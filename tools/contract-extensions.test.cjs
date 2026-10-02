@@ -31,7 +31,7 @@ const sec = (id) => { for (const ch of rb.chapters) for (const s of ch.sections)
 const secFull = (id) => { for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return (s.full || s.paragraphs).join(" "); throw new Error(id); };
 
 /* run the real helpers */
-const CG = { SEASON: null, lg: null, auth: null, TEAM: {}, _myOffers: [] };
+const CG = { SEASON: null, lg: null, auth: null, TEAM: {}, _myOffers: [], role: () => "manager" };   /* v3.79: a club's seat; the office skips the window (tools/office-time-locks-v379.test.cjs) */
 const grab = (name) => { const i = live.indexOf("CG." + name + " = function"); if (i < 0) throw new Error("no CG." + name); return live.slice(i, live.indexOf("\nCG.", i + 5)); };
 /* v2.48: the helpers read the season format — load the format block first, and drive the extension
    cases as a FULL-format season (the basic format has no extensions or held rights at all) */

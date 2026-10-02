@@ -4157,7 +4157,8 @@ CG.ROUTES.draft = function(){
   /* Rule 2.8: a pick's salary is its round's, and the last round pays the league minimum — so the
      scale depends on how many rounds this board actually has, exactly as the database derives it. */
   var draftRounds = (cur && cur.length) ? Math.max.apply(null, cur.map(function(p){ return p.round||1; })) : 10;
-  var myTurn = isMgr && onClock && onClockCode===myClub && !onClock.used && !onClock.skipped && dstatus==="live";
+  /* v3.79: the league office may make the pick while the draft is paused (draft_make_pick admits a commissioner) */
+  var myTurn = isMgr && onClock && onClockCode===myClub && !onClock.used && !onClock.skipped && (dstatus==="live" || (dstatus==="paused" && CG.role()==="commish"));
 
   var clockBox = "";
   if (dstatus==="live" || dstatus==="paused"){
@@ -4877,7 +4878,7 @@ CG.hubDraftLive = function(){
   var pool = lg.draftPool||[], board = (lg._myBoard||[]).slice();
   var cur = CG.draftCurPick();
   var live = st && (st.status==="live"||st.status==="paused");
-  var myTurn = !!(cur && cur.ownerCode===myCode && st.status==="live");
+  var myTurn = !!(cur && cur.ownerCode===myCode && (st.status==="live" || (st.status==="paused" && CG.role()==="commish")));   /* v3.79: the office, while paused too */
   var myPicks = picks.filter(function(p){ return p.ownerCode===myCode; });
   var nextMine = myPicks.filter(function(p){ return !p.used && !p.skipped; }).sort(function(a,b){ return a.overall-b.overall; })[0];
   var mySkipped = myPicks.filter(function(p){ return p.skipped && !p.used; });
@@ -9523,6 +9524,8 @@ CG.nominateManagerModal = function(role){
   var m = CG.clubMgmt(); if(!m || !m.isOwner) return;
   var label = role==="gm"?"General Manager":"Assistant GM";
   var inSeason = CG.seasonUnderway();
+  /* v3.79: the league office's appointment takes effect at once (notify_mgmt_application); an Owner's goes to the vote */
+  var voteLine = m.isOffice ? "As the league office, your appointment takes effect at once." : "The league office’s reviewers vote to approve the appointment.";
   var body;
   if (inSeason){
     var pool = ((CG.lg && CG.lg.byTeam && CG.lg.byTeam[m.club]) || []).filter(function(x){
@@ -9531,21 +9534,21 @@ CG.nominateManagerModal = function(role){
     if (!pool.length){ CG.toast("Nobody on your roster can take the seat right now","err"); return; }
     body = '<p class="caption" style="margin-bottom:12px">During the season you name your '+label+' from your own club: a player on your active roster or in your training camp (Rule 2.6). '+
       'A manager plays on the active roster, so a camp player you name comes up with the seat, and your active roster needs room for him in his position group. '+
-      'Between the end of the playoffs and the next draft you may name anyone signed up for the coming season. The league office’s reviewers vote to approve the appointment.</p>'+
+      'Between the end of the playoffs and the next draft you may name anyone signed up for the coming season. '+voteLine+'</p>'+
       '<label class="fld"><span>Player</span><select id="mgNomineeSel"><option value="">Pick a player on your club…</option>'+
       pool.map(function(x){
         return '<option value="'+esc(x.id)+'">'+esc(x.tag)+' · '+esc(x.pos)+(x.squad==="tc"?" · training camp":"")+'</option>';
       }).join("")+'</select></label>';
   } else {
     body = '<p class="caption" style="margin-bottom:12px">It is the off-season, so you may name anyone signed up for the coming season, on your club or not (Rule 2.6). '+
-      'Once the next entry draft starts, a '+label+' is named from your own roster. The league office’s reviewers vote to approve the appointment.'+
+      'Once the next entry draft starts, a '+label+' is named from your own roster. '+voteLine+
       ' Every club must hold its Owner and General Manager seats before the entry draft begins; the Assistant GM seat may stay open (Rule 2.8).</p>'+
       CG.memberPickerField("mgNominee","Player","Anyone signed up for the coming season. Start typing a gamertag");
   }
   CG.modal("Nominate a "+label,
     body+
     '<label class="fld"><span>Why them? (optional)</span><textarea id="mgPitch" rows="3" placeholder="A line on why they should run your club."></textarea></label>',
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="mgGo">Submit nomination</button>');
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="mgGo">'+(m.isOffice ? "Appoint" : "Submit nomination")+'</button>');
   if (!inSeason) CG.wireMemberPicker("mgNominee", ["seasonplayers"]);
   var go = document.getElementById("mgGo");
   if (go) go.addEventListener("click", function(){
@@ -9559,12 +9562,22 @@ CG.nominateManagerModal = function(role){
 };
 CG.submitMgmtApp = function(role, nomineeId, pitch){
   var m = CG.clubMgmt(); if(!m || !m.isOwner){ CG.toast("Only the club owner can nominate management","err"); return; }
+  var go = document.getElementById("mgGo");
+  function again(){ if (go) go.disabled = false; }
+  /* v3.79: a nomination the league office makes takes effect at once (notify_mgmt_application decides it in the same
+     insert); one that cannot be seated is refused with the reason, so the status read back says which happened */
   CG.sb.from("management_applications").insert({ team_id:m.teamId, role:role, submitted_by:CG.auth.user.id, nominee_id:nomineeId, pitch:pitch }).select("id").then(function(r){
-    if(r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
-    if(!r.data||!r.data.length){ CG.toast("You can only nominate management for your own club","err"); return; }
+    if(r.error){ again(); CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
+    if(!r.data||!r.data.length){ again(); CG.toast("You can only nominate management for your own club","err"); return; }
     if(CG.closeOverlay) CG.closeOverlay();
-    CG.toast("Nomination submitted — the reviewers will vote","ok"); CG.reloadLeague();
-  });
+    if (!m.isOffice){ CG.toast("Nomination submitted — the reviewers will vote","ok"); CG.reloadLeague(); return; }
+    /* the insert's RETURNING is the row as inserted ("pending"); notify_mgmt_application approves it after, so read it again */
+    CG.sb.from("management_applications").select("status,seat_block").eq("id", r.data[0].id).maybeSingle().then(function(q){
+      if (!q.error && q.data && q.data.status==="approved") CG.toast("Seated: the league office's appointment takes effect at once","ok");
+      else CG.toast("Filed, but it was not seated ("+((q.data && (q.data.seat_block || q.data.status)) || (q.error && q.error.message) || "unknown")+"). Check the application","err");
+      CG.reloadLeague();
+    }, function(e){ CG.toast("Filed, but its status could not be read back: "+(e&&e.message||e),"err"); CG.reloadLeague(); });
+  }, function(e){ again(); CG.toast("Couldn’t submit: "+(e&&e.message||e),"err"); });
 };
 /* inject the management card into the roster page + wire its controls */
 /* Front-office management now lives on its own Team HQ → Management tab (CG.hubManagement),
@@ -9605,7 +9618,9 @@ CG.AFTER._roster = function(){
        a goaltender only for a goaltender. The database's shape check makes the same test. */
     var opts = roster.filter(function(x){
       return x.spotId && !x.mgmt && !CG.isWaived(x.id) && x.squad===wantSquad &&
-        CG.posGroup(x.pos)===CG.posGroup(me.pos);
+        CG.posGroup(x.pos)===CG.posGroup(me.pos) &&
+        /* v3.79: a suspended player is locked in place for his club (Rule 7.2); the office may move him */
+        !(CG.role()!=="commish" && CG.suspensionOf && CG.suspensionOf(x.id));
     });
     if (!opts.length){
       CG.toast("No eligible "+(wantSquad==="tc"?"camp":"active")+" "+(CG.posGroup(me.pos)==="G"?"goaltender":CG.posGroup(me.pos)==="D"?"defenseman":"forward")+
@@ -9615,7 +9630,7 @@ CG.AFTER._roster = function(){
     var pro = me.squad==="tc" ? null : me, camp = me.squad==="tc" ? me : null;
     var grp = CG.posGroup(me.pos);   /* was referenced but never declared — the click threw before the modal opened */
     CG.modal("Swap "+esc(me.tag),
-      '<p class="caption" style="margin-bottom:12px">Your roster is full, so this is a straight swap: '+esc(me.tag)+
+      '<p class="caption" style="margin-bottom:12px">'+esc(CG.squadSwapWhy ? CG.squadSwapWhy(club, me) : "That move needs a swap.")+' This is a straight swap: '+esc(me.tag)+
       ' ('+(me.squad==="tc"?"camp":"pro roster")+') trades places with a '+(wantSquad==="tc"?"training-camp":"pro-roster")+
       ' '+(grp==="G"?"goaltender":grp==="D"?"defenseman":"forward")+', any position in the group (Rule 2.1). Squad changes have no limit outside the weekly roster freeze, Wednesday 7:30 PM to Friday midnight ET.</p>'+
       '<div class="stack" style="gap:6px">'+opts.map(function(x){
@@ -9629,10 +9644,11 @@ CG.AFTER._roster = function(){
       var swapBtn = this; swapBtn.disabled = true;
       CG.mgmtQueue("swap_roster_squad", { p_pro_spot:proSpot, p_tc_spot:tcSpot }, "swap "+me.tag+" and "+otherTag+" between the roster and camp").then(function(q){ if (q){ if (q===CG.MGMT_FAILED) swapBtn.disabled = false; return; }
       CG.sb.rpc("swap_roster_squad", { p_pro_spot: proSpot, p_tc_spot: tcSpot }).then(function(r){
-        if (r.error){ CG.toast(r.error.message, "err"); return; }
+        /* v3.79: a refusal used to leave this button dead, so the dialog had to be closed to try another player */
+        if (r.error){ swapBtn.disabled = false; CG.toast(r.error.message, "err"); return; }
         if (CG.closeOverlay) CG.closeOverlay();
         CG.toast("Squads swapped", "ok"); CG.reloadLeague();
-      }, function(e){ CG.toast("Couldn’t swap: "+(e&&e.message||e), "err"); });
+      }, function(e){ swapBtn.disabled = false; CG.toast("Couldn’t swap: "+(e&&e.message||e), "err"); });
       });
     }); });
   }); });
@@ -10664,7 +10680,9 @@ CG.seatedElsewhere = function(pid, teamId){
 /* the deal a club may extend right now, either kind, or null — mirrors _extendable_contract() */
 CG.extendableContractOf = function(pid){
   var c = CG.contractOf(pid), sn = (CG.SEASON && CG.SEASON.number) || 1;
-  if (c && (c.end_season||1)===sn && CG.extensionWindowOpen() && !CG.signedExtensionOf(pid) && !CG.seatedElsewhere(pid, c.team_id)) return c;
+  /* v3.79: the league office is held to no window (offer_extension passes is_commissioner()); never in basic (Rule 2.5) */
+  var winOpen = CG.extensionWindowOpen() || (CG.role()==="commish" && !CG.isBasic());
+  if (c && (c.end_season||1)===sn && winOpen && !CG.signedExtensionOf(pid) && !CG.seatedElsewhere(pid, c.team_id)) return c;
   var r = CG.rightsHeldContractOf(pid);
   /* rights survive only while nothing real has happened to him this season: no deal of his own
      anywhere (a pre-season loan's contract is looked through) and no seat on another club */
@@ -12811,7 +12829,8 @@ CG.hubScheduleLive = function(){
       /* Rule 4.2: the night's codes release together, 30 minutes before its FIRST game — the same
           moment can_see_match starts answering. This used to gate on each game's own puck drop, so
           the 10:20 code read "locked" here while the matchup page already showed it. */
-      var codeReleased = CG.now() >= (CG.codeReleaseAt ? CG.codeReleaseAt(g) : g.at - 30*60000);
+      var codeReleased = CG.now() >= (CG.codeReleaseAt ? CG.codeReleaseAt(g) : g.at - 30*60000)
+        || CG.role()==="commish";   /* v3.79: the league office reads it as soon as it is set */
       return '<div class="card-b" style="border-top:1px solid var(--line-soft);display:flex;flex-direction:column;gap:12px">'+
         '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
           '<span class="mono" style="font-size:12px;color:var(--steel);min-width:76px">'+CG.fmtTime(g.at)+'</span>'+

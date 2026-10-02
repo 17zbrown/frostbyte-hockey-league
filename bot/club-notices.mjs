@@ -35,6 +35,8 @@ export const KIND_STYLE = {
   offer: { colour: 0x1C7ED6, icon: "📨" },
   /* v2.72: a player's weekly availability, the moment it is in (notify_availability_submitted) */
   availability: { colour: 0x0CA678, icon: "📅" },
+  /* v3.79: the league office re-settled a game's server after the night locked (office_late_server_pick) */
+  schedule: { colour: 0x1C7ED6, icon: "🖥️" },
 };
 export function buildNoticeEmbed(row, actorName) {
   const st = KIND_STYLE[row.kind] || { colour: 0x8899A6, icon: "🧾" };
@@ -43,7 +45,7 @@ export function buildNoticeEmbed(row, actorName) {
     title: st.icon + " " + String(row.title || "Roster move"),
     description: String(row.body || "") + tail,
     color: st.colour,
-    url: SITE + "/#/hub/" + (row.kind === "trade" ? "tradehub" : row.kind === "offer" ? "freeagents" : row.kind === "availability" ? "lineups" : "roster"),
+    url: SITE + "/#/hub/" + (row.kind === "trade" ? "tradehub" : row.kind === "offer" ? "freeagents" : row.kind === "availability" ? "lineups" : row.kind === "schedule" ? "schedule" : "roster"),
     timestamp: row.created_at || new Date().toISOString(),
   };
 }

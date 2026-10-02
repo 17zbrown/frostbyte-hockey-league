@@ -100,7 +100,10 @@ console.log("\n— the sheet is a preview, and a late change is free (Rule 5.3, 
    These pins used to demand that the price be named in five places. There is no price. What must
    hold now is the opposite: nothing threatens one, and the sheet stays editable until the game is
    actually under way. */
-A("one definition of when the sheet finally closes, ten minutes after puck drop", /CG\.emergencyClosed = function\(g\)\{ return CG\.now\(\) >= \(g\.at \|\| Date\.parse\(g\.scheduled_at\)\) \+ 10\*60000; \};/.test(pub));
+/* v3.79: for a club; the league office is never closed out while the game is scheduled (Rule 2.6) */
+A("one definition of when the sheet finally closes, ten minutes after puck drop",
+  /CG\.gameUnderWay = function\(g\)\{ return CG\.now\(\) >= \(g\.at \|\| Date\.parse\(g\.scheduled_at\)\) \+ 10\*60000; \};/.test(pub)
+  && /CG\.emergencyClosed = function\(g\)\{ return CG\.role\(\)!=="commish" && CG\.gameUnderWay\(g\); \};/.test(pub));
 A("...and it is documented as publication, not closure", /only PUBLISHES it\s*\n?\s*to the opponent/.test(pub.replace(/\s+/g, " ")) || /only PUBLISHES it to the opponent/.test(pub.replace(/\s+/g, " ")));
 A("the 30-minute lock no longer gates editing", /function isLocked\(\)\{ return CG\.emergencyClosed\(game\); \}/.test(hub));
 A("the submit handler refuses only once the game is under way", /if \(CG\.emergencyClosed\(game\)\)\{ CG\.toast\("This game is under way, so the sheet is closed/.test(hub));
@@ -119,11 +122,14 @@ A("the published sheet says a change is free, and on what condition",
 A("the confirm says the opponent is told rather than that a price is paid",
   /Your opponent can already see this sheet, so they are told what changed/.test(hub) && /There is no cost/.test(hub));
 {
-  const src = pub.slice(pub.indexOf("CG.emergencyClosed = function"), pub.indexOf("\n", pub.indexOf("CG.emergencyClosed = function")));
-  const CG = { now: () => T + 9 * 60000 }; new Function("CG", src)(CG);
+  const lineOf = (k) => pub.slice(pub.indexOf(k), pub.indexOf("\n", pub.indexOf(k)));
+  const src = lineOf("CG.gameUnderWay = function") + "\n" + lineOf("CG.emergencyClosed = function");
+  const CG = { now: () => T + 9 * 60000, role: () => "manager" }; new Function("CG", src)(CG);
   A("open at nine minutes past", CG.emergencyClosed({ at: T }) === false);
-  const CG2 = { now: () => T + 11 * 60000 }; new Function("CG", src)(CG2);
+  const CG2 = { now: () => T + 11 * 60000, role: () => "manager" }; new Function("CG", src)(CG2);
   A("shut at eleven", CG2.emergencyClosed({ at: T }) === true);
+  const CG3 = { now: () => T + 11 * 60000, role: () => "commish" }; new Function("CG", src)(CG3);
+  A("...but never for the league office (v3.79)", CG3.emergencyClosed({ at: T }) === false);
 }
 
 console.log("\n— the desk cards that people watch a game night through");
@@ -133,7 +139,7 @@ console.log("\n— the desk cards that people watch a game night through");
 A("the browser asks the resolver on the NIGHT's lock, not each game's own",
   /var lock = CG\.codeReleaseAt \? CG\.codeReleaseAt\(g\) : g\.at - \(CG\.VETO_LOCK_MS\|\|1800000\);/.test(live));
 A("the club's schedule reads the NIGHT's release, not each game's own puck drop",
-  /var codeReleased = CG\.now\(\) >= \(CG\.codeReleaseAt \? CG\.codeReleaseAt\(g\) : g\.at - 30\*60000\);/.test(live));
+  /var codeReleased = CG\.now\(\) >= \(CG\.codeReleaseAt \? CG\.codeReleaseAt\(g\) : g\.at - 30\*60000\)\n\s*\|\| CG\.role\(\)==="commish";/.test(live));   /* v3.79: and the office at once */
 A("the office's readiness card repaints itself every 30 seconds", /CG\._readyIv = setInterval\(function\(\)\{/.test(live) && /\}, 30000\);/.test(live.slice(live.indexOf("CG._readyIv = setInterval"))));
 A("...and stops when the office leaves the page or a dialog opens",
   /location\.hash\.indexOf\("\/admin\/schedule"\) < 0\)\{ clearInterval\(CG\._readyIv\)/.test(live)

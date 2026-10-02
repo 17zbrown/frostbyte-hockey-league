@@ -799,7 +799,12 @@ CG.serverVetoControls = function(game, me, lockAt){
   /* What happens if this club files nothing: silence is a choice, so name its outcome rather than
      leaving the desk blank. */
   var noPick = '<p class="caption" style="margin:8px 0 0">No pick from either club and this game is played on <b>'+esc(CG.DEFAULT_SERVER)+'</b>.</p>';
-  if (CG.now() >= lockAt){
+  /* v3.79: the league office keeps the picks after the lock. A change settles the server again at once
+     (office_late_server_pick) and both clubs are told, so the note says what is in force now. */
+  var officeLate = CG.now() >= lockAt && CG.role()==="commish";
+  if (officeLate) noPick = '<p class="caption" style="margin:8px 0 0">League office: the night is locked and this game is on <b data-srv-of="'+game.id+'">'+
+    esc((CG.lg._servers||{})[game.id] || "a server still settling")+'</b>. A change here settles the server again at once, and both clubs are told.</p>';
+  if (CG.now() >= lockAt && !officeLate){
     var srv = (CG.lg._servers||{})[game.id];
     return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="lock">'+CG.ic("lock",13)+'Picks locked</span>'+
       '<span class="small">Server: <b style="font-family:var(--f-disp)">'+(srv?esc(srv):"resolving…")+'</b></span></div>';
@@ -808,12 +813,12 @@ CG.serverVetoControls = function(game, me, lockAt){
     return '<div class="grid g2" style="gap:12px">'+
       '<label class="fld" style="margin:0"><span>1st choice · home</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="pref1">'+opts(mine.pref1)+'</select></label>'+
       '<label class="fld" style="margin:0"><span>2nd choice</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="pref2">'+opts(mine.pref2)+'</select></label></div>'+
-      (mine.pref1 ? "" : noPick);
+      ((mine.pref1 && !officeLate) ? "" : noPick);
   }
   return '<div class="grid g2" style="gap:12px">'+
     '<label class="fld" style="margin:0"><span>Veto — won’t play</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="veto">'+opts(mine.veto)+'</select></label>'+
     '<label class="fld" style="margin:0"><span>Preferred</span><select class="srv-sel" data-veto-game="'+game.id+'" data-veto-field="preferred">'+opts(mine.preferred)+'</select></label></div>'+
-    ((mine.veto||mine.preferred) ? "" : noPick);
+    (((mine.veto||mine.preferred) && !officeLate) ? "" : noPick);
 };
 CG.saveVeto = function(gameId, changedSel){
   var club = CG.hqClub(); if(!club) return;
@@ -837,6 +842,16 @@ CG.saveVeto = function(gameId, changedSel){
   CG.sb.from("game_vetoes").upsert(rec,{onConflict:"game_id,team_id"}).then(function(r){
     if(r.error){ CG.toast(/lock/i.test(r.error.message||"")?"Picks are locked":"Couldn’t save: "+r.error.message,"err"); return; }
     CG.lg._vetoes = CG.lg._vetoes||{}; CG.lg._vetoes[gameId] = Object.assign({}, CG.lg._vetoes[gameId]||{}, rec);
+    /* v3.79: after the lock the database has just settled the server again; read it back and say it */
+    if (CG.role()==="commish" && g.at && CG.now() >= (CG.codeReleaseAt ? CG.codeReleaseAt(g) : g.at - 30*60000)){
+      CG.sb.rpc("resolve_game_server", { p_game:gameId }).then(function(rs){
+        if (rs.error){ CG.toast("Saved, but the server could not be read back: "+rs.error.message,"err"); return; }
+        CG.lg._servers = CG.lg._servers||{}; CG.lg._servers[gameId] = rs.data || null;
+        document.querySelectorAll('[data-srv-of="'+gameId+'"]').forEach(function(el){ el.textContent = rs.data || "a server still settling"; });
+        CG.toast("Saved. This game is on "+(rs.data || "a server still settling")+"; both clubs are told when it changes","ok");
+      }, function(e){ CG.toast("Saved, but the server could not be read back: "+(e&&e.message||e),"err"); });
+      return;
+    }
     CG.toast(g.home===club?"1st & 2nd choices saved":"Veto & preferred saved","ok");
   });
   });
@@ -869,6 +884,7 @@ CG.hubLineup = function(qs){
      the database checks on every filing. Editing stops only once the game is genuinely under way,
      which is the same instant set_game_lineup stops accepting one. */
   var shut = CG.emergencyClosed(game);          /* the game is under way: the box score is the record */
+  var underWay = CG.gameUnderWay(game);         /* v3.79: the same instant; for the office the sheet stays open */
   var locked = shut;
   var status = saved ? saved.status : (dbLu ? "submitted" : "draft");
   var slots = saved ? saved.slots
@@ -912,6 +928,7 @@ CG.hubLineup = function(qs){
       /* "Set for the whole night" — one submit dresses every not-yet-locked game of this night with
          the same six. Pre-lock only; each game still runs the weekly-cap + suspension checks. */
       var nightGs = CG.nightGames(club, CG.gameNight(game));
+      if (underWay) return "";   /* v3.79: no whole-night filing once a game is being played */
       if (shut || nightGs.length < 2) return "";
       return '<label class="chk" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer" '+
         'title="Submit these six for all '+nightGs.length+' of tonight\u2019s games at once">'+
@@ -923,14 +940,17 @@ CG.hubLineup = function(qs){
     (dbLu && !shut && (!rawLocked || CG.role()==="commish") ? '<button class="btn btn-ghost btn-sm" id="luRemove" title="Withdraw this sheet: the six come off this game and get the game back in their week (Rule 5.2)">Remove lineup</button>' : "")+
     '<button class="btn btn-chrome btn-sm" id="luSubmit">'+(status==="submitted"?"Resubmit":"Submit lineup")+'</button>';
   var bar = '<div class="note '+(shut?"":(status==="submitted"?"grn":"chr"))+'" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px">'+
-    '<b style="font-family:var(--f-disp)">Status: '+(shut?"Game under way":(rawLocked?"Published":status))+'</b>'+
-    (rawLocked&&!shut?'<span class="caption">your opponent can see this sheet since '+CG.fmtTime(lockAt)+'</span>'
+    '<b style="font-family:var(--f-disp)">Status: '+((shut||underWay)?"Game under way":(rawLocked?"Published":status))+'</b>'+
+    (rawLocked&&!shut&&!underWay?'<span class="caption">your opponent can see this sheet since '+CG.fmtTime(lockAt)+'</span>'
       :(saved&&saved.at?'<span class="caption">last saved '+CG.fmtFull(saved.at)+'</span>':""))+
     '<span style="margin-left:auto;display:flex;gap:9px;flex-wrap:wrap;justify-content:flex-end;min-width:0">'+
     (shut ? '<span class="lock">'+CG.ic("lock",14)+'Closed</span><span class="caption">The game is under way. Who actually played is read from the box score (Rule 5.3).</span>'
           : editControls)+
     '</span></div>'+
-    (rawLocked && !shut
+    (underWay && !shut
+      ? '<div class="note" style="margin-bottom:18px;font-size:13px;line-height:1.5"><b>Game under way.</b> As the league office you can still change this sheet; the box score remains the record of who played (Rules 2.6 and 5.3).</div>'
+      : "")+
+    (rawLocked && !shut && !underWay
       ? '<div class="note" style="margin-bottom:18px;font-size:13px;line-height:1.5">This sheet is <b>published</b>: your opponent can see roughly who they face. You can still change it right up to puck drop at <b>no cost</b>, as long as the player you bring in is on your roster or in your camp and plays his own position (Rule 5.3). Your opponent is told when you do, so the lineup they are looking at stays the current one.</div>'
       : "");
   var rink = '<div class="rink"><div class="rk-rows">'+
@@ -1179,9 +1199,10 @@ CG.AFTER._lineup = function(){
                          p_ld:state.slots.LD||null, p_rd:state.slots.RD||null, p_goalie:state.slots.G||null };
           /* the checkbox: submit to every not-yet-locked game of this night, not just this one.
              Emergency mode is inherently one game, so the checkbox is never shown there. */
-          var wholeNight = !emg && !!(document.getElementById("luWholeNight") && document.getElementById("luWholeNight").checked);
+          /* v3.79: the league office may dress the whole night after the lock too (CG.lcDressable) */
+          var wholeNight = (!emg || CG.role()==="commish") && !!(document.getElementById("luWholeNight") && document.getElementById("luWholeNight").checked);
           var targets = wholeNight
-            ? CG.nightGames(club, CG.gameNight(game)).filter(function(g){ return CG.now() < g.at - 30*60000; })
+            ? CG.nightGames(club, CG.gameNight(game)).filter(CG.lcDressable)
             : [game];
           if (!targets.some(function(g){ return g.id===game.id; })) targets.unshift(game);
           /* v2.38: under "Owner approves" each game's lineup is queued for the Owner, not dressed */
@@ -1332,15 +1353,19 @@ CG.lcTogglePerGame = function(club, nightKey){
   CG._lcOpenNights[nightKey] = !CG.lcPerGameOpen(club, nightKey);
   return CG._lcOpenNights[nightKey];
 };
+/* v3.79: may the night plan dress this game? A club until the sheet is published (T-30); the league office until the
+   game is under way. Past that the office still files or changes one sheet at a time in the builder (set_game_lineup
+   lets a commissioner while the game is scheduled), but no bulk tool reaches a game being played. */
+CG.lcDressable = function(g){ return CG.role()==="commish" ? !CG.gameUnderWay(g) : CG.now() < g.at - 30*60000; };
 CG.lcOpenGames = function(club, nightKey){
-  return CG.nightGames(club, nightKey).filter(function(g){ return CG.now() < g.at - 30*60000; });
+  return CG.nightGames(club, nightKey).filter(CG.lcDressable);
 };
 /* v3.76: the sheets that may be withdrawn. A club may until the lock; the league office until the game is
    under way (clear_game_lineup lets a commissioner past the lock). Only games with a sheet on file count. */
 CG.lcClearableGames = function(club, nightKey){
   var lu = (CG.lg && CG.lg._lineups) || {};
   var gs = CG.role()==="commish"
-    ? CG.nightGames(club, nightKey).filter(function(g){ return !(CG.emergencyClosed && CG.emergencyClosed(g)); })
+    ? CG.nightGames(club, nightKey).filter(function(g){ return !CG.gameUnderWay(g); })   /* v3.79: bounded on the instant, not the office's never-closed sheet */
     : CG.lcOpenGames(club, nightKey);
   return gs.filter(function(g){ return lu[club+":"+g.id]; });
 };
@@ -1518,7 +1543,7 @@ CG.hubLines = function(qs){
   var nights = CG.lineNights(club);
   var planReady = nights.filter(function(n){
     var pl = (lg._linePlan||{})[n.key];
-    return pl && (lg._teamLines||{})[pl] && CG.now() < n.game.at - 30*60000;
+    return pl && (lg._teamLines||{})[pl] && CG.lcOpenGames(club, n.key).length > 0;
   }).length;
   var plan = '<div class="card"><div class="card-h"><h3>Night plan</h3>'+
     (planReady > 1 ? '<button class="btn btn-chrome btn-sm" id="lcDressWeek" title="Dress every game of every planned night in one go">Dress the week ('+planReady+')</button>' : '<span class="chip">'+nights.length+' night'+(nights.length===1?"":"s")+'</span>')+'</div>'+
@@ -1528,7 +1553,7 @@ CG.hubLines = function(qs){
       /* a night is EVERY game in it, not just the first — the whole point of the fix */
       var games = CG.nightGames(club, n.key);
       var g = n.game, opp = g.home===club ? g.away : g.home;
-      var open = games.filter(function(x){ return CG.now() < x.at - 30*60000; });   // still dressable
+      var open = games.filter(CG.lcDressable);   // still dressable (v3.79: the office past the lock too)
       var slotOf = {}; open.forEach(function(x){ slotOf[x.id] = CG.lcGameSlot(club, n.key, x.id); });
       var toDress = open.filter(function(x){ return slotOf[x.id] != null; });
       var distinct = [...new Set(toDress.map(function(x){ return slotOf[x.id]; }))];
@@ -1928,7 +1953,7 @@ CG.AFTER._lines = function(qs){
           .map(function(sl){ return (((lg._teamLines||{})[sl]||{}).name) || ("Line "+sl); }))];
         return (CG.NIGHT_LABEL[n.key]||n.key)+": "+names.join(" + ");
       }).join(" · ")+
-      ". Each dressing runs through the league’s checks; anything refused is reported by night and the rest still land. Redress any night to adjust before its lock."+
+      ". Each dressing runs through the league’s checks; anything refused is reported by night and the rest still land. Redress any night to adjust before "+(CG.role()==="commish" ? "its games are under way." : "its lock.")+
       (conflicts.length ? "\n\nThe weekly limit (Rule 5.2) will refuse some of this: "+conflicts.map(function(c){
         return c.tag+" on "+c.night+" ("+c.used+" of "+c.cap+" games already filed or played, "+(c.left?("room for only "+c.left+" more"):"none left")+")";
       }).join("; ")+". Change those lines first, or dress the rest and fix them after." : ""),
@@ -2011,7 +2036,9 @@ CG.AFTER._lines = function(qs){
       var nameOfSlot = function(sl){ return (((lg._teamLines||{})[sl]||{}).name) || ("Line "+sl); };
       CG.confirm("Dress "+plan.length+" game"+(plan.length===1?"":"s")+" "+esc(CG.NIGHT_LABEL[night]||night)+"?",
         plan.map(function(x){ return CG.fmtTime(x.g.at)+": "+esc(nameOfSlot(x.slot)); }).join(" · ")+
-        ". Each game is submitted with the line set for it, through the same checks as the builder: weekly limits, suspensions and that game\u2019s own 30-minute lock. A game left on \u201cnone\u201d is untouched.",
+        ". Each game is submitted with the line set for it, through the same checks as the builder: weekly limits, suspensions and "+
+        (CG.role()==="commish" ? "for the league office, any game not yet under way, past its lock too (the opponent is told of a change)" : "that game\u2019s own 30-minute lock")+
+        ". A game left on \u201cnone\u201d is untouched.",
         "Dress the night", function(){
         el.disabled = true;
         dressNight(night, null, function(err, okN, qN){
@@ -2056,7 +2083,12 @@ function squadRoom(club, p){
   var roster = (CG.lg.byTeam[club]||[]).filter(function(x){ return x.spotId && !CG.isWaived(x.id); });
   if (p.squad==="tc"){
     var grp = CG.posGroup(p.pos), cap = CG.ROSTER_QUOTA[grp];   /* the format's shape: 7 F / 5 D / 3 G basic (v3.64), 9 F / 6 D / 2 G full (Rule 2.1) */
-    return roster.filter(function(x){ return x.squad!=="tc" && CG.posGroup(x.pos)===grp && !CG.spotOutsideShape(x); }).length < cap;
+    /* v3.79: room in his group AND in the active roster as a whole, counted as check_roster_structure counts. A club
+       over in one group can be at the total with room in another (SEA, 2026-10-02: 8 F / 5 D / 2 G = 15): a plain
+       call-up of its camp goaltender was offered and refused at commit; the legal move is a goaltender swap. */
+    var active = roster.filter(function(x){ return x.squad!=="tc" && !CG.spotOutsideShape(x); });
+    return active.filter(function(x){ return CG.posGroup(x.pos)===grp; }).length < cap
+      && (!CG.ROSTER_MAX || active.length < CG.ROSTER_MAX);
   }
   return roster.filter(function(x){ return x.squad==="tc"; }).length < CG.CAMP_MAX;
 }
@@ -2074,10 +2106,33 @@ CG.suspensionText = function(s){
     : "through "+(s.endsAt ? CG.fmtDay(Date.parse(s.endsAt)) : "further notice")+" at 11:59 PM ET";
   return "Suspended, "+len+". He is locked where he is: he cannot be scheduled, called up or sent down until it is served (Rule 7.2).";
 };
+/* v3.79 (commissioner, 2026-10-02: "it's asking me to swap ... when the team ... is below the maximum"): say WHY a
+   one-way move is not possible. Rule 2.1 caps each position GROUP, so a roster under its total can still be full at
+   forward, on defense or in goal; and a send-down needs a free place in training camp. The swap button and the swap
+   dialog both read this, instead of "Roster full". */
+CG.squadSwapWhy = function(club, p){
+  var roster = (CG.lg.byTeam[club]||[]).filter(function(x){ return x.spotId && !CG.isWaived(x.id); });
+  if (p.squad==="tc"){
+    var grp = CG.posGroup(p.pos), cap = CG.ROSTER_QUOTA[grp];
+    var on = roster.filter(function(x){ return x.squad!=="tc" && CG.posGroup(x.pos)===grp && !CG.spotOutsideShape(x); }).length;
+    var total = roster.filter(function(x){ return x.squad!=="tc" && !CG.spotOutsideShape(x); }).length;
+    var one = grp==="G" ? "goaltender" : grp==="D" ? "defenseman" : "forward";
+    /* the group has room but the active roster as a whole is full (some other group is over its limit) */
+    if (on < cap) return "The active roster is full: "+total+" of "+CG.ROSTER_MAX+". "+((CG.GROUP_NAME||{})[grp] || "That group")+" have room ("+on+" of "+cap+
+      "), but calling him up means sending a "+one+" to training camp in the same move, or first sending down a player from a group over its limit (Rule 2.1).";
+    return ((CG.GROUP_NAME||{})[grp] || "That group")+" are full: "+on+" of "+cap+" on the active roster."+
+      ((CG.ROSTER_MAX && total < CG.ROSTER_MAX) ? " The roster as a whole has "+total+" of "+CG.ROSTER_MAX+", but each position group has its own limit." : "")+
+      " Calling him up means sending a "+one+" to training camp in the same move (Rule 2.1).";
+  }
+  var n = roster.filter(function(x){ return x.squad==="tc"; }).length;
+  return "Training camp is full: "+n+" of "+CG.CAMP_MAX+". Sending him down means calling a camp player of his position group up in the same move (Rule 2.1).";
+};
 function squadBtn(p){
   if (!p.spotId) return "";
   var sus = CG.suspensionOf(p.id);
-  if (sus){
+  /* v3.79: a suspended player is locked in place for his club (Rule 7.2); the league office may still move him,
+     as guard_squad_move has always allowed */
+  if (sus && CG.role()!=="commish"){
     return '<button class="btn btn-ghost btn-sm" disabled title="'+esc(CG.suspensionText(sus))+'">'+CG.ic("lock",12)+' '+
       (p.squad==="tc" ? "Call up" : "To camp")+'</button>';
   }
@@ -2090,6 +2145,7 @@ function squadBtn(p){
   }
   var club = CG.myClub();
   var title = 'No limit on squad changes outside the weekly roster freeze, Wednesday 7:30 PM to Friday midnight ET (Rule 2.1)';
+  if (sus) title = 'Suspended: his club cannot move him until it is served (Rule 7.2); the league office can. '+title;
   /* v3.40: the weekly movement freeze. Both directions, both buttons. The database refuses it
      anyway; this says so before the click instead of after it. */
   var fz = CG.rosterFreeze ? CG.rosterFreeze() : { on:false };
@@ -2115,9 +2171,8 @@ function squadBtn(p){
       return '<button class="btn btn-ghost btn-sm" disabled title="'+esc("Your "+CG.GROUP_NAME[og].toLowerCase()+" are over the limit ("+on+" for "+ocap+" spots). Send some down, waive or trade them before calling anyone up (Rule 2.1).")+'">Call up</button>';
     }
   }
-  /* roster full at this shape — a straight same-position swap is the only legal move */
-  return '<button class="btn btn-ghost btn-sm" data-squad-swap="'+p.spotId+'" title="Roster full — swap for '+
-    (p.squad==="tc"?"an active-roster":"a camp")+' player of the same position. '+title+'">Swap…</button>';
+  /* the group (or camp) is full: a straight swap within the position group is the only legal move */
+  return '<button class="btn btn-ghost btn-sm" data-squad-swap="'+p.spotId+'" title="'+esc(CG.squadSwapWhy(club, p)+' '+title)+'">Swap…</button>';
 }
 CG.hubRoster = function(qs){
   var lg = CG.lg, club = CG.myClub(), t = CG.TEAM[club];
@@ -2146,13 +2201,18 @@ CG.hubRoster = function(qs){
       '. '+(function(){
         /* v3.75: the advice depends on the week: in the freeze a send-down waits, after the deadline a trade does */
         var fzOv = CG.rosterFreeze ? CG.rosterFreeze() : { on:false }, lockedOv = !!(CG.movesLockedNow && CG.movesLockedNow());
+        /* v3.79: the freeze binds the club's management, not the league office (v3.76) */
+        if (fzOv.on && CG.role()==="commish") return 'The weekly roster freeze binds the club’s own management until '+esc(fzOv.reopens)+'; as a commissioner you can send players to training camp now.';
         if (fzOv.on) return 'Send-downs are locked by the weekly roster freeze until '+esc(fzOv.reopens)+'. '+
           (lockedOv ? 'Trades and waivers closed at the movement deadline (Rule 2.4), so send players to training camp once the freeze lifts.'
                     : 'Until then, a waiver or a trade is the way to comply.');
         return lockedOv
           ? 'Send players to training camp before the roster freezes on Wednesday at 7:30 PM Eastern. Trades and waivers closed at the movement deadline (Rule 2.4).'
           : 'Send players to training camp before the roster freezes on Wednesday at 7:30 PM Eastern, when call-ups and send-downs stop until Saturday. Waivers and trades stay open through the freeze.';
-      })()+' You can’t add to a group you’re over in.</span></div>';
+      })()+' You can’t add to a group you’re over in'+
+      /* v3.79: and while the active roster is at its total, a call-up in any group needs a send-down from that group */
+      ((CG.ROSTER_MAX && roster.filter(function(x){ return x.spotId && x.squad!=="tc" && !CG.isWaived(x.id) && !CG.spotOutsideShape(x); }).length >= CG.ROSTER_MAX)
+        ? ', and while the active roster is at '+CG.ROSTER_MAX+', a call-up in any group needs a send-down from that same group.' : '.')+'</span></div>';
   }
   /* v3.72: the weekly freeze was explained only in a button tooltip, which a phone never shows */
   var fzR = CG.rosterFreeze ? CG.rosterFreeze() : { on:false };
@@ -2198,13 +2258,16 @@ CG.hubRoster = function(qs){
      position they registered when they are listed elsewhere for the pre-season (Rule 0.4). */
   var isLoan = function(p){ return !p.mgmt && (p.origin === "preseason_random" || p.origin === "latecomer_random"); };
   /* v2.48: basic-format depth — undrafted and late sign-ups placed by the league office. A real
-     one-season contract (trade, waive, dress like anyone) that never counts against the shape. */
+     one-season contract (trade, waive, dress like anyone). v3.79: counted like anyone else wherever he sits
+     (v2.73; check_roster_structure leaves out only pre-season loans). */
   var isDepth = function(p){ return !p.mgmt && p.origin === "depth_random"; };
   var regPos = {}; (lg._registrationsRaw||[]).forEach(function(r){ if (r.profile_id && r.position) regPos[r.profile_id] = r.position; });
   var contracted = roster.filter(function(p){ return !isLoan(p); }), loans = roster.filter(isLoan);
   /* only a seat that may manage the roster can renumber it; the same gate the page's other
      roster moves use, so a seat the Owner has put behind approval cannot quietly renumber either */
-  var canEditNum = CG.can("roster.manage") && (!CG.mgmtAccess || CG.mgmtAccess("roster") !== "hidden");
+  /* v3.79: the league office in a preview always may (set_jersey_number passes a commissioner whatever seat is mirrored) */
+  var canEditNum = (CG.role()==="commish" && !!(CG.previewClub && CG.previewClub()))
+    || (CG.can("roster.manage") && (!CG.mgmtAccess || CG.mgmtAccess("roster") !== "hidden"));
   var wkRefR = (CG.lineNights ? ((CG.lineNights(club)[0] || {}).game || null) : null);
   var rowFor = function(p){
     var waived = CG.isWaived(p.id), onBlk = CG.isOnBlock(p.id), mrole = CG.mgmtTag(p.mgmt);
@@ -2228,7 +2291,7 @@ CG.hubRoster = function(qs){
     else if (expiring) status += ' <span class="chip chip-warn" title="His contract ends after this season (Rule 2.2)">Final season</span>';
     if (openOffer) status += ' <span class="chip chip-live" title="'+(CG.offerAwaitsClub(openOffer)?'His number is waiting for you on your dashboard':'Your offer is waiting on him')+'">'+(CG.offerAwaitsClub(openOffer)?'His ask':'Offer out')+'</span>';
     if (loan) status = '<span class="chip chip-ink" style="--bc:var(--steel)" title="'+(p.origin==="latecomer_random"?"Late sign-up placed for the pre-season":"Randomly assigned for the pre-season")+' — not the club’s asset: no trades, no waivers; he returns to the draft pool when the final pre-season game ends (Rule 0.4)">Loan</span> '+status;
-    if (isDepth(p)) status = '<span class="chip chip-ink" style="--bc:var(--steel)" title="Placed by the league office after the draft (or as a late sign-up) on a one-season deal at the league minimum — the club’s player like any other, but he never counts against the 9/6/3 shape (Rule 2.8)">Depth</span> '+status;
+    if (isDepth(p)) status = '<span class="chip chip-ink" style="--bc:var(--steel)" title="Placed by the league office after the draft (or as a late sign-up) on a one-season deal at the league minimum. The club’s player like any other: on the active roster he counts toward the '+CG.ROSTER_QUOTA.F+' F / '+CG.ROSTER_QUOTA.D+' D / '+CG.ROSTER_QUOTA.G+' G shape and the '+(CG.ROSTER_MAX||"")+'-player total; in training camp, toward the camp limit of '+CG.CAMP_MAX+' (Rules 2.1 and 2.8)">Depth</span> '+status;
     var extRow = !p.mgmt && !loan && CG.extendableContractOf && CG.extendableContractOf(p.id);
     var extBtn = (extRow && extRow.team_id === (lg._codeToId||{})[club])
       ? '<button class="btn btn-chrome btn-sm" data-extend="'+p.id+'">Extend</button>' : '';
@@ -2242,9 +2305,10 @@ CG.hubRoster = function(qs){
           extBtn+squadBtn(p)+
           '<button class="btn btn-ghost btn-sm" data-block="'+p.id+'">'+(onBlk?"Off block":"To block")+'</button>'+
           '<button class="btn btn-ghost btn-sm" data-trade="'+p.id+'">Trade</button>'+
-          (function(){ var mv = CG.canMovePlayer ? CG.canMovePlayer(p) : null;
+          (function(){ var mv = (CG.role()!=="commish" && CG.canMovePlayer) ? CG.canMovePlayer(p) : null;
             /* Rule 2.4 minimum service: only the WAIVE waits for his games now (v3.40). A club may
-               trade a player the day he signs. */
+               trade a player the day he signs. v3.79: it binds the club's management, never the
+               league office (waive_player skips it for a commissioner). */
             return mv
               ? '<button class="btn btn-ghost btn-sm" disabled title="'+esc(mv.text)+'">Waive</button>'+
                 '<span class="chip chip-warn chip-xs" title="'+esc(mv.text)+'">'+mv.gp+' of '+mv.need+' GP</span>'

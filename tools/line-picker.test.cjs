@@ -11,15 +11,16 @@ const src = fs.readFileSync(path.join(__dirname, "..", "src/live/part6_hub.js"),
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
 const cut = (name) => { const i = src.indexOf("CG." + name + " = function"); return src.slice(i, src.indexOf("\n};", i) + 3); };
+const line = (name) => { const i = src.indexOf("CG." + name + " = function"); return src.slice(i, src.indexOf("\n", i) + 1); };
 
-const CG = { now: () => 1000, lg: { _gameLinePlan: {}, _linePlan: {} } };
+const CG = { now: () => 1000, lg: { _gameLinePlan: {}, _linePlan: {} }, role: () => "manager", emergencyClosed: () => false };   /* v3.79: a club's seat */
 const NIGHT = [
   { id: "a", at: 1000 + 5 * 3600000 },
   { id: "b", at: 1000 + 5 * 3600000 + 35 * 60000 },
   { id: "c", at: 1000 + 5 * 3600000 + 70 * 60000 },
 ];
 CG.nightGames = () => NIGHT;
-new Function("CG", cut("lcOpenGames") + cut("lcGameSlot") + cut("lcNightSlots") + cut("lcPerGameOpen") + cut("lcTogglePerGame"))(CG);
+new Function("CG", line("lcDressable") + cut("lcOpenGames") + cut("lcGameSlot") + cut("lcNightSlots") + cut("lcPerGameOpen") + cut("lcTogglePerGame"))(CG);
 
 console.log("— a line per game, up to three a night");
 {

@@ -40,13 +40,14 @@ A("the Squads card copy says so too", /as often as you like, except during the w
 A("...and the camp meter reads the format's camp cap (CG.CAMP_MAX), not a hardcoded 3 — and no cap when camp is unlimited",
   /meter\("training camp",tcSq\.length,CG\.CAMP_MAX>=999\?null:CG\.CAMP_MAX\)/.test(hub));
 A("no comment still claims a 3-swaps ceiling or the pre-v2.7 2/4/6 shape", !/3-swaps-a-season|2\/4\/6|2 G \/ 4 D \/ 6 F/.test(live + hub));
-A("the Swap tooltip does not nest parentheses", !/\('\+title\+'\)/.test(hub) && /of the same position\. '\+title\+'"/.test(hub));
+/* v3.79: the tooltip now leads with why (CG.squadSwapWhy), then the freeze line */
+A("the Swap tooltip does not nest parentheses", !/\('\+title\+'\)/.test(hub) && /title="'\+esc\(CG\.squadSwapWhy\(club, p\)\+' '\+title\)\+'">Swap…<\/button>/.test(hub));
 
 console.log("\n— the swap picker and call-up toast");
 A("the picker no longer filters by swaps remaining", !/\(3-\(x\.squadMoves\|\|0\)\)>0/.test(live));
 A("...and never says 'swaps left'", !/swaps left/.test(live) && !/three season swaps/.test(live));
 A("the call-up toast no longer reads moves_left from the RPC", !/moves_left/.test(live));
-A("the picker matches the position GROUP (v2.41 shape: a wing for a center, either side of defense; goalie for goalie)", /CG\.posGroup\(x\.pos\)===CG\.posGroup\(me\.pos\);/.test(live) && !/x\.pos===me\.pos;/.test(live));
+A("the picker matches the position GROUP (v2.41 shape: a wing for a center, either side of defense; goalie for goalie)", /CG\.posGroup\(x\.pos\)===CG\.posGroup\(me\.pos\)( &&|;)/.test(live) && !/x\.pos===me\.pos;/.test(live));
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);

@@ -85,7 +85,8 @@ console.log("\n— the whole-night checkbox and its submit path");
      already under way, which is also when the sheet stops being editable at all. */
   A("...never once the game is under way", /if \(shut \|\| nightGs\.length < 2\) return "";/.test(src));
   A("checked, the submit targets every not-yet-locked game of the night",
-    /wholeNight[\s\S]{0,120}CG\.nightGames\(club, CG\.gameNight\(game\)\)\.filter\(function\(g\)\{ return CG\.now\(\) < g\.at - 30\*60000; \}\)/.test(src));
+    /wholeNight[\s\S]{0,120}CG\.nightGames\(club, CG\.gameNight\(game\)\)\.filter\(CG\.lcDressable\)/.test(src)
+    && /CG\.lcDressable = function\(g\)\{ return CG\.role\(\)==="commish" \? !CG\.gameUnderWay\(g\) : CG\.now\(\) < g\.at - 30\*60000; \};/.test(src));   /* v3.79: a club until T-30, the office until under way */
   A("...submitting the current game as emergency if it is, the rest normally",
     /p_emergency:\(g\.id===game\.id\?emg:false\)/.test(src));
   A("...and reports per-game refusals without aborting the batch", /errs\.push\(CG\.fmtTime\(g\.at\)/.test(src));

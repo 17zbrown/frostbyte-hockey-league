@@ -57,7 +57,7 @@ console.log("— the value model, run for real");
 }
 
 console.log("— Rule 2.4 minimum service is enforced on the site");
-A("the roster page disables Trade and Waive with the count until three games", /var mv = CG\.canMovePlayer \? CG\.canMovePlayer\(p\) : null;/.test(hub) && /disabled title="'\+esc\(mv\.text\)\+'">Waive<\/button>/.test(hub));
+A("the roster page disables Trade and Waive with the count until three games", /var mv = \(CG\.role\(\)!=="commish" && CG\.canMovePlayer\) \? CG\.canMovePlayer\(p\) : null;/.test(hub) && /disabled title="'\+esc\(mv\.text\)\+'">Waive<\/button>/.test(hub));
 A("the trade picker no longer greys anybody out for games played (v3.40)",
   /return '<button class="gamecard" data-tpick-p="'\+p\.id\+'" style="grid-template-columns:auto 1fr auto;text-align:left;cursor:pointer;width:100%">/.test(live));
 A("...and the waive gate is still there for the roster page",

@@ -52,8 +52,9 @@ console.log("\n— the standard server");
   A("the scheduler's copy agrees", new RegExp('const DEFAULT_SERVER = "' + STD + '"').test(sched));
   /* the desk has to say what happens when a club files nothing, BEFORE it files nothing */
   A("a club with no pick is told where the game lands", /No pick from either club and this game is played on/.test(hub));
-  A("the home side shows it only while unfilled", /\(mine\.pref1 \? "" : noPick\)/.test(hub));
-  A("the away side shows it only while unfilled", /\(\(mine\.veto\|\|mine\.preferred\) \? "" : noPick\)/.test(hub));
+  /* v3.79: after the lock the office sees the server in force instead (officeLate) */
+  A("the home side shows it only while unfilled", /\(\(mine\.pref1 && !officeLate\) \? "" : noPick\)/.test(hub));
+  A("the away side shows it only while unfilled", /\(\(\(mine\.veto\|\|mine\.preferred\) && !officeLate\) \? "" : noPick\)/.test(hub));
 }
 
 console.log("\n— a player's suggested server");

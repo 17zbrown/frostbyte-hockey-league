@@ -19,7 +19,7 @@ console.log("— private lobby codes (P1-3): the client never asks for game_code
   A("codes and servers come from the masked view", /from\("games_public"\)\.select\("id,game_code,server"\)/.test(live));
   A("the schedule reads them from that view", /code:cc\.game_code\|\|null, server:cc\.server\|\|null/.test(live));
   A("the release moment is the night's first game", /CG\.codeReleaseAt = function\(g\)\{ return CG\.nightFirstAt\(g\) - 30\*60000; \}/.test(pub2));
-  A("...and the matchup page uses it", /var released = now >= CG\.codeReleaseAt\(g\);/.test(pub2));
+  A("...and the matchup page uses it", /var released = now >= CG\.codeReleaseAt\(g\)( \|\| CG\.role\(\)==="commish")?;/.test(pub2));   /* v3.79: the office reads it at once */
   A("...as do the hub card and the notification copy", /CG\.codeReleaseAt\(myGame\)/.test(hub) && /30 minutes before the night's first game, to the two clubs/.test(ui));
 }
 

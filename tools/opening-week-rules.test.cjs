@@ -47,7 +47,7 @@ console.log("\n— 2. a trade no longer waits on three games; a waiver still doe
   A("the trade picker greys nobody out", /return '<button class="gamecard" data-tpick-p="'\+p\.id\+'"/.test(live));
   A("the roster page still gates the WAIVE button", /only the WAIVE waits for his games now/.test(hub));
   A("...and the Trade button is outside that gate",
-    /'<button class="btn btn-ghost btn-sm" data-trade="'\+p\.id\+'">Trade<\/button>'\+\s*\n\s*\(function\(\)\{ var mv = CG\.canMovePlayer/.test(hub));
+    /'<button class="btn btn-ghost btn-sm" data-trade="'\+p\.id\+'">Trade<\/button>'\+\s*\n\s*\(function\(\)\{ var mv = \(CG\.role\(\)!=="commish" && CG\.canMovePlayer\)/.test(hub));
   A("2.3 drops the proviso", /A traded player needs no minimum service: a club may trade a player on the day it acquires him/.test(sec("2.3")));
   A("...and the old proviso is gone", !/provided every player in the trade has appeared in three/.test(sec("2.3")));
   /* v3.41, hours later: the commissioner lifted the WAIVE minimum too, so 2.4 now restricts neither

@@ -485,8 +485,11 @@ CG.codeReleaseAt = function(g){ return CG.nightFirstAt(g) - 30*60000; };
    sheet is the game being under way, ten minutes after the scheduled start. set_game_lineup
    enforces the same instant in the database, so anything that offers an edit past it is offering a
    button that can only hand back a refusal. One definition, read by the builder and its handler.
-   (The name is left alone on purpose: renaming it would touch every call site for no behavior.) */
-CG.emergencyClosed = function(g){ return CG.now() >= (g.at || Date.parse(g.scheduled_at)) + 10*60000; };
+   (The name is left alone on purpose: renaming it would touch every call site for no behavior.)
+   v3.79 (Rule 2.6): the league office is never closed out. set_game_lineup lets a commissioner file or
+   change a sheet for as long as the game is scheduled, so for the office no sheet is ever shut here. */
+CG.gameUnderWay = function(g){ return CG.now() >= (g.at || Date.parse(g.scheduled_at)) + 10*60000; };   /* v3.79: the instant itself, for everyone */
+CG.emergencyClosed = function(g){ return CG.role()!=="commish" && CG.gameUnderWay(g); };
 CG.gameCode = function(id){
   /* the real code is the one the commissioner sets on the game (EA lobby codes are 6-digit) */
   var g = CG.lg && CG.lg.schedule && CG.lg.schedule.find(function(x){ return x.id===id; });
@@ -618,7 +621,8 @@ CG.ROUTES.matchup = function(id){
   } else {
     /* PREVIEW: server, code, lineups. The code releases with the night's first game (Rule 4.2);
        the lineups release with THIS game's lock (Rule 5.3). */
-    var released = now >= CG.codeReleaseAt(g);
+    /* v3.79: the league office reads a code as soon as it is set (can_see_match has always answered it) */
+    var released = now >= CG.codeReleaseAt(g) || CG.role()==="commish";
     /* Reveal lineups at the SAME moment they lock (T-30), not 60 minutes out. Revealing at T-60
        while the builder stayed editable until T-30 let a manager read the opponent's confirmed
        sheet and then change his own for 30 minutes. Now both sheets appear only once neither can
@@ -642,8 +646,12 @@ CG.ROUTES.matchup = function(id){
       codeBox = '<div class="codebox locked"><span class="lock">'+CG.ic("clock",14)+'Code releases at '+CG.fmtTime(CG.codeReleaseAt(g))+'</span><div class="cb-code">'+CG.fmtTime(CG.codeReleaseAt(g))+'</div>'+
         '<p class="caption" style="margin-top:8px;color:var(--on-ink-dim)">Automatic release 30 minutes before the night’s first game, to the two clubs only. Never share codes publicly (Rule 4.2).</p></div>';
     } else {
-      codeBox = '<div class="codebox"><span class="lock" style="color:var(--chrome)">'+CG.ic("code",14)+'Private game code · live</span><div class="cb-code">'+(CG.gameCode(g.id)||'<span style="opacity:.6;letter-spacing:0;font-size:.7em">code pending</span>')+'</div>'+
-        '<p class="caption" style="margin-top:8px;color:var(--on-ink-dim)">Released '+CG.fmtTime(CG.codeReleaseAt(g))+' · visible to the two clubs and the league office only.</p></div>';
+      /* v3.79: the office reads it before the release; say that the clubs do not have it yet */
+      var early = now < CG.codeReleaseAt(g);
+      codeBox = '<div class="codebox"><span class="lock" style="color:var(--chrome)">'+CG.ic("code",14)+'Private game code'+(early?'':' · live')+'</span><div class="cb-code">'+(CG.gameCode(g.id)||'<span style="opacity:.6;letter-spacing:0;font-size:.7em">code pending</span>')+'</div>'+
+        '<p class="caption" style="margin-top:8px;color:var(--on-ink-dim)">'+(early
+          ? 'Releases to the two clubs at '+CG.fmtTime(CG.codeReleaseAt(g))+'. You see it now as the league office.'
+          : 'Released '+CG.fmtTime(CG.codeReleaseAt(g))+' · visible to the two clubs and the league office only.')+'</p></div>';
     }
     body += '<div class="grid g23" style="align-items:start"><div class="stack">';
     /* lineups */

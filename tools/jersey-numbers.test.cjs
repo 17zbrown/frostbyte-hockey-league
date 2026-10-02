@@ -20,7 +20,7 @@ console.log("— the column");
   A("...and the section headers span it", !/colspan="8"/.test(hub) && !/colspan="9"/.test(hub) && (hub.match(/colspan="10"/g) || []).length >= 2);
   A("management gets a field, everyone else the number", /canEditNum \? /.test(hub.replace(/\s+/g, " ")) || /\(canEditNum && !loan && !isDepth\(p\)\)/.test(hub));
   A("...gated on the same permission as the page's other roster moves",
-    /var canEditNum = CG\.can\("roster\.manage"\) && \(!CG\.mgmtAccess \|\| CG\.mgmtAccess\("roster"\) !== "hidden"\);/.test(hub));
+    /\|\| \(CG\.can\("roster\.manage"\) && \(!CG\.mgmtAccess \|\| CG\.mgmtAccess\("roster"\) !== "hidden"\)\);/.test(hub));   /* v3.79: or the office in a preview */
   A("a pre-season loan is not the club's to renumber", /\(canEditNum && !loan && !isDepth\(p\)\)/.test(hub));
   A("the field is bounded in the markup too, not only on the server",
     /type="number" min="1" max="99" step="1"/.test(hub));
