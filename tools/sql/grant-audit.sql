@@ -57,4 +57,14 @@ union all
 select 'discord-post-without-no-previews', p.proname, pg_get_function_identity_arguments(p.oid), false
 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public' and p.proname <> 'discord_http_post'
-  and p.prosrc ~ 'net\.http_post\s*\(' and p.prosrc ~* '(discord|webhook)';
+  and p.prosrc ~ 'net\.http_post\s*\(' and p.prosrc ~* '(discord|webhook)'
+union all
+-- 8) (2026-10-02) an updatable view that runs with its owner's privileges (security_invoker = false) and that an API
+--    role can write: every write through it skips RLS and every RPC check. suspension_record was one; games_public is
+--    the model (SELECT only). sql/2026-10-02-suspension-record-read-only.sql.
+select 'definer-view-writable', c.relname, '', has_table_privilege('anon', c.oid, 'UPDATE')
+from pg_class c join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public' and c.relkind = 'v'
+  and not coalesce('security_invoker=true' = any(c.reloptions) or 'security_invoker=on' = any(c.reloptions), false)
+  and (has_table_privilege('anon', c.oid, 'INSERT') or has_table_privilege('anon', c.oid, 'UPDATE') or has_table_privilege('anon', c.oid, 'DELETE')
+    or has_table_privilege('authenticated', c.oid, 'INSERT') or has_table_privilege('authenticated', c.oid, 'UPDATE') or has_table_privilege('authenticated', c.oid, 'DELETE'));
