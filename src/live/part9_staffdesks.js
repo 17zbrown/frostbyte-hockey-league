@@ -459,7 +459,9 @@ CG.deskOfficials = function(){
   h += CG.deskCapExceptionsCard();
 
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Active discipline</h3>'+
-    '<span class="chip">'+sus.length+(warns.length?' + '+warns.length+' warned':'')+'</span></div>';
+    '<span class="chip">'+sus.length+(warns.length?' + '+warns.length+' warned':'')+'</span>'+
+    /* v3.81: a commissioner disciplines directly, no case needed (CG.disciplinePickPrompt) */
+    (commishNow ? '<button class="btn btn-ink btn-sm" data-desk-discipline style="margin-left:auto">Discipline a member</button>' : '')+'</div>';
   h += (sus.length||warns.length) ? sus.concat(warns).map(function(s){
       var p = CG.playerById(lg, s.playerId);
       var nm = p ? p.tag : (s.playerName || (lg._profName||{})[s.profile_id] || "A player");
@@ -475,7 +477,9 @@ CG.deskOfficials = function(){
         (s.id?'<button class="btn btn-ghost btn-sm" data-desk-lift="'+esc(s.id)+'" data-name="'+esc(nm)+'">Lift</button>':"")+
         (p?'<a class="btn btn-ghost btn-sm" href="'+CG.playerRoute(p)+'">Profile</a>':"")+'</div>';
     }).join("")
-    : CG.deskEmpty("Nobody is serving anything. Discipline is issued from a case — open the <a href=\"#/hub/complaints\">case queue</a> and rule from the case itself, so the ruling stays attached to the evidence.");
+    : CG.deskEmpty("Nobody is serving anything. "+(commishNow
+        ? "Discipline a member directly with the button above, or rule from a case in the <a href=\"#/hub/complaints\">case queue</a> to keep the ruling attached to its evidence."
+        : "Discipline is issued from a case. Open the <a href=\"#/hub/complaints\">case queue</a> and rule from the case itself, so the ruling stays attached to the evidence."));
   h += '</div>';
 
   h += '<div class="card"><div class="card-h"><h3>Cases waiting on a ruling</h3>'+
@@ -1162,6 +1166,9 @@ CG.AFTER._deskOfficials = function(){
     b.addEventListener("click", function(){
       CG.extendSuspensionPrompt(this.getAttribute("data-desk-extend"), this.getAttribute("data-name"));
     });
+  });
+  document.querySelectorAll("[data-desk-discipline]").forEach(function(b){
+    b.addEventListener("click", function(){ CG.disciplinePickPrompt(); });
   });
 };
 CG.AFTER._deskOperations = function(){

@@ -6958,8 +6958,11 @@ CG.suspendUser = function(profileId, name, opts){
       '<label class="fld" style="margin-top:10px"><span>What happened, in your words <span class="caption">(required if you tick Other)</span></span>'+
         '<textarea id="susReason" rows="2" placeholder="Quote it or say where it was. The member is shown this."></textarea></label>'
     : '<label class="fld"><span>Reason (the member is shown this)</span><textarea id="susReason" rows="2" placeholder="e.g. Rule 7.4 dangerous contact"></textarea></label>';
-  CG.modal("Suspend "+esc(name), grounds + CG.disciplineLengthFields(ctx, false, true),
-    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="susGo">Suspend</button>');
+  /* v3.81 (commissioner, 2026-10-02: "allow me to suspend players through the control centers without the need of a
+     case to be filed"): every discipline a case can issue, warning and rest of the season included, is issued here
+     too. Who may impose what is still decided in _issue_suspension. The community desk's conduct form is unchanged. */
+  CG.modal((conduct ? "Suspend " : "Discipline ")+esc(name), grounds + CG.disciplineLengthFields(ctx, !conduct, true),
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="susGo">'+(conduct ? "Suspend" : "Issue")+'</button>');
   CG.wireDisciplineLength();
   document.getElementById("susGo").addEventListener("click", function(){
     var reason=(document.getElementById("susReason").value||"").trim(), codes=null;
@@ -6969,13 +6972,27 @@ CG.suspendUser = function(profileId, name, opts){
       if(codes.indexOf("other")>=0 && !reason){ CG.toast("“Other” says nothing on its own. Write what happened.","err"); return; }
     } else if(!reason){ CG.toast("Give the suspension a reason: it is the league record","err"); return; }
     var len = CG.readDisciplineLength(); if (!len) return;
-    if (len.p_mode==="seasons"){ CG.toast("A suspension through a season is issued from a case","err"); return; }
     var btn=this; btn.disabled=true;
     CG.sb.rpc("suspend_player", Object.assign({ p_profile:profileId, p_ends_at:null, p_games:null, p_reason:reason||null, p_codes:codes }, len)).then(function(r){
       btn.disabled=false;
       if(r.error){ CG.toast("Couldn’t suspend: "+r.error.message,"err"); return; }
       CG.disciplineDone(name);
     });
+  });
+};
+/* v3.81: discipline anyone without a case: pick the member, then the same form as Users and roles */
+CG.disciplinePickPrompt = function(){
+  CG.modal("Discipline a member",
+    '<p class="caption" style="margin-bottom:10px">No case is needed. The member and his club are told at once, and he has 48 hours to appeal (Rule 7.6).</p>'+
+    CG.memberPickerField("dpWho", "Member", "Start typing a gamertag"),
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="dpGo">Continue</button>');
+  CG.wireMemberPicker("dpWho", ["members"]);
+  var go = document.getElementById("dpGo");
+  if (go) go.addEventListener("click", function(){
+    var pick = CG.readMemberPicker("dpWho");
+    if (!pick || !pick.id){ CG.toast("Pick the member from the list","err"); return; }
+    if (CG.closeOverlay) CG.closeOverlay();
+    CG.suspendUser(pick.id, pick.name);
   });
 };
 /* A further offense while a suspension runs is added to its end (commissioner, 2026-09-28). */
