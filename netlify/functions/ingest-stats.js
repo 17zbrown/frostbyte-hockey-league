@@ -105,6 +105,11 @@ function normalizeMatch(raw) {
         saves: isG ? +(p.glsaves || 0) : 0, shots_against: isG ? +(p.glshots || 0) : 0, goals_against: isG ? +(p.glga || 0) : 0,
         breakaway_shots: isG ? +(p.glbrkshots || 0) : 0, breakaway_saves: isG ? +(p.glbrksaves || 0) : 0,
         poke_checks: isG ? +(p.glpokechecks || 0) : 0,
+        /* v3.81: the four goaltending stats the ratings engine (v3.49) reads. They were added to game_stats and
+           backfilled on 2026-09-26, but never mapped here, so every goalie line imported from Sep 30 on had them
+           null and every goaltender's rating was computed without them. */
+        diving_saves: isG ? +(p.gldsaves || 0) : 0, shutout_periods: isG ? +(p.glsoperiods || 0) : 0,
+        pen_shot_saves: isG ? +(p.glpensaves || 0) : 0, pen_shots_against: isG ? +(p.glpenshots || 0) : 0,
         shutout: isG && +(p.glga || 0) === 0 && +(p.glshots || 0) > 0
       };
     });
@@ -303,7 +308,8 @@ function mergeSegments(segments) {
                          "blocked_shots","interceptions","passes_completed","passes_attempted",
                          "shot_attempts","possession_seconds","penalties_drawn","deflections",
                          "saucer_passes","saves","shots_against","goals_against",
-                         "breakaway_shots","breakaway_saves","poke_checks"]) prev[k] = (prev[k] || 0) + (p[k] || 0);
+                         "breakaway_shots","breakaway_saves","poke_checks",
+                         "diving_saves","shutout_periods","pen_shot_saves","pen_shots_against"]) prev[k] = (prev[k] || 0) + (p[k] || 0);
         prev.is_goalie = prev.is_goalie || p.is_goalie;
         // the segment the player skated longest in names the position and the latest gamertag wins
         if ((p.time_on_ice_seconds || 0) > Math.max(...prev._toiW)) prev.position = p.position;
@@ -1303,7 +1309,9 @@ async function leagueBoxRows(game, clubByTeam, cache = new Map()) {
         penalties_drawn: e.penalties_drawn, deflections: e.deflections, saucer_passes: e.saucer_passes,
         offense_rating: e.offense_rating, defense_rating: e.defense_rating, team_play_rating: e.team_play_rating,
         breakaway_shots: e.breakaway_shots, breakaway_saves: e.breakaway_saves,
-        poke_checks: e.poke_checks, shutout: e.shutout
+        poke_checks: e.poke_checks, shutout: e.shutout,
+        diving_saves: e.diving_saves, shutout_periods: e.shutout_periods,
+        pen_shot_saves: e.pen_shot_saves, pen_shots_against: e.pen_shots_against
       });
     }
   }
