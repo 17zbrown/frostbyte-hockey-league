@@ -135,6 +135,19 @@ function normalizeMatch(raw) {
              ppg: +(c.ppg || 0), ppo: +(c.ppo || 0), result: +(c.result || 0), players };
   };
   const clubs = [club(clubIds[0]), club(clubIds[1])];
+  /* v3.83 (commissioner, 2026-10-02: DET v NYI Oct 1 was filed 6-1; EA's official result, and the Islanders'
+     goaltender, said 7-1). The players' goals stand in for the score ONLY on a disconnected sitting, where EA's
+     club score is the 3-0 placeholder (v3.06). On a clean sitting EA's own score is the record: it counts a goal no
+     player in the payload holds, an own goal or one scored by a player who left the lobby, and the players' sum
+     would drop it. Never below the players' goals, and any disagreement is carried as `unattributed` so the
+     filing tells the statistics desk (noteUnattributed). */
+  const matchDnf = clubs.some((c) => c.dnf);
+  for (const c of clubs) {
+    const sum = c.score;
+    c.goals_sum = sum;
+    c.score = matchDnf ? sum : Math.max(c.ea_score, sum);
+    c.unattributed = matchDnf ? 0 : c.ea_score - sum;
+  }
   // EA's per-club `result` code: 1 = regulation win, 2 = regulation loss, 5 = OT win, 6 = OT loss.
   // CGHL plays continuous sudden-death OT and no shootout (Rule 4.1), so any non-regulation
   // finish is overtime. If either club reports 5 or 6, the game went to OT.
@@ -287,6 +300,24 @@ async function noteGameLength(game, st, summary) {
   }
 }
 
+/* v3.83 — a clean sitting whose official score and players' goals disagree is filed on EA's score (normalizeMatch);
+   the goal no player holds is a question for the statistics desk (an own goal, or a player who left the lobby), so
+   say which game and how many. Never fails a filing: the record is already right. */
+async function noteUnattributed(game, homeClub, awayClub, summary) {
+  const off = [[game.home_team_id, homeClub], [game.away_team_id, awayClub]].filter(([, c]) => c && c.unattributed);
+  if (!off.length) return;
+  let code = () => "?";
+  try {
+    const t = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code`);
+    code = (id) => ((t || []).find((x) => x.id === id) || {}).code || "?";
+  } catch { /* the name is a courtesy */ }
+  const what = off.map(([tid, c]) => `${code(tid)} ${c.score} on EA's record, ${c.goals_sum != null ? c.goals_sum : c.score - c.unattributed} by its players`).join("; ");
+  (summary.warnings = summary.warnings || []).push({ game_id: game.id, warning: `filed on EA's official score; goals no player holds: ${what}` });
+  try {
+    await tellStaff(`\u2139\ufe0f **A goal no player holds** \u00b7 ${code(game.away_team_id)} @ ${code(game.home_team_id)}: filed on EA's official score (${what}). Usually an own goal or a player who left the lobby; the box score lines are EA's as sent. Check it in Control Center, Stats manager if it looks wrong.`);
+  } catch (e) { console.warn("unattributed-goal note failed:", String((e && e.message) || e)); }
+}
+
 function mergeSegments(segments) {
   const segs = segments.slice().sort((a, b) => a.ts - b.ts);
   const last = segs[segs.length - 1];
@@ -331,6 +362,7 @@ function mergeSegments(segments) {
     return {
       ea_club_id: cid, name: parts.map((x) => x.name).filter(Boolean).pop() || null,
       score: parts.reduce((a, x) => a + (x.score || 0), 0),
+      unattributed: parts.reduce((a, x) => a + (x.unattributed || 0), 0),
       ppg: parts.reduce((a, x) => a + (x.ppg || 0), 0),
       ppo: parts.reduce((a, x) => a + (x.ppo || 0), 0),
       result: parts[parts.length - 1].result,
@@ -889,6 +921,7 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
     console.warn("recap notifications failed (the import itself is unaffected):", String(e && e.message || e)));
   summary.ingested.push({ ea_match_id: norm.ea_match_id, game_id: game.id, score: `${homeScore}-${awayScore}`, players: rows.length, linked });
   await noteGameLength(game, st1, summary);
+  await noteUnattributed(game, homeClub, awayClub, summary);
   /* the game is filed either way, but a lost status leaves the archive reading `unmatched`, which
      the statistics desk reads as work it has to do by hand. Say so rather than swallow it. */
   if (!(await archive(ctx, norm, raw, "ingested", `${homeScore}-${awayScore}, ${rows.length} players (${linked} linked)`, game.id)))
@@ -1191,6 +1224,7 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
   summary.ingested.push({ ea_match_id: norm.ea_match_id, game_id: cand.id, merged_into: cand.ea_match_id,
     score: `${homeClub.score}-${awayClub.score}`, players: rows.length, resumed: true });
   await noteGameLength(cand, st, summary);
+  await noteUnattributed(cand, homeClub, awayClub, summary);
   /* a reload that was itself a whole game, after a game stopped past its first ten minutes: the clubs
      may have restarted from the beginning (an illegal loadout under Rule 4.5, or a full replay)
      instead of playing the rest. The importer cannot tell those apart, so it combines them under
@@ -1707,6 +1741,7 @@ export const handler = async (event) => {
           home_ppg: homeClub.ppg || 0, home_ppo: homeClub.ppo || 0, away_ppg: awayClub.ppg || 0, away_ppo: awayClub.ppo || 0 },
       "return=minimal");
     if (st.finished) await noteGameLength(game, st, { warnings: [] });
+    if (st.finished) await noteUnattributed(game, homeClub, awayClub, { warnings: [] });
     /* Evidence linkage: attaching these sittings to this fixture proves the opponent's EA club.
        Link it so auto-imports cover them from now on; staff are told either way. */
     if (derivedOpp) {
