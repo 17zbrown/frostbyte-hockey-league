@@ -1315,9 +1315,36 @@ async function leagueBoxRows(game, clubByTeam, cache = new Map()) {
       });
     }
   }
+  await oneCreditPerGame(rows);
   await applyCreditWithdrawals(game.id, rows);
   await learnPersonas(rows);
   return rows;
+}
+
+/* v3.82 — one member, one line per game. A person cannot play on two lines of one game, least of all on both
+   sides of it, yet the name-based steps of resolveProfile can hand two EA accounts to one member: on Oct 1 the
+   Dallas line of vDarkiee___ was credited to LIL__Dark200, whose own persona played for Detroit in the same EA
+   match, because his profile carried 'vDarkiee___' as its platform gamertag. When two lines resolve to one member,
+   the line on the persona recorded on his profile keeps the credit and the rest are left unlinked (the reviewer
+   then raises them as unidentified, so a person decides). With no persona to decide between them, none is credited:
+   a wrong link is worse than none. If the profiles cannot be read, the same rule applies, credited to none. */
+async function oneCreditPerGame(rows) {
+  const by = new Map();
+  for (const r of rows || []) if (r.profile_id) { if (!by.has(r.profile_id)) by.set(r.profile_id, []); by.get(r.profile_id).push(r); }
+  const dup = [...by.entries()].filter(([, rs]) => rs.length > 1);
+  if (!dup.length) return;
+  let persona = new Map();
+  try {
+    const profs = await sbGet(`profiles?id=in.(${dup.map(([pid]) => encodeURIComponent(pid)).join(",")})&select=id,ea_player_id`);
+    persona = new Map((profs || []).map((p) => [p.id, p.ea_player_id != null ? String(p.ea_player_id) : null]));
+  } catch (e) { console.log(`ingest: could not read the profiles behind a double credit (${String((e && e.message) || e)}); crediting none of them`); }
+  for (const [pid, rs] of dup) {
+    const own = persona.get(pid);
+    const keep = own ? rs.filter((r) => String(r.ea_player_id) === own) : [];
+    for (const r of rs) if (!(keep.length === 1 && r === keep[0])) r.profile_id = null;
+    console.log(`ingest: ${rs.length} lines of one game resolved to member ${pid}; ` +
+      (keep.length === 1 ? `kept the line on his own EA persona ${own}` : "credited none of them, no recorded persona decides"));
+  }
 }
 
 /* v3.08 — Rule 6.3: a withdrawal of personal credit is the LAST word on a box-score line.
