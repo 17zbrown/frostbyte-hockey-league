@@ -6898,7 +6898,9 @@ CG.disciplineLengthFields = function(ctx, withWarning, withSeasons){
     '<p class="caption" style="margin-top:8px">'+(commish
       ? 'As a commissioner you may set any length.'
       : 'Staff set 3 to 18 games in steps of three, or a date up to 30 days away for a member with no roster spot. Anything longer, a ban, or anything about league staff is a commissioner ruling.')+
-    ' Games are counted on the games of whichever club he is on and carry into the next season. Every suspension ends at 11:59 PM Eastern on its last day.</p>';
+    ' Games are counted on the games of whichever club he is on and carry into the next season. Every suspension ends at 11:59 PM Eastern on its last day.'+
+    /* v3.85 (Rule 7.2): say what a season-long suspension does before it is issued */
+    ((withSeasons && commish) ? ' A suspension through a season also takes him off his club\u2019s roster and out of any front-office seat, and withdraws his sign-ups (Rule 7.2).' : '')+'</p>';
 };
 CG.wireDisciplineLength = function(){
   var sel = document.getElementById("dlMode"); if (!sel) return;
@@ -7037,7 +7039,7 @@ CG.liftUserSuspension = function(susId, name){
 CG.banUser = function(profileId, name){
   CG.modal("Ban "+esc(name)+"?",
     '<label class="fld"><span>Reason (shown to the member)</span><textarea id="banReason" rows="2" placeholder="e.g. repeated conduct violations"></textarea></label>'+
-    '<p class="caption">Bans remove site access and remove the member from the Chel Gaming Discord. Reversible with Unban.</p>',
+    '<p class="caption">Bans remove site access, remove the member from the Chel Gaming Discord, take him off his club\u2019s roster and out of any front-office seat, and withdraw his sign-ups (Rule 7.2). Unban restores site access only.</p>',
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="banGo">Ban member</button>');
   document.getElementById("banGo").addEventListener("click", function(){
     var reason=(document.getElementById("banReason").value||"").trim();
