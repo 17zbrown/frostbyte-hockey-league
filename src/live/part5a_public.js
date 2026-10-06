@@ -230,7 +230,8 @@ CG.slideDefs = function(){
   var feat = lg.tonight.find(function(g){ return g.feature; });
   var a1 = C.articles.find(function(a){ return a.featured; }) || C.articles[0];
   var potw = lg.potw[lg.potw.length-1];
-  var sk = potw ? CG.playerById(lg, potw.skater) : null;
+  var potwPicks = CG.potwPicks(lg, potw);   /* v3.87: forward, defenseman, goaltender */
+  var sk = potwPicks.length ? potwPicks[0].p : null;
   var divLeaders = (CG.DIVISIONS||["East","West"]).map(function(dv){ return CG.standings(lg,dv)[0]; }).filter(Boolean);
   var curWeek = lg.results.reduce(function(m,r){ return Math.max(m, r.week||1); }, 1);
   var slides = [];
@@ -250,13 +251,14 @@ CG.slideDefs = function(){
       '<a class="btn btn-ghost" href="#/schedule">Tonight’s slate</a></div>'+
       '<span class="s-date">Puck drop '+CG.fmtTime(feat.at)+'</span>' });
   }
-  if (potw && sk) slides.push({ key:"potw", label:"Player of the Week", html:
-    '<span class="s-cat"><span class="chip chip-chrome">Player of the Week '+potw.week+'</span></span>'+
-    '<h2>'+esc(sk.tag)+'</h2>'+
-    '<p class="s-dek">'+esc(potw.blurb || (sk.tag+" takes Week "+potw.week+"’s honors for "+CG.TEAM[sk.team].name+"."))+'</p>'+
-    '<div class="s-cta"><a class="btn btn-chrome" href="'+CG.playerRoute(sk)+'">Player profile</a>'+
-    '<a class="btn btn-ghost" href="#/awards">Award history</a></div>'+
-    '<span class="s-date">'+esc(CG.TEAM[sk.team].name)+' · '+sk.pos+'</span>' });
+  if (potw && sk) slides.push({ key:"potw", label:"Players of the Week", html:
+    '<span class="s-cat"><span class="chip chip-chrome">Players of the Week · Week '+potw.week+'</span></span>'+
+    '<h2>'+potwPicks.map(function(pk){ return esc(pk.p.tag); }).join(' <span style="opacity:.45">·</span> ')+'</h2>'+
+    '<p class="s-dek">'+potwPicks.map(function(pk){ return esc(pk.role+" of the Week: "+pk.p.tag+(pk.blurb ? ", "+pk.blurb : "")+"."); }).join(" ")+'</p>'+
+    '<div class="s-cta"><a class="btn btn-chrome" href="#/awards?tab=potw">See the winners</a>'+
+    '<a class="btn btn-ghost" href="'+CG.playerRoute(sk)+'">'+esc(sk.tag)+'’s profile</a></div>'+
+    '<span class="s-date">'+potwPicks.map(function(pk){ return CG.TEAM[pk.p.team].name; })
+      .filter(function(nm, i, all){ return all.indexOf(nm)===i; }).map(esc).join(' · ')+'</span>' });   /* each club once */
   if ((lg.powerRankings||[]).length){
     var pr1 = lg.powerRankings[0], pr1t = CG.TEAM[pr1.team];
     slides.push({ key:"rankings", label:"Power Rankings", html:
@@ -1243,11 +1245,9 @@ CG.ROUTES.home = function(){
   /* HONORS — needs at least one completed game night AND a minted POTW; either can lag early
      in the season, so both are hard requirements or this section would throw on week 1 */
   if (CG.modOn("honors") && !pre && lg.lastNight.length && lg.potw.length
-      && CG.playerById(lg, (lg.potw[lg.potw.length-1]||{}).skater)
-      && CG.playerById(lg, (lg.potw[lg.potw.length-1]||{}).goalie)){
+      && CG.potwPicks(lg, lg.potw[lg.potw.length-1]).length){
     var stars = (lg.lastNight[lg.lastNight.length-1].stars||[]).filter(function(s){ return CG.playerById(lg, s.pid); });
     var potw = lg.potw[lg.potw.length-1];
-    var skp = CG.playerById(lg, potw.skater), glp = CG.playerById(lg, potw.goalie);
     html += '<section class="sec sec-dark"><div class="shell"><div class="grid g5x7" data-rv="up">'+
       '<div><span class="eyebrow chr">Three Stars · last game night</span>'+
         '<div class="starsrow" style="margin-top:22px">'+stars.map(function(s,i){
@@ -1258,12 +1258,13 @@ CG.ROUTES.home = function(){
         }).join("")+'</div>'+
         '<p class="caption" style="margin-top:14px;color:var(--on-ink-dim)">Picked automatically from the night’s box scores.</p></div>'+
       '<div><span class="eyebrow chr">Players of the Week '+potw.week+'</span>'+
-        '<div class="stack" style="margin-top:22px">'+ [ [skp,"Skater"], [glp,"Goaltender"] ].map(function(pair){
-          return '<div class="card raise" data-go="'+CG.playerRoute(pair[0])+'" role="link" tabindex="0"><div class="card-b" style="display:flex;gap:14px;align-items:center">'+
-            CG.crest(pair[0].team,40)+'<div style="min-width:0"><span class="chip chip-chrome">'+pair[1]+'</span>'+
-            '<b style="display:block;font-family:var(--f-disp);font-size:18px;color:#fff;margin-top:6px">'+esc(pair[0].tag)+'</b>'+
-            '<span class="caption" style="color:var(--on-ink-dim)">'+esc(CG.TEAM[pair[0].team].name)+'</span></div>'+
-            '<span class="ovrbox" style="margin-left:auto">'+CG.lg.ratings[pair[0].id].ovr+'</span></div></div>';
+        '<div class="stack" style="margin-top:22px">'+ CG.potwPicks(lg, potw).map(function(pk){
+          var rt = CG.lg.ratings[pk.p.id];
+          return '<div class="card raise" data-go="'+CG.playerRoute(pk.p)+'" role="link" tabindex="0"><div class="card-b" style="display:flex;gap:14px;align-items:center">'+
+            CG.crest(pk.p.team,40)+'<div style="min-width:0"><span class="chip chip-chrome">'+pk.role+'</span>'+
+            '<b style="display:block;font-family:var(--f-disp);font-size:18px;color:#fff;margin-top:6px">'+esc(pk.p.tag)+'</b>'+
+            '<span class="caption" style="color:var(--on-ink-dim)">'+esc(CG.TEAM[pk.p.team].name)+'</span></div>'+
+            (rt ? '<span class="ovrbox" style="margin-left:auto">'+rt.ovr+'</span>' : '')+'</div></div>';
         }).join("")+'</div></div>'+
     '</div></div></section>';
   }
@@ -2160,16 +2161,14 @@ CG.ROUTES.team = function(code, qs){
     body += '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("trophy",22)+'</div><b>No honors in '+esc(SD.label)+'</b><p>Weekly hardware began with Season 1 — exhibition games didn’t award stars or Players of the Week.</p></div></div>';
   }
   else if (tab==="honors"){
-    var wins = lg.potw.filter(function(w){
-      var sk = CG.playerById(lg,w.skater), gl = CG.playerById(lg,w.goalie);   /* winner may have left the roster */
-      return (sk && sk.team===code) || (gl && gl.team===code);
+    /* every pick this club holds, one card each (a week can give a club more than one) */
+    var wins = [];
+    lg.potw.forEach(function(w){
+      CG.potwPicks(lg, w).forEach(function(pk){ if (pk.p.team===code) wins.push({ week:w.week, pk:pk }); });   /* winner may have left the roster */
     });
-    body += wins.length ? '<div class="grid g3">'+wins.map(function(w){
-      var sk = CG.playerById(lg,w.skater);
-      var p = CG.playerById(lg, sk && sk.team===code ? w.skater : w.goalie);
-      if (!p) return "";
-      return '<div class="card raise" data-go="'+CG.playerRoute(p)+'"><div class="card-b" style="display:flex;gap:12px;align-items:center">'+
-        CG.crest(code,34)+'<div><span class="chip chip-chrome">Week '+w.week+' POTW</span><b style="display:block;font-family:var(--f-disp);margin-top:6px">'+esc(p.tag)+'</b></div></div></div>';
+    body += wins.length ? '<div class="grid g3">'+wins.map(function(x){
+      return '<div class="card raise" data-go="'+CG.playerRoute(x.pk.p)+'"><div class="card-b" style="display:flex;gap:12px;align-items:center">'+
+        CG.crest(code,34)+'<div><span class="chip chip-chrome">Week '+x.week+' · '+x.pk.role+' of the Week</span><b style="display:block;font-family:var(--f-disp);margin-top:6px">'+esc(x.pk.p.tag)+'</b></div></div></div>';
     }).join("")+'</div>' : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("trophy",22)+'</div><b>No hardware yet</b><p>Weekly honors and season awards land here once this club starts collecting them.</p></div></div>';
   }
   body += '</div>';
@@ -2569,16 +2568,16 @@ CG.ROUTES.player = function(pid, qs){
     body += '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("trophy",22)+'</div><b>No honors in '+esc(SD.label)+'</b><p>Weekly hardware — Three Stars and Players of the Week — began with Season 1. Preseason games were exhibitions.</p></div></div>';
   }
   else if (tab==="honors"){
-    var potws = lg.potw.filter(function(w){ return w.skater===p.id||w.goalie===p.id; });
+    var potws = [];   /* v3.87: {week, pk} for each week this player was named, whatever the position */
+    lg.potw.forEach(function(w){ CG.potwPicks(lg, w).forEach(function(pk){ if (pk.pid===p.id) potws.push({ week:w.week, pk:pk }); }); });
     var starN = lg.results.reduce(function(acc,r2){ return acc + (r2.stars.some(function(st){ return st.pid===p.id; })?1:0); },0);
     body += '<div class="grid g3">'+
       '<div class="kpi" style="cursor:default"><b class="num">'+potws.length+'</b><span>Player of the Week awards</span></div>'+
       '<div class="kpi" style="cursor:default"><b class="num">'+starN+'</b><span>Three Stars selections</span></div>'+
       '<div class="kpi" style="cursor:default"><b class="num">'+lg.suspensions.filter(function(x){ return x.playerId===p.id && x.status!=="lifted" && x.mode==="games"; }).reduce(function(n,x){ return n+(x.games||0); },0)+'</b><span>Suspension games</span></div></div>'+
-      (potws.length?'<div class="card" style="margin-top:18px"><div class="card-h"><h3>Weekly honors</h3></div>'+potws.map(function(w){
-        var blurb = (CG.CONTENT.awards.potw.find(function(x){ return x.week===w.week; })||{});
-        return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic("trophy",15)+'</span><span><b>Week '+w.week+' — '+(w.skater===p.id?"Skater":"Goaltender")+' of the Week</b>'+
-          '<p>'+esc(w.skater===p.id?blurb.skaterBlurb||"":blurb.goalieBlurb||"")+'</p></span></div>';
+      (potws.length?'<div class="card" style="margin-top:18px"><div class="card-h"><h3>Weekly honors</h3></div>'+potws.map(function(x){
+        return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic("trophy",15)+'</span><span><b>Week '+x.week+': '+x.pk.role+' of the Week</b>'+
+          '<p>'+esc(x.pk.blurb)+'</p></span></div>';
       }).join("")+'</div>':"")+
       (sus?'<div class="note red" style="margin-top:18px"><b style="display:block;font-family:var(--f-disp)">Discipline record</b>'+
         'Suspended '+esc(CG.suspensionLen(sus))+', '+CG.suspensionStateWord(sus)+'. '+esc(CG.suspensionHeadings(sus))+'. Issued '+CG.fmtDate(sus.issued)+'.'+
@@ -2625,7 +2624,7 @@ CG.vizGauge = function(val, max, disp, label, color){
 };
 CG.vizRadar = function(axes, me, cmp, meLabel, cmpLabel){
   var cx=150, cy=120, R=86, n=axes.length, TAU=Math.PI*2, g="";
-  function poly(vals, mx){ return vals.map(function(v,i){ var a=-Math.PI/2+i*TAU/n, rr=R*Math.max(0,Math.min(1,v/mx)); return [cx+Math.cos(a)*rr, cy+Math.sin(a)*rr]; }); }
+  function poly(vals, mx){ return vals.map(function(v,i){ var a=-Math.PI/2+i*TAU/n, rr=R*Math.max(0,Math.min(1,(v||0)/mx)); return [cx+Math.cos(a)*rr, cy+Math.sin(a)*rr]; }); }
   function ptsOf(P){ return P.map(function(p){return p.map(function(z){return z.toFixed(1);}).join(",");}).join(" "); }
   /* faint filled backdrop so the web reads as a surface, then the concentric grid + spokes */
   g+='<polygon class="vr-surface" points="'+ptsOf(poly(axes.map(function(){return 1;}),1))+'"/>';
@@ -2636,7 +2635,8 @@ CG.vizRadar = function(axes, me, cmp, meLabel, cmpLabel){
     g+='<text x="'+lx.toFixed(1)+'" y="'+(ly+3).toFixed(1)+'" text-anchor="'+anc+'">'+esc(name.toUpperCase())+'</text>'; });
   function shape(vals,fill,stroke,dots){ var P=poly(vals,100);
     var o='<polygon points="'+ptsOf(P)+'" fill="'+fill+'" stroke="'+stroke+'" stroke-width="2.25" stroke-linejoin="round"/>';
-    if(dots) P.forEach(function(p){ o+='<circle class="vr-dot" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="3.2" fill="'+stroke+'"/>'; }); return o; }
+    /* v3.87: no dot for an axis the source does not record (null), so a blank never reads as a zero */
+    if(dots) P.forEach(function(p, i){ if (vals[i] == null) return; o+='<circle class="vr-dot" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="3.2" fill="'+stroke+'"/>'; }); return o; }
   if (cmp) g+=shape(cmp,"color-mix(in srgb,var(--steel) 18%,transparent)","var(--steel)",false);
   g+=shape(me,"color-mix(in srgb,var(--viz-accent) 20%,transparent)","var(--viz-accent)",true);
   var legend = '<div class="vlegend"><span><i style="background:var(--viz-accent)"></i>'+esc(meLabel||"This player")+'</span>'+(cmp?'<span><i style="background:var(--steel)"></i>'+esc(cmpLabel||"League avg")+'</span>':'')+'</div>';
@@ -2650,7 +2650,7 @@ CG.leagueDNA = function(lg, isGoalie, posGroup, exceptId){
   if (!lg || !lg.pstats) return null;
   var fn = isGoalie ? CG.goalieDNA : CG.skaterDNA;
   if (!fn) return null;
-  var sums = null, n = 0;
+  var sums = null, cnt = null, n = 0;
   (lg.players||[]).forEach(function(pl){
     if (exceptId && pl.id === exceptId) return;      /* "you vs the field" must not include you */
     var isG = pl.pos === "G";
@@ -2659,13 +2659,13 @@ CG.leagueDNA = function(lg, isGoalie, posGroup, exceptId){
     var st = lg.pstats[pl.id];
     if (!st || (st.gp||0) < 1) return;
     var v = fn(st); if (!v || !v.length) return;
-    if (!sums) sums = v.map(function(){ return 0; });
-    v.forEach(function(x, i){ sums[i] += x; });
+    if (!sums){ sums = v.map(function(){ return 0; }); cnt = v.map(function(){ return 0; }); }
+    v.forEach(function(x, i){ if (x == null) return; sums[i] += x; cnt[i]++; });   /* v3.87: an untracked axis is skipped, not averaged as 0 */
     n++;
   });
   /* below this a single outlier IS the "average", which is worse than drawing no comparison */
   if (!n || n < 5) return null;
-  return sums.map(function(x){ return Math.round(x/n); });
+  return sums.map(function(x, i){ return cnt[i] ? Math.round(x/cnt[i]) : null; });
 };
 /* the human name for a position group, for the radar legend — "F" meant nothing to a reader */
 CG.posGroupLabel = function(grp){
@@ -2745,24 +2745,28 @@ CG.skaterDNA = function(s){
   ];
 };
 CG.SKATER_DNA_AXES = ["Shooting","Playmaking","Defense","Physical","Discipline","Clutch"];
-/* The goalie counterpart. Every axis is computable from BOTH the league season line and a pickup
-   aggregate, so the same radar reads the same way everywhere: Stopping maps save % across the
-   realistic CHEL band (.780 floors it, .950 maxes it), Goals Against inverts GAA, Workload is how
-   much rubber they face, and the rest are rates per start. */
+/* The goalie counterpart. Stopping maps save % across the realistic CHEL band (.780 floors it, .950
+   maxes it), Goals Against inverts GAA, and the rest are rates per start.
+   v3.87 (commissioner, 2026-10-06): Big Saves replaces Workload. Workload was shots faced per game
+   over 12, and every CGHL goalie faces 12 to 27 a game, so every goalie and the league average sat
+   at 100; it also measured the defense in front of him, not the goalie. Big Saves is diving saves
+   plus breakaway saves per game (1.5 a game fills it; Season 1's best was 1.7). Pickup box scores
+   do not store either, so a pickup aggregate gets null there and the radar leaves that axis out. */
 CG.goalieDNA = function(s){
   var gp=Math.max(1,s.gp||0), cl=function(x){return Math.max(4,Math.min(100,Math.round(x)));};
   var svp = s.sa ? (s.sv||0)/s.sa : 0;
   return [
     cl((svp-.78)/(.95-.78)*100),          /* Stopping    — save % */
     cl((4.5-(s.ga||0)/gp)/4.5*100),       /* Goals Against — inverted GAA; 4.5+ floors */
-    cl((s.sa||0)/gp/12*100),              /* Workload    — shots faced per game; 12 = under siege */
+    (s.dives == null && s.brkSv == null) ? null
+      : cl(((s.dives||0)+(s.brkSv||0))/gp/1.5*100),   /* Big Saves: diving + breakaway saves per game */
     cl(((s.qs||0)/gp)*100),               /* Quality Starts */
     cl((s.so||0)/gp*250),                 /* Shutouts    — one every 2.5 starts maxes it */
     cl(((s.w||0)/gp)*100)                 /* Winning */
   ];
 };
 /* "GAA" not "Goals Against": the radar's right-edge anchor clips two-word labels at this viewBox */
-CG.GOALIE_DNA_AXES = ["Stopping","GAA","Workload","Quality Starts","Shutouts","Winning"];
+CG.GOALIE_DNA_AXES = ["Stopping","GAA","Big Saves","Quality Starts","Shutouts","Winning"];
 
 /* Pickup Stats tab — the same stat presentation as league play (KPI grid + game-by-game table),
    built from the isolated pickup_stats rows, minus the overall/rating. W/L is derived from the
@@ -2932,7 +2936,8 @@ CG.renderPickupStats = function(rows){
   } else {
     var gdna = CG.goalieDNA({ gp:gGames, sv:sv, sa:sa, ga:ga, qs:qsG, so:so, w:gw });
     vizCards = '<div class="grid g2" style="align-items:start;margin-bottom:16px">'+
-      '<div class="viz-card"><div class="vch"><h4>Goalie DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.GOALIE_DNA_AXES, gdna, null, "This goalie")+'</div>'+
+      '<div class="viz-card"><div class="vch"><h4>Goalie DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.GOALIE_DNA_AXES, gdna, null, "This goalie")+
+        '<p class="caption" style="margin-top:6px;text-align:center">Big Saves is not recorded for pickup games.</p></div>'+
       '<div class="viz-card"><div class="vch"><h4>Efficiency</h4><span class="vsub">goaltending</span></div><div class="vgauges">'+
       CG.vizGauge(sa?(sv/sa*100):0, 100, sa?(sv/sa).toFixed(3).replace(/^0/,""):"—", "Save %")+
       CG.vizGauge(gGames?(3-Math.min(3,ga/gGames)):0, 3, gGames?(ga/gGames).toFixed(2):"—", "GAA", "var(--gold)")+

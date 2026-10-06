@@ -865,7 +865,7 @@ CG.buildLiveLeague = async function(opts){
     return { goalie:true, sa:sa, sv:sv, ga:+r.goals_against||0,
       w:won?1:0, l:(!won&&!ot)?1:0, otl:(!won&&ot)?1:0,
       so:r.shutout?1:0, qs:((sa>0?(sv/sa):1)>=.885)?1:0,
-      brkShots:+r.breakaway_shots||0, brkSv:+r.breakaway_saves||0, pokes:+r.poke_checks||0,
+      brkShots:+r.breakaway_shots||0, brkSv:+r.breakaway_saves||0, pokes:+r.poke_checks||0, dives:+r.diving_saves||0,
       toi:+r.time_on_ice_seconds||0,
       name:r.skater_name||null, pos:"G", eaId:r.ea_player_id||null, pid:r.profile_id||null };
   }
@@ -1031,6 +1031,7 @@ CG.buildLiveLeague = async function(opts){
         s.brkShots=(s.brkShots||0)+(+r.breakaway_shots||0);
         s.brkSv=(s.brkSv||0)+(+r.breakaway_saves||0);
         s.pokes=(s.pokes||0)+(+r.poke_checks||0);
+        s.dives=(s.dives||0)+(+r.diving_saves||0);   /* v3.87: Big Saves on Goalie DNA */
       } else {
         s.ppg=(s.ppg||0)+(+r.pp_goals||0); s.shg=(s.shg||0)+(+r.sh_goals||0);
         s.pass=(s.pass||0)+(+r.passes_completed||0); s.passAtt=(s.passAtt||0)+(+r.passes_attempted||0);
@@ -1195,19 +1196,20 @@ CG.buildLiveLeague = async function(opts){
   lg.archive = {};
   lg.lastNight = lg.lastNight || [];
 
-  /* real awards: pair each week's skater + goalie rows into the shape every honors surface
-     expects ({week, skater, goalie, blurbs}); season awards + champion ride alongside */
+  /* real awards: gather each week's Players of the Week rows into one entry per week
+     ({week, forward, defense, goalie, skater, blurbs}; CG.potwPicks reads it). v3.87: a forward,
+     a defenseman and a goaltender; Weeks 1 and 2 named a skater instead of the first two. A week
+     shows whichever picks it has: a position with nobody eligible is not named that week. */
   var seasonAwardsRaw = awardsRaw.filter(function(a){ return !seasonId || a.season_id===seasonId; });
+  var POTW_FIELDS = { potw_forward:["forward","fBlurb"], potw_skater:["skater","skBlurb"], potw_defense:["defense","dBlurb"], potw_goalie:["goalie","glBlurb"] };
   var potwByWeek = {};
   seasonAwardsRaw.forEach(function(a){
-    if (a.category==="potw_skater" || a.category==="potw_goalie"){
-      var e = potwByWeek[a.week] = potwByWeek[a.week] || { week:a.week };
-      if (a.category==="potw_skater"){ e.skater = a.profile_id; e.skBlurb = a.stat_line||""; e.blurb = a.stat_line||""; }
-      else { e.goalie = a.profile_id; e.glBlurb = a.stat_line||""; }
-    }
+    var f = POTW_FIELDS[a.category];
+    if (!f || a.week==null) return;
+    var e = potwByWeek[a.week] = potwByWeek[a.week] || { week:a.week };
+    e[f[0]] = a.profile_id; e[f[1]] = a.stat_line||"";
   });
-  lg.potw = Object.values(potwByWeek).filter(function(e){ return e.skater && e.goalie; })
-    .sort(function(a,b){ return (a.week||0)-(b.week||0); });
+  lg.potw = Object.values(potwByWeek).sort(function(a,b){ return (a.week||0)-(b.week||0); });
   lg.seasonAwards = seasonAwardsRaw.filter(function(a){ return a.week==null && a.category!=="champion"; });
   lg.champion = seasonAwardsRaw.find(function(a){ return a.category==="champion"; }) || null;
   lg._awardsRaw = awardsRaw;
@@ -10865,7 +10867,7 @@ CG.AUTOMATIONS = [
   { key:"latecomer-assign", staleAfterMin:20, name:"Late sign-up placement",    every:"Every 5 min inside the database", desc:"Places anyone who registered after the eligibility deadline (or joined mid-season) on a club with an open spot.", rpc:"auto_assign_latecomers" },
   { key:"contract-enforcement", staleAfterMin:45, name:"Contract sign-up enforcement", every:"Every 15 min inside the database", desc:"After the sign-up deadline: an unsigned contract holds its club’s cap as dead money; if the club changed owners, the deal is voided and the player suspended for its remaining term (Rule 2.5).", rpc:"enforce_unsigned_contracts" },
   { key:"staff-briefing", staleAfterMin:2160, name:"Staff briefing", every:"Daily inside the database", desc:"Posts the standing backlog (open cases, pending applications, unmatched EA imports, finals missing box scores, active suspensions) to #staff-general — suppressed when nothing needs attention.", rpc:"staff_briefing" },
-  { key:"weekly-potw", staleAfterMin:11520,      name:"Players of the Week",       every:"Mondays inside the database", desc:"Names the week’s best skater and goaltender from the imported box scores, and publishes the announcement.", rpc:"compute_potw_guarded" },
+  { key:"weekly-potw", staleAfterMin:11520,      name:"Players of the Week",       every:"Mondays inside the database", desc:"Names the week’s best forward, defenseman and goaltender from the imported box scores (at least three games that week, all at that position), and publishes the announcement.", rpc:"compute_potw_guarded" },
   { key:"watchdog", staleAfterMin:45,         name:"Automation watchdog",       every:"Every 15 min inside the database", desc:"Watches every job above — a dead or failing automation pings the commissioners in-app and on Discord.", rpc:"automation_watchdog_guard" }
 ];
 CG.admAutomationsLive = function(){

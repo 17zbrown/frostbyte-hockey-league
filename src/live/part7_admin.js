@@ -571,7 +571,7 @@ CG.AFTER._admHomepage = function(){
 /* ---------- carousel manager ---------- */
 CG.admCarousel = function(){
   var defs = [
-    ["news","Breaking news"],["matchup","Featured matchup"],["potw","Player of the Week"],
+    ["news","Breaking news"],["matchup","Featured matchup"],["potw","Players of the Week"],
     ["rankings","Power Rankings"],["standings","Standings snapshot"]
   ];
   var cfg = CG.store.get("slides")||{};

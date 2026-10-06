@@ -682,6 +682,16 @@ CG.aggregate = function(lg, overrides){
 
 /* ---------- convenience selectors ---------- */
 CG.playerById = function(lg,id){ return lg.players.find(function(p){ return p.id===id; }); };
+/* v3.87: one week's Players of the Week, in the order every honors surface shows them. Weeks 1
+   and 2 of Season 1 named a skater and a goaltender; from Week 3 on it is a forward, a defenseman
+   and a goaltender, each with at least three games that week, all at that position. A pick who
+   has since left the league drops out and the rest still show. Returns [{p, pid, role, blurb}]. */
+CG.potwPicks = function(lg, w){
+  if (!w) return [];
+  return [[w.forward,"Forward",w.fBlurb], [w.skater,"Skater",w.skBlurb], [w.defense,"Defenseman",w.dBlurb], [w.goalie,"Goaltender",w.glBlurb]]
+    .map(function(r){ var p = r[0] ? CG.playerById(lg, r[0]) : null; return p ? { p:p, pid:r[0], role:r[1], blurb:r[2]||"" } : null; })
+    .filter(Boolean);
+};
 /* Rule 8.1 (v2.22): clubs are ordered by TOTAL POINTS EARNED — games in hand are allowed to
    distort the table. Rule 8.2 breaks ties in a fixed order: head-to-head between the tied clubs,
    then regulation wins, then goal differential, then goals scored. Head-to-head is a mini-table

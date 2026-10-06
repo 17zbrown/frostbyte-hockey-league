@@ -62,20 +62,23 @@ CG.ROUTES.awards = function(param, qs){
       : '<div class="card"><div class="empty" style="padding:60px 20px"><div class="e-art">'+CG.ic("trophy",22)+'</div><b>No stars named yet</b><p>The board fills in as game nights are played.</p></div></div>';
   }
   if (tab==="potw"){
-    var weeks = lg.potw.slice().reverse().filter(function(w){ return CG.playerById(lg,w.skater) && CG.playerById(lg,w.goalie); });
+    /* v3.87: a forward, a defenseman and a goaltender each week (Weeks 1 and 2: a skater and a goaltender) */
+    var weeks = lg.potw.slice().reverse().filter(function(w){ return CG.potwPicks(lg, w).length; });
     var latestWeek = weeks.length ? weeks[0].week : null;
     body += weeks.length ? '<div class="stack">'+weeks.map(function(w){
-      var sk = CG.playerById(lg,w.skater), gl = CG.playerById(lg,w.goalie);
+      var picks = CG.potwPicks(lg, w);
       return '<div class="card"><div class="card-h"><h3>Week '+w.week+'</h3><span class="chip">'+(w.week===latestWeek?"Latest":"")+'</span></div>'+
-        '<div class="grid g2" style="gap:0">'+
-        [[sk,"Skater of the Week",w.skBlurb],[gl,"Goaltender of the Week",w.glBlurb]].map(function(row){
-          return '<div class="card-b" style="display:flex;gap:14px;align-items:flex-start;border-top:1px solid var(--line-soft)">'+CG.crest(row[0].team,38)+
-            '<div style="min-width:0"><span class="chip chip-chrome">'+row[1]+'</span>'+
-            '<b style="display:block;font-family:var(--f-disp);font-size:17px;margin-top:7px;cursor:pointer" data-go="'+CG.playerRoute(row[0])+'">'+esc(row[0].tag)+'</b>'+
-            '<span class="caption">'+esc(CG.TEAM[row[0].team].name)+'</span>'+
-            '<p class="small" style="color:var(--steel);margin-top:8px">'+esc(row[2]||"")+'</p></div></div>';
+        '<div class="grid '+(picks.length>2?"g3":"g2")+'" style="gap:0">'+
+        picks.map(function(pk){
+          return '<div class="card-b" style="display:flex;gap:14px;align-items:flex-start;border-top:1px solid var(--line-soft)">'+CG.crest(pk.p.team,38)+
+            '<div style="min-width:0"><span class="chip chip-chrome">'+pk.role+' of the Week</span>'+
+            '<b style="display:block;font-family:var(--f-disp);font-size:17px;margin-top:7px;cursor:pointer" data-go="'+CG.playerRoute(pk.p)+'">'+esc(pk.p.tag)+'</b>'+
+            '<span class="caption">'+esc(CG.TEAM[pk.p.team].name)+'</span>'+
+            '<p class="small" style="color:var(--steel);margin-top:8px">'+esc(pk.blurb)+'</p></div></div>';
         }).join("")+'</div></div>';
-    }).join("")+'</div>' : '<div class="card"><div class="empty" style="padding:60px 20px"><div class="e-art">'+CG.ic("trophy",22)+'</div><b>No weekly honors yet</b><p>The first Players of the Week are computed automatically the Monday after Week 1 — straight from the imported box scores.</p></div></div>';
+    }).join("")+'</div>'+
+      '<p class="caption" style="margin-top:14px">A forward, a defenseman and a goaltender are named every Monday from the imported box scores. To be named, a player must play at least three games that week, all at that position.</p>'
+    : '<div class="card"><div class="empty" style="padding:60px 20px"><div class="e-art">'+CG.ic("trophy",22)+'</div><b>No weekly honors yet</b><p>The first Players of the Week are computed automatically the Monday after Week 1, straight from the imported box scores.</p></div></div>';
   }
   if (tab==="season"){
     var mvps = CG.skaterLeaders(lg,"p").slice(0,3);
