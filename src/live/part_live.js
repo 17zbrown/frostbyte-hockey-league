@@ -6179,7 +6179,7 @@ CG.admPreseason = function(qs){
   var basicS = CG.isBasic(s);
   var h='<div style="margin-bottom:18px"><h2 class="h-sec">'+(basicS?'Draft &amp; placement':'Pre-season central')+'</h2>'+
     '<p class="lede" style="margin-top:6px">Registrations, owner applications, and roster building for '+esc(s.name||"the season")+'. Everything here writes to the live database.</p></div>'+
-    (basicS ? '<div class="note" style="margin-bottom:18px"><b>'+CG.FORMAT_NAME.basic+'</b> — this season has no pre-season and no pre-season loans. Everyone registered by the cutoff enters the draft; ten minutes after it concludes, anyone undrafted is placed on a club as depth at the league minimum, and late sign-ups are placed the same way until the movement deadline (Rule 2.8). The loan tools below are inert here.</div>' : '');
+    (basicS ? '<div class="note" style="margin-bottom:18px"><b>'+CG.FORMAT_NAME.basic+'</b> — this season has no pre-season and no pre-season loans. Everyone registered by the cutoff enters the draft; ten minutes after it concludes, anyone undrafted is placed on a club as depth at the league minimum, and after that first round every late sign-up goes round the league in turn, every club receiving one before any receives a second, until the movement deadline (Rule 2.8). The loan tools below are inert here.</div>' : '');
   /* the switcher: every season that has a row, with the one taking sign-ups marked, so the office
      can look at next season's pool the moment the trade deadline opens it */
   if (seasons.length > 1){
@@ -6236,7 +6236,11 @@ CG.admPreseason = function(qs){
     '<button class="btn btn-ghost" id="preLatecomers"'+(lateN?"":" disabled")+'>Assign late sign-ups ('+lateN+')</button></div>'+
     '<p class="caption" style="margin-top:12px">Randomly assign spreads every unrostered registration evenly across the clubs (management counts toward the split). '+
     'Release runs automatically after the final pre-season game; post-draft placement runs automatically ten minutes after the draft concludes and seats everyone still without a club at the league minimum. '+
-    'The sign-up deadline is a draft-eligibility cutoff, not a hard close — anyone registering after it (and anyone joining mid-season) is placed on a club with an open spot automatically. These buttons are manual overrides.</p></div></div>';
+    'The sign-up deadline is a draft-eligibility cutoff, not a hard close — anyone registering after it (and anyone joining mid-season) is placed on a club with an open spot automatically. These buttons are manual overrides.</p>'+
+    /* v3.89: where the late sign-up rotation stands (Rule 2.8), loaded after render by CG.AFTER._preseason */
+    /* only for the season being played: the camp counts it reads are that season's (CG.lg) */
+    (basicS && s.id && s.id === (CG.SEASON||{}).id ? '<div id="raRotation" data-season="'+esc(s.id)+'" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line-soft)"><p class="caption">Loading the late sign-up rotation…</p></div>' : '')+
+    '</div></div>';
 
   var sortedRegs=regs.slice().sort(function(a,b){ var x=CG.regOverall(a), y=CG.regOverall(b); return (y==null?-1:y)-(x==null?-1:x); });
   var clubOpts=CG.TEAMS.map(function(t){ return '<option value="'+t.code+'">'+esc(t.code)+' · '+esc(t.name)+'</option>'; }).join("");
@@ -6392,6 +6396,7 @@ CG.AFTER._preseason = function(){
   var prn=document.getElementById("preReleaseNow"); if (prn) prn.addEventListener("click", CG.preseasonRelease);
   var prk=document.getElementById("preRookies"); if (prk) prk.addEventListener("click", CG.distributeRookies);
   var plc=document.getElementById("preLatecomers"); if (plc) plc.addEventListener("click", CG.assignLatecomers);
+  var rot=document.getElementById("raRotation"); if (rot) CG.loadRaRotation(rot);
   document.querySelectorAll("[data-reg-decline]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-reg-decline"), name=this.getAttribute("data-name");
     CG.confirm("Decline "+name+"’s registration?","They’re kept out of random assignment and the draft pool until reinstated. If they’re already rostered, waive them from the club first.","Decline", function(){ CG.setRegStatus(id,"declined",name); });
@@ -6709,12 +6714,53 @@ CG.distributeRookies = function(){
     });
   });
 };
+/* v3.89 (commissioner, 2026-10-07): "Make the mid-season random assignments random but run through each team once
+   before a team can get a 2nd RA." A late sign-up goes to a club at the LOWEST count of late sign-ups this season that
+   has room in its training camp, drawn at random among them (an empty camp first). A club at the lowest count whose
+   camp is full is passed over and keeps its place in line. Placements the league office undid do not count
+   (random_assignments.counts). rows: that table's rows for the season. Cap room is checked by the database too; it is
+   rare enough not to be drawn here. */
+CG.raRotationHtml = function(rows, lg){
+  var codeOf = {}, n = {};
+  CG.TEAMS.forEach(function(t){ codeOf[t.id] = t.code; n[t.code] = 0; });
+  (rows||[]).forEach(function(r){ var c = codeOf[r.team_id]; if (r.counts && c != null) n[c]++; });
+  var campN = function(code){ return (((lg||{}).byTeam||{})[code]||[]).filter(function(p){ return (p.status||"active")==="active" && p.squad==="tc"; }).length; };
+  var clubs = CG.TEAMS.map(function(t){ var k = campN(t.code); return { code:t.code, n:n[t.code], empty: k===0, full: CG.CAMP_MAX < 999 && k >= CG.CAMP_MAX }; })
+    .sort(function(a,b){ return a.n-b.n || (a.code<b.code?-1:1); });
+  var open = clubs.filter(function(c){ return !c.full; });
+  var low = open.length ? open[0].n : null;
+  var tied = open.filter(function(c){ return c.n===low; });
+  /* the database draws an empty camp first within a tie (v3.16), so say the same */
+  var emptyFirst = tied.some(function(c){ return c.empty; }) && tied.some(function(c){ return !c.empty; });
+  var next = (emptyFirst ? tied.filter(function(c){ return c.empty; }) : tied).map(function(c){ return c.code; });
+  var held = clubs.filter(function(c){ return c.full && low != null && c.n <= low; })   /* would be in this draw but for a full camp */.map(function(c){ return c.code+" ("+c.n+")"; });
+  var list = function(a){ return a.length < 2 ? a.join("") : a.slice(0,-1).join(", ")+" or "+a[a.length-1]; };
+  return '<b style="display:block;font-family:var(--f-disp);margin-bottom:8px">Late sign-up rotation</b>'+
+    '<div style="display:flex;gap:6px;flex-wrap:wrap">'+clubs.map(function(c){
+      var isNext = next.indexOf(c.code) >= 0;
+      return '<span class="chip'+(isNext?' chip-chrome':'')+'" title="'+c.n+' late sign-up'+(c.n===1?'':'s')+' placed this season'+(c.full?'; training camp full':'')+'">'+
+        esc(c.code)+' '+c.n+(c.full?' · camp full':'')+'</span>';
+    }).join("")+'</div>'+
+    '<p class="caption" style="margin-top:10px">'+
+      (next.length ? 'The next late sign-up goes to '+esc(list(next))+(next.length>1?', drawn at random':'')+(emptyFirst?' (an empty training camp goes first)':'')+'. ' : 'No club has room in its training camp, so the next late sign-up waits for one. ')+
+      (held.length ? 'Passed over until its camp has room, keeping its place in line: '+esc(held.join(", "))+'. ' : '')+
+      'Every club receives one late sign-up before any club receives a second (Rule 2.8); a placement the league office undoes does not count.</p>';
+};
+CG.loadRaRotation = function(el){
+  var sid = el.getAttribute("data-season");
+  if (!sid){ el.innerHTML = ''; return; }
+  CG.sb.from("random_assignments").select("team_id,counts").eq("season_id", sid).then(function(r){
+    if (!document.body.contains(el)) return;
+    if (r.error){ el.innerHTML = '<p class="caption" style="color:var(--loss)">The late sign-up rotation did not load: '+esc(r.error.message||String(r.error))+'</p>'; return; }
+    el.innerHTML = CG.raRotationHtml(r.data||[], CG.lg);
+  });
+};
 /* Late sign-ups (registered after the draft-eligibility cutoff) + anyone who joins mid-season are
    randomly assigned to a club with an open spot. Runs on its own every 5 min; this forces it. */
 CG.assignLatecomers = function(){
   CG.confirm("Assign late sign-ups now?",
     "Everyone who registered after the sign-up deadline (or joined mid-season) and isn’t on a club yet "+
-    "goes to the emptiest club with an open roster spot. This also runs automatically every few minutes — "+
+    "is placed as depth in the rotation: drawn at random from the clubs with the fewest late sign-ups this season that have camp room (Rule 2.8). This also runs automatically every few minutes; "+
     "the button just forces it. Puck-drop rosters are never blocked by a late arrival.",
     "Assign late sign-ups", function(){
     CG.sb.rpc("auto_assign_latecomers",{ p_force:true }).then(function(r){
