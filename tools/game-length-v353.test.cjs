@@ -29,8 +29,9 @@ A("the rehearsal is recorded", /T3\s+forfeit_abandoned_game on a HELD game/.test
 
 console.log("\n— the importer's one test");
 A("finished = full clock and a decided score", /finished: reachedFull && margin > 0/.test(ing));
-A("overtime read from the clock at one goal past sixty", /const inferredOt = !eaOt && total > REGULATION_S && margin === 1;/.test(ing));
-A("overlong = past sixty by more than a goal", /overlong: total > REGULATION_S && margin > 1/.test(ing));
+/* v3.88: the same rule, plus a minute of slack for the reload of the time left after a game-ending drop in the final five minutes (Rule 4.3.6) */
+A("overtime read from the clock at one goal past sixty", /const inferredOt = !eaOt && total > REGULATION_S \+ slack && margin === 1;/.test(ing) && /const slack = lateReload \? CLOCK_SLACK_S : 0;/.test(ing));
+A("overlong = past sixty by more than a goal", /overlong: total > REGULATION_S \+ slack && margin > 1/.test(ing));
 A("ten minutes is the early-restart line", /const EARLY_RESTART_S = 600;/.test(ing));
 A("used by the fresh filing, the continuation, the manual merge and the sweep",
   /const st1 = sittingsState\(\[norm\]\);/.test(ing) && /const stp = sittingsState\(ps\);/.test(ing) && /const st = sittingsState\(norms\);/.test(ing) && /const stA = sittingsState\(ps\);/.test(ing));

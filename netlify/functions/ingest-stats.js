@@ -110,7 +110,9 @@ function normalizeMatch(raw) {
            null and every goaltender's rating was computed without them. */
         diving_saves: isG ? +(p.gldsaves || 0) : 0, shutout_periods: isG ? +(p.glsoperiods || 0) : 0,
         pen_shot_saves: isG ? +(p.glpensaves || 0) : 0, pen_shots_against: isG ? +(p.glpenshots || 0) : 0,
-        shutout: isG && +(p.glga || 0) === 0 && +(p.glshots || 0) > 0
+        shutout: isG && +(p.glga || 0) === 0 && +(p.glshots || 0) > 0,
+        /* v3.88: EA's own flag for a player who left before the end of the session (Rule 4.3.6, stopCause) */
+        left_early: String(p.player_dnf || "0") === "1"
       };
     });
     /* v3.06 — THE SCORE IS THE PLAYERS' GOALS, not EA's club `score`.
@@ -130,8 +132,13 @@ function normalizeMatch(raw) {
        above. Carried through as a second, independent witness to the clock: on the SEA v PIT
        sitting that was wrongly filed as a result, both flags were 1 and the clock read 2400. */
     const dnf = +(c.winnerByDnf || 0) === 1 || +(c.winnerByGoalieDnf || 0) === 1;
+    /* v3.88: gfraw is EA's raw goal count. It equals the official score on every clean sitting in the archive (114 of
+       114) and the players' goals on every disconnected one (38 of 38), and unlike the players' sum it counts a goal no
+       player holds, such as one scored in a dropped player's place (Rule 4.3.6). */
+    const gfraw = c.gfraw != null && c.gfraw !== "" ? +c.gfraw : null;
     return { ea_club_id: String(cid), name: c.details ? c.details.name : null,
-             score: scored, ea_score: eaScore, score_disputed: scored !== eaScore, dnf,
+             score: scored, ea_score: eaScore, score_disputed: scored !== eaScore, dnf, gfraw,
+             goalie_dnf: +(c.winnerByGoalieDnf || 0) === 1,
              ppg: +(c.ppg || 0), ppo: +(c.ppo || 0), result: +(c.result || 0), players };
   };
   const clubs = [club(clubIds[0]), club(clubIds[1])];
@@ -145,8 +152,10 @@ function normalizeMatch(raw) {
   for (const c of clubs) {
     const sum = c.score;
     c.goals_sum = sum;
-    c.score = matchDnf ? sum : Math.max(c.ea_score, sum);
-    c.unattributed = matchDnf ? 0 : c.ea_score - sum;
+    /* v3.88: on a disconnected sitting EA's raw count, never below the players' goals: a goal scored in a dropped
+       player's place is kept there too (it was lost before, the placeholder being unusable) */
+    c.score = matchDnf ? Math.max(c.gfraw || 0, sum) : Math.max(c.ea_score, sum);
+    c.unattributed = matchDnf ? Math.max(0, (c.gfraw || 0) - sum) : c.ea_score - sum;
   }
   // EA's per-club `result` code: 1 = regulation win, 2 = regulation loss, 5 = OT win, 6 = OT loss.
   // CGHL plays continuous sudden-death OT and no shootout (Rule 4.1), so any non-regulation
@@ -257,20 +266,110 @@ function segElapsed(seg) {
      overlong    past sixty minutes and decided by more than one goal: filed, and put in front of
                  statistics staff. */
 const EARLY_RESTART_S = 600;   // Q19: stopped inside the first ten minutes of the first period = restart from the beginning
+/* v3.88: THE FINAL FIVE MINUTES (Rule 4.3.6). Commissioner, 2026-10-07: "any disconnects after 5 minutes remaining in
+   the 3rd period is to finish out the game with no reloading. Make sure to have the api track any points from the players
+   that lag out as well if possible." And: "the only reason a game would end early is if someone either lagged out
+   individually or if they manually quit." And, when a drop ends the game anyway: "Reload the time left, usual penalty."
+   What EA does (the archive, Sep 24 to Oct 7): a SKATER who drops usually leaves the session running; EA keeps his line,
+   flagged player_dnf, with everything he did before he left, and normalizeMatch credits it like any other line (all 38
+   dropped players' lines are in the box scores with their points). A GOALTENDER who drops ends the session on the spot
+   (all 17 archived goalie drops; the other club gets winnerByGoalieDnf), and now and then a skater's drop does too. So:
+     played out      a drop that leaves the session running needs nothing from the importer: the game reaches sixty
+                     minutes and files like any other;
+     game-ending     a drop that ends the session (stopCause goalie/player): the clubs reload the TIME LEFT, so the
+                     game is held for that reload exactly as before, and the reload, ended by hand on a fast clock,
+                     gets CLOCK_SLACK_S either side of sixty minutes (sittingsState);
+     club left       a whole club flagged at the final clock, or nobody flagged: the game stopped in the final five
+                     minutes with no drop to explain it, so the league office rules on it. It is held, the officials
+                     are told at once, and a reload that comes anyway is combined as played but NOT published; the
+                     office publishes it or rules otherwise. (A club that lost a player just before the final five
+                     minutes and reached its whistle inside them looks the same, which is why a person decides.)
+   Only games scheduled from Thursday, October 8 (Eastern) on: earlier games were played under the old rule. */
+const THIRD_START_S = 2400;          // 40:00 on EA's displayed clock: the third period begins
+const FINAL_STRETCH_S = 300;         // the final five minutes of regulation
+const CLOCK_SLACK_S = 60;            // a reload of the time left lands this far either side of sixty minutes
+const FINAL_STRETCH_FROM_MS = Date.parse("2026-10-08T04:00:00Z");   // midnight Eastern, Thursday, October 8
+const inFinalStretch = (secs) => secs >= REGULATION_S - FINAL_STRETCH_S && secs < REGULATION_S;
+const clockLeft = (secs) => { const left = Math.max(0, REGULATION_S - Math.round(secs)); return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`; };
+const finalStretchApplies = (game) => Date.parse((game && game.scheduled_at) || 0) >= FINAL_STRETCH_FROM_MS;
+
+/* v3.88: where on the game clock a run of sittings stands. The sittings' clocks add up, except after a stop in the
+   first five minutes of the third: Rule 4.3.6 replays that whole period as a new one, so the next sitting starts the
+   third again at 40:00, not where play stopped. (The raw sum would run up to five minutes ahead of the real clock.) */
+function gameClock(sittings) {
+  const ps = sittings.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  let pos = 0;
+  ps.forEach((p, i) => {
+    if (i > 0 && pos > THIRD_START_S && pos <= THIRD_START_S + FINAL_STRETCH_S) pos = THIRD_START_S;
+    pos += segElapsed(p);
+  });
+  return pos;
+}
+
+/* v3.88: why a sitting stopped before the end of regulation, from EA's own flags.
+     club_left   every player of one club flagged player_dnf: the club left the game (a goalie drop flags only him);
+     goalie      EA set winnerByGoalieDnf (on the OTHER club), or the one goaltender flagged at the final clock. EA
+                 often flags a second player at that same moment (5 of the 16 archived goalie drops), so its club flag
+                 is read first;
+     player      one skater flagged at the final clock, or EA set winnerByDnf with somebody flagged there;
+     unknown     nothing flagged: no disconnection explains the stop. */
+function stopCause(norm) {
+  if (!norm || !norm.clubs) return { kind: "unknown" };
+  const clock = segElapsed(norm);
+  for (const c of norm.clubs) if (c.players.length && c.players.every((p) => p.left_early)) return { kind: "club_left", club: c.ea_club_id };
+  const atEnd = norm.clubs.flatMap((c) => c.players.filter((p) => p.left_early && clock - (p.time_on_ice_seconds || 0) <= 3)
+    .map((p) => ({ club: c.ea_club_id, who: p.gamertag || null, goalie: !!p.is_goalie })));
+  const gWin = norm.clubs.find((c) => c.goalie_dnf);
+  if (gWin) {
+    const g = atEnd.find((p) => p.goalie && p.club !== gWin.ea_club_id) || atEnd.find((p) => p.goalie);
+    const other = norm.clubs.find((c) => c.ea_club_id !== gWin.ea_club_id);
+    return { kind: "goalie", club: g ? g.club : (other ? other.ea_club_id : null), who: g ? g.who : null };
+  }
+  const goalies = atEnd.filter((p) => p.goalie);
+  if (goalies.length === 1) return { kind: "goalie", club: goalies[0].club, who: goalies[0].who };
+  if (atEnd.length === 1) return { kind: "player", club: atEnd[0].club, who: atEnd[0].who };
+  if (atEnd.length && norm.clubs.some((c) => c.dnf)) return { kind: "player", club: atEnd[0].club, who: null };
+  return { kind: "unknown" };
+}
+
+/* v3.88: the hold reason for a game that stopped inside the final five minutes, shared by every hold (the import, a
+   restart, a merge, a club's attach). null when the game did not stop there, or was played before the rule. */
+function finalStretchHold(game, st) {
+  if (!st || st.reachedFull || !finalStretchApplies(game) || !inFinalStretch(st.total)) return null;
+  const cause = stopCause(st.last), left = clockLeft(st.total);
+  if (cause.kind === "goalie" || cause.kind === "player")
+    return { office: false, cause, left,
+      why: `${cause.kind === "goalie" ? "the goaltender" : "a player"}${cause.who ? " (" + cause.who + ")" : ""} disconnected with ${left} left in the third and EA ended the game: waiting for the reload of the time left, with the usual penalty (Rule 4.3.6)` };
+  return { office: true, cause, left,
+    why: `stopped with ${left} left in the third ${cause.kind === "club_left" ? "when a club left the game" : "with no disconnection flagged"}: a disconnection in the final five minutes is played out, so the league office rules on it (Rule 4.3.6)` };
+}
+
 function sittingsState(sittings) {
   const ps = sittings.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
   const last = ps[ps.length - 1];
-  const total = ps.reduce((a, p2) => a + segElapsed(p2), 0);
+  const raw = ps.reduce((a, p2) => a + segElapsed(p2), 0);
+  const total = gameClock(ps);   // v3.88: the game clock, which equals the raw sum unless the third was replayed whole
   const merged = ps.length > 1 ? mergeSegments(ps) : ps[0];
   if (!merged || merged.error || !merged.clubs || merged.clubs.length !== 2)
-    return { error: (merged && merged.error) || "unreadable sittings", total, last, finished: false };
+    return { error: (merged && merged.error) || "unreadable sittings", total, raw, last, finished: false };
   const margin = Math.abs((merged.clubs[0].score || 0) - (merged.clubs[1].score || 0));
-  const reachedFull = total >= REGULATION_S || segElapsed(last) >= REGULATION_S || !!last.went_ot;
+  /* v3.88: the reload of the time left after a game-ending drop in the final five minutes (Rule 4.3.6) is ended by hand
+     on a clock running about five times real time, so it lands a little either side of sixty minutes: a few seconds
+     over is not an overtime, and a few seconds short is still the end of regulation when the clubs ended it (not when
+     another drop did; that one is reloaded again). Granted ONCE, to the sitting that completes regulation: a sitting
+     after a game already level at the end of regulation is its overtime, read as one. */
+  const stPrior = ps.length > 1 ? sittingsState(ps.slice(0, -1)) : null;
+  const lateReload = !!stPrior && !stPrior.error && !stPrior.reachedFull && inFinalStretch(stPrior.total)
+    && segElapsed(last) <= FINAL_STRETCH_S + CLOCK_SLACK_S;
+  const lastCause = lateReload ? stopCause(last).kind : null;
+  const short = lateReload && segElapsed(last) > 0 && lastCause !== "goalie" && lastCause !== "player" ? CLOCK_SLACK_S : 0;
+  const slack = lateReload ? CLOCK_SLACK_S : 0;
+  const reachedFull = total >= REGULATION_S - short || segElapsed(last) >= REGULATION_S || !!last.went_ot;
   const eaOt = !!merged.went_ot;
-  const inferredOt = !eaOt && total > REGULATION_S && margin === 1;
-  return { total, last, merged, margin, level: margin === 0, reachedFull,
+  const inferredOt = !eaOt && total > REGULATION_S + slack && margin === 1;
+  return { total, raw, last, merged, margin, level: margin === 0, reachedFull, lateReload,
            finished: reachedFull && margin > 0, wentOt: eaOt || inferredOt, inferredOt,
-           overlong: total > REGULATION_S && margin > 1 };
+           overlong: total > REGULATION_S + slack && margin > 1 };
 }
 
 /* The staff hear about a result the clock had to decide (an inferred overtime) and about a game that
@@ -298,6 +397,32 @@ async function noteGameLength(game, st, summary) {
     try { await sbRpc("notify_department", { p_dept: "statistics", p_type: "flag", p_title: "A game ran past 60 minutes by more than a goal", p_body: body, p_view: "game", p_param: game.id }); }
     catch (e) { console.warn("overlong flag bell failed:", String((e && e.message) || e)); }
   }
+}
+
+/* v3.88: the officials hear at once about a game the league office has to rule on under Rule 4.3.6. Best effort,
+   like every note here: the hold already stands. kind "stopped": it stopped in the final five minutes with no
+   game-ending drop to explain it. kind "reload": a reload came after such a stop; it is combined as played and held. */
+async function noteFinalStretch(game, kind, fsh, hs, as, summary) {
+  let code = () => "?";
+  try {
+    const t = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code`);
+    code = (id) => ((t || []).find((x) => x.id === id) || {}).code || "?";
+  } catch { /* the names are a courtesy */ }
+  const fx = `${code(game.away_team_id)} @ ${code(game.home_team_id)}`;
+  const score = `${code(game.away_team_id)} ${as}, ${code(game.home_team_id)} ${hs}`;
+  const how = fsh.cause && fsh.cause.kind === "club_left" ? "a club left the game" : "EA flagged no disconnection that ended it";
+  (summary.warnings = summary.warnings || []).push({ game_id: game.id,
+    warning: kind === "stopped" ? `stopped with ${fsh.left} left in the third (${how}); held for the league office (Rule 4.3.6)` : `reloaded after a stop with ${fsh.left} left in the third (${how}); combined as played and held for the league office (Rule 4.3.6)` });
+  const text = kind === "stopped"
+    ? `⏱️ **Stopped in the final five minutes** · ${fx}: the game ended with ${fsh.left} left in the third (${score}), and ${how}. A disconnection in the final five minutes is played out, and one that ends the game is reloaded for the time left (Rule 4.3.6), so this one is yours to rule on: check the clubs' reports. If the disconnection came before the final five minutes, a reload is due as usual. The game is held; if a club goes on to another opponent first, it is filed as an unfinished game (Rule 4.3.9).`
+    : `🔁 **Reloaded after a stop in the final five minutes** · ${fx}: the game stopped with ${fsh.left} left in the third (${how}) and the clubs reloaded. The sittings are combined as played (${score}) but NOT published: under Rule 4.3.6 the league office rules on a stop like this. Publish it, or rule otherwise, in Control Center, Stats manager.`;
+  try { await tellStaff(text); } catch (e) { console.warn("final-stretch note failed:", String((e && e.message) || e)); }
+  /* durable: the officiating desk's bell, so the ruling does not hang on one Discord post */
+  try {
+    await sbRpc("notify_department", { p_dept: "officiating", p_type: "flag",
+      p_title: kind === "stopped" ? "A game stopped in the final five minutes" : "A reload after a final-five stop is held for a ruling",
+      p_body: text.replace(/^\S+ \*\*[^*]+\*\* \u00b7 /, "").replace(/\*\*/g, ""), p_view: "game", p_param: game.id });
+  } catch (e) { console.warn("final-stretch bell failed:", String((e && e.message) || e)); }
 }
 
 /* v3.83 — a clean sitting whose official score and players' goals disagree is filed on EA's score (normalizeMatch);
@@ -894,15 +1019,19 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
         home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo },
       "return=minimal");
     ctx.filed.set(String(norm.ea_match_id), game.id);
+    const fsh = finalStretchHold(game, st1);   // v3.88: a stop inside the final five minutes (Rule 4.3.6)
     const why = st1.reachedFull
       ? `held: level ${homeScore}-${awayScore} after ${Math.round(elapsed / 60)} minutes, an overtime disconnection. Waiting for the overtime reload (Rule 4.3)`
-      : `held: ${Math.round(elapsed / 60)} of ${Math.round(REGULATION_S / 60)} minutes played`
-        + `${norm.dnf ? " and EA flagged a disconnect" : ""} — waiting for the rest of the game (Rule 4.3)`;
+      : fsh
+        ? `held: ${fsh.why}`
+        : `held: ${Math.round(elapsed / 60)} of ${Math.round(REGULATION_S / 60)} minutes played`
+          + `${norm.dnf ? " and EA flagged a disconnect" : ""} — waiting for the rest of the game (Rule 4.3)`;
     summary.held = summary.held || [];
     summary.held.push({ ea_match_id: norm.ea_match_id, game_id: game.id, elapsed, reason: why });
     console.log(`ingest: game ${game.id} held — ${why}`);
     if (!(await archive(ctx, norm, raw, "incomplete", why, game.id)))
       summary.errors.push({ ea_match_id: norm.ea_match_id, error: `game ${game.id} is held, but its archive row could not be marked incomplete` });
+    if (fsh && fsh.office) await noteFinalStretch(game, "stopped", fsh, homeScore, awayScore, summary);
     return;
   }
 
@@ -1131,11 +1260,14 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
         { status: "scheduled", home_score: null, away_score: null, went_ot: false, ea_match_id: norm.ea_match_id, ...ppgR },
         "return=minimal");
       ctx.filed.set(String(norm.ea_match_id), cand.id);
-      const why = `held: the restarted game has ${Math.round(segElapsed(norm) / 60)} of ${Math.round(REGULATION_S / 60)} minutes played — waiting for the rest of the game (Rule 4.3)`;
+      const fshR = finalStretchHold(cand, stR);   // v3.88 (Rule 4.3.6)
+      const why = fshR ? `held: the restarted game ${fshR.why}`
+        : `held: the restarted game has ${Math.round(segElapsed(norm) / 60)} of ${Math.round(REGULATION_S / 60)} minutes played — waiting for the rest of the game (Rule 4.3)`;
       summary.held = summary.held || [];
       summary.held.push({ ea_match_id: norm.ea_match_id, game_id: cand.id, elapsed: segElapsed(norm), reason: why, restarted: true });
       if (!(await archive(ctx, norm, raw, "incomplete", why, cand.id)))
         summary.errors.push({ ea_match_id: norm.ea_match_id, error: `game ${cand.id} is held, but its archive row could not be marked incomplete` });
+      if (fshR && fshR.office) await noteFinalStretch(cand, "stopped", fshR, hC.score, aC.score, summary);
     }
     return R(true);
   }
@@ -1151,6 +1283,18 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
      overtime disconnection waiting for its overtime reload (Q20). This replaces the v3.18 rule that
      filed a level merge as a double loss and asked the officials to rule on it. */
   const st = sittingsState(priors.concat([norm]));
+  /* v3.88 (Rule 4.3.6): the earlier sittings stopped inside the final five minutes. After a game-ending drop the
+     reload of the time left is the rule and the merge files it as usual; after a stop the office has to rule on (a
+     club left, or nothing explains it), the reload is combined as played but held, never published. */
+  const priorSorted = priors.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  /* the hold sticks: ANY earlier point at which the game stopped for the office keeps it held, so a later sitting
+     (an overtime, a further drop) can never publish a game the office has not ruled on */
+  let priorHold = null;
+  for (let i = 1; i <= priorSorted.length && !priorHold; i++) {
+    const h = finalStretchHold(cand, sittingsState(priorSorted.slice(0, i)));
+    if (h && h.office) priorHold = h;
+  }
+  const officeHold = !!priorHold;
 
   // write exactly as a normal ingest writes, from the merged line
   const clubByTeam = {};
@@ -1176,20 +1320,27 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
     return R(true);
   }
   const mins = Math.round(totalLen / 60);
-  if (!st.finished && cand.status !== "final") {
+  if ((!st.finished || officeHold) && cand.status !== "final") {
     /* HELD after the merge: the combined box score is written (the next sitting's merge reads the
        archive, not these rows), the game keeps no result, and this sitting is archived as merged so
        the next continuation counts it. */
     await sbSend("PATCH", `games?id=eq.${cand.id}`,
       { home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo },
       "return=minimal");
-    const why = st.level && st.reachedFull
-      ? `merged and held: level ${homeClub.score}-${awayClub.score} after ${mins} minutes, waiting for the overtime reload (Rule 4.3)`
-      : `merged and held: the sittings add up to ${mins} of ${Math.round(REGULATION_S / 60)} minutes, waiting for the rest of the game (Rule 4.3)`;
+    const fshM = officeHold ? null : finalStretchHold(cand, st);
+    const why = officeHold
+      ? `merged and held: a reload after the game ${priorHold.why}; combined as played, not published`
+      : st.level && st.reachedFull
+        ? `merged and held: level ${homeClub.score}-${awayClub.score} after ${mins} minutes, waiting for the overtime reload (Rule 4.3)`
+        : fshM
+          ? `merged and held: ${fshM.why}`
+          : `merged and held: the sittings add up to ${mins} of ${Math.round(REGULATION_S / 60)} minutes, waiting for the rest of the game (Rule 4.3)`;
     const loggedH = await archive(ctx, norm, raw, "merged", `${why} — sitting ${priors.length + 1} of ${cand.ea_match_id}`, cand.id);
     if (!loggedH) summary.errors.push({ ea_match_id: norm.ea_match_id, error: `merged into ${cand.ea_match_id} but the merge could not be archived — the next poll may merge it again; check ea_ingest_log` });
     summary.held = summary.held || [];
     summary.held.push({ ea_match_id: norm.ea_match_id, game_id: cand.id, elapsed: totalLen, reason: why, merged_into: cand.ea_match_id });
+    if (officeHold) await noteFinalStretch(cand, "reload", priorHold, homeClub.score, awayClub.score, summary);
+    else if (fshM && fshM.office) await noteFinalStretch(cand, "stopped", fshM, homeClub.score, awayClub.score, summary);
     return R(true);
   }
   if (!st.finished) {
@@ -1759,10 +1910,13 @@ export const handler = async (event) => {
         `${st.finished ? "final" : "held (not yet a full, decided game)"} ${homeClub.score}-${awayClub.score}${st.wentOt ? " (OT)" : ""}, ${rows.length} player lines. ` +
         `Review it in the Stats Manager if anything looks off.`);
     }
+    const fshL = st.finished ? null : finalStretchHold(game, st);   // v3.88 (Rule 4.3.6)
     const heldWhy = st.finished ? null
       : (st.level && st.reachedFull
         ? `Level ${homeClub.score}-${awayClub.score} after ${Math.round(st.total / 60)} minutes: held for the overtime reload (Rule 4.3).`
-        : `The sittings add up to ${Math.round(st.total / 60)} of ${Math.round(REGULATION_S / 60)} minutes: held until the rest of the game is merged (Rule 4.3).`);
+        : fshL
+          ? `Held: ${fshL.why}.`
+          : `The sittings add up to ${Math.round(st.total / 60)} of ${Math.round(REGULATION_S / 60)} minutes: held until the rest of the game is merged (Rule 4.3).`);
     return { statusCode: 200, body: JSON.stringify({ ok: true, gameId: game.id,
       score: `${homeClub.score}-${awayClub.score}`, wentOt: !!st.wentOt, inferredOt: !!st.inferredOt,
       held: !st.finished, heldWhy, struck, overlong: !!st.overlong,
