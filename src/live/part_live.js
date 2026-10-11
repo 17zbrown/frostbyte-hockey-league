@@ -6723,7 +6723,8 @@ CG.distributeRookies = function(){
 CG.raRotationHtml = function(rows, lg){
   var codeOf = {}, n = {};
   CG.TEAMS.forEach(function(t){ codeOf[t.id] = t.code; n[t.code] = 0; });
-  (rows||[]).forEach(function(r){ var c = codeOf[r.team_id]; if (r.counts && c != null) n[c]++; });
+  /* v3.92: only placements made under the rotation are turns; earlier Season 1 placements are history (in_rotation false) */
+  (rows||[]).forEach(function(r){ var c = codeOf[r.team_id]; if (r.counts && r.in_rotation !== false && c != null) n[c]++; });
   var campN = function(code){ return (((lg||{}).byTeam||{})[code]||[]).filter(function(p){ return (p.status||"active")==="active" && p.squad==="tc"; }).length; };
   var clubs = CG.TEAMS.map(function(t){ var k = campN(t.code); return { code:t.code, n:n[t.code], empty: k===0, full: CG.CAMP_MAX < 999 && k >= CG.CAMP_MAX }; })
     .sort(function(a,b){ return a.n-b.n || (a.code<b.code?-1:1); });
@@ -6738,7 +6739,7 @@ CG.raRotationHtml = function(rows, lg){
   return '<b style="display:block;font-family:var(--f-disp);margin-bottom:8px">Late sign-up rotation</b>'+
     '<div style="display:flex;gap:6px;flex-wrap:wrap">'+clubs.map(function(c){
       var isNext = next.indexOf(c.code) >= 0;
-      return '<span class="chip'+(isNext?' chip-chrome':'')+'" title="'+c.n+' late sign-up'+(c.n===1?'':'s')+' placed this season'+(c.full?'; training camp full':'')+'">'+
+      return '<span class="chip'+(isNext?' chip-chrome':'')+'" title="'+c.n+' late sign-up'+(c.n===1?'':'s')+' placed in the rotation this season'+(c.full?'; training camp full':'')+'">'+
         esc(c.code)+' '+c.n+(c.full?' · camp full':'')+'</span>';
     }).join("")+'</div>'+
     '<p class="caption" style="margin-top:10px">'+
@@ -6749,7 +6750,7 @@ CG.raRotationHtml = function(rows, lg){
 CG.loadRaRotation = function(el){
   var sid = el.getAttribute("data-season");
   if (!sid){ el.innerHTML = ''; return; }
-  CG.sb.from("random_assignments").select("team_id,counts").eq("season_id", sid).then(function(r){
+  CG.sb.from("random_assignments").select("team_id,counts,in_rotation").eq("season_id", sid).then(function(r){
     if (!document.body.contains(el)) return;
     if (r.error){ el.innerHTML = '<p class="caption" style="color:var(--loss)">The late sign-up rotation did not load: '+esc(r.error.message||String(r.error))+'</p>'; return; }
     el.innerHTML = CG.raRotationHtml(r.data||[], CG.lg);

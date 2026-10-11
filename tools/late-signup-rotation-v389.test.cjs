@@ -71,7 +71,7 @@ const allFull = ctx.CG.raRotationHtml(data, { byTeam: Object.fromEntries(ctx.CG.
 A("no camp room anywhere says so instead of naming a club", /No club has room in its training camp/.test(allFull));
 A("the panel loads after render, for the season on the page, and says so if it fails",
   /var rot=document\.getElementById\("raRotation"\); if \(rot\) CG\.loadRaRotation\(rot\);/.test(live)
-  && /CG\.sb\.from\("random_assignments"\)\.select\("team_id,counts"\)\.eq\("season_id", sid\)/.test(live)
+  && /CG\.sb\.from\("random_assignments"\)\.select\("team_id,counts,in_rotation"\)\.eq\("season_id", sid\)/   /* v3.92 adds in_rotation */.test(live)
   && /The late sign-up rotation did not load/.test(live));
 A("only in the basic format, and only for the season being played (camp counts are that season's)", /\(basicS && s\.id && s\.id === \(CG\.SEASON\|\|\{\}\)\.id \? '<div id="raRotation" data-season="/.test(live));
 A("the office copy beside it describes the rotation, not the old emptiest-club rule", !/emptiest club with an open roster spot/.test(live) && /drawn at random from the clubs with the fewest late sign-ups this season that have camp room \(Rule 2\.8\)/.test(live) && !/late sign-ups are placed the same way until the movement deadline/.test(live));
