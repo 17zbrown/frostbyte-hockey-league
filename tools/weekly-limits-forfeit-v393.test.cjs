@@ -57,12 +57,29 @@ console.log("— the site");
 A("games load both columns", /forfeit_team_id,voided,limit_week,limits_exempt";/.test(live) && /limitsExempt: !!g\.limits_exempt,/.test(live));
 A("a filed sheet does not count; an exempt game counts for no one", /filed:   \{ counts:false/.test(live) && /exempt:  \{ counts:false/.test(live) && /else if \(g\.limitsExempt\) v = "exempt";/.test(live));
 A("the week ledger, the line builder and the officials' desk compare limit weeks", /CG\.limitWeekOf\(g\) !== CG\.limitWeekOf\(game\)/.test(live) && /CG\.limitWeekOf\(g\) !== CG\.limitWeekOf\(ref\)/.test(hub) && /CG\.limitWeekOf\(x\) === CG\.limitWeekOf\(g\)/.test(desks));
-A("a night opening with a made-up game is represented by a game of the week it is played", /else if \(CG\.limitWeekOf\(seen\[k\]\.game\) !== seen\[k\]\.game\.week && CG\.limitWeekOf\(g\) === g\.week\) seen\[k\]\.game = g;/.test(hub));
+A("a night opening with a made-up or exempt game is represented by a game of the week it is played", /else if \(!isRef\(seen\[k\]\.game\) && isRef\(g\)\) seen\[k\]\.game = g;/.test(hub));
 A("Dress the week warns, in forfeit terms", /a club that plays a player past it forfeits that game \(Rule 5\.2\)/.test(hub) && /games already played, /.test(hub));
 A("the case form offers Forfeit appeal to club management, listing the club's forfeits", /forfeit_appeal:  \{ label:"Forfeit appeal"/.test(live) && /mgmtOnly:true, blurb:"For club management: appeal a game your club was ruled to forfeit/.test(live)
   && /g\.status==="final" && g\.forfeit===mtF\.code/.test(live) && /if \(type==="forfeit_appeal"\) payload\.game_id = gEl\.value;/.test(live));
 A("a commissioner gets Overturn and Deny on the case, with a reason, through the RPC", /data-ffa-decide="overturn"/.test(live) && /a\.type==="forfeit_appeal" && !closed && isCommish/.test(live) && /CG\.sb\.rpc\("decide_forfeit_appeal", \{ p_request:id, p_overturn:overturn, p_response:txt \}\)/.test(live));
 A("...and the generic Resolve, Deny and discipline buttons are off a forfeit appeal", /\(isPos \|\| a\.type==="forfeit_appeal" \? "" :/.test(live));
+
+console.log("— part three: the review's fixes");
+const three = R("sql/2026-10-12-over-limit-review-fixes-v393.sql");
+A("a held game (box score on file) counts, in the counter and the running count", /\(g\.status = ''final'' or \(g\.status = ''scheduled'' and g\.ea_match_id is not null\)\)/.test(three) && /\(g2\.status = 'final' or \(g2\.status = 'scheduled' and g2\.ea_match_id is not null\)\)/.test(three));
+A("an exception can be granted before the night: played plus sheets filed for earlier games", /and g2\.status = ''scheduled'' and g2\.ea_match_id is null/.test(three) && /games played or dressed for earlier this week/.test(three));
+A("no forfeit path writes transactions (it would ping #transactions); #game-scores only", !/insert into public\.transactions/.test(three.slice(three.indexOf("create or replace function public._limit_forfeit_check"), three.indexOf("create or replace function public._limit_forfeit_recheck")))
+  && !/insert into public\.transactions/.test(three.slice(three.indexOf("create or replace function public.decide_forfeit_appeal"), three.indexOf("alter policy ar_read"))));
+A("a commissioner's Undo forfeit excuses the named players (undo_forfeit and unforfeit_game)", /perform public\._limit_forfeit_excuse\(p_game, g\.forfeit_team_id, ''Automatic forfeit undone by a commissioner''\);/.test(three) && /perform public\._limit_forfeit_excuse\(p_game, v_g\.forfeit_team_id, ''Automatic forfeit undone by a commissioner''\);/.test(three));
+A("a game already a forfeit is never written; the office hears if the other club went over", /if g\.forfeit_team_id is not null then\s+if exists \(select 1 from unnest\(v_teams\) t where t <> g\.forfeit_team_id\)/.test(three));
+A("a limit week is serialized (advisory lock) and a rewritten box score rechecks", /pg_advisory_xact_lock\(hashtext\('limitweek'\)/.test(three) && /create trigger trg_limit_forfeit_stats_ins after insert on public\.game_stats/.test(three) && /create trigger trg_limit_forfeit_stats_del after delete on public\.game_stats/.test(three));
+A("forfeit_game does not overwrite a forfeit unless a commissioner calls it", /if v_g\.forfeit_team_id is not null and not public\.is_commissioner\(\) then/.test(three));
+A("an appeal's identity is fixed, one per game (unique index), decided under a lock, moot when the forfeit is gone", /are fixed once it is filed/.test(three) && /create unique index if not exists action_requests_one_forfeit_appeal/.test(three) && /where id = p_request for update;/.test(three) && /'limit_forfeit_appeal_moot'/.test(three));
+A("the club's seats can read their appeal (policy and can_see_request), and the site shows it to them", /\(\(type = 'forfeit_appeal'\) and is_gm_of\(team_id\)\)\);/.test(three) && /a\.type==="forfeit_appeal" && myClubId && a\.team_id===myClubId/.test(live));
+A("a no-op exemption is refused", /there is no exemption to lift/.test(three));
+A("the night's week reference is never an exempt game", /var isRef = function\(x\)\{ return !x\.limitsExempt && CG\.limitWeekOf\(x\) === x\.week; \};/.test(hub) && /if \(g\.limitsExempt && stage === "regular"\) return;/.test(hub));
+A("Dress the week projects played plus filed sheets", /r\.verdict === "played" \|\| \(r\.verdict === "filed" && !\(CG\.capExceptionFor && CG\.capExceptionFor\(r\.id, pid\)\)\)/.test(hub));
+A("no screen says a filed sheet counts or that dressing is where the limit is enforced", !/games already played or filed \(Rule "\+\(game\.stage==="playoff"\?"8\.3":"5\.2"\)\+"\)\. Drop him/.test(hub) && !/The limit itself is enforced when a lineup is dressed/.test(hub) && !/is refused when it is dressed/.test(hub) && !/gets those games back in his week/.test(hub) && !/The count includes lineups you have already filed/.test(hub));
 
 console.log("— the rulebook and changelog");
 global.CG = {}; vm.runInThisContext(R("src/live/part3_content.js"));
@@ -72,6 +89,7 @@ const r52 = sec("5.2").paragraphs[1];
 A("Rule 5.2: games played, from the official record; filed lineups do not count", /A player's games in a game-week are the games he has played, read from the official record/.test(r52) && /A lineup filed for a game still to be played does not count/.test(r52));
 A("...over the cap is an automatic forfeit loss, result as played kept", /forfeits the game in which he went beyond it: when that game is made final the league's tools rule it a forfeit loss for the club automatically, the result as played stays on record/.test(r52));
 A("...both clubs: a commissioner rules; one appeal; from 12 October 2026", /no forfeit is ruled automatically and a commissioner rules the game/.test(r52) && /may appeal once, through its Owner, General Manager or Assistant General Manager/.test(r52) && /from 12 October 2026/.test(r52));
+A("Rules 10.1 and 5.3 no longer say a filed sheet counts", /a lineup filed for a game not yet played does not count toward his week \(Rule 5\.2\)/.test(sec("10.1").paragraphs[0]) && !/returns the game to every player on it/.test(sec("5.3").paragraphs[0]));
 A("Rule 3.3: original week, or no week at all", /counts toward the week it was originally scheduled in, or toward no week at all, for players' weekly game limits \(Rule 5\.2\)/.test(sec("3.3").paragraphs[0]));
 const cl = rb.changelog.find((c) => c.version === "3.93");
 A("changelog 3.93 is first and says what changed", rb.changelog[0].version === "3.93" && !!cl && /count only games played/.test(cl.summary) && cl.items.some((i) => /Islanders at Stars/.test(i)));

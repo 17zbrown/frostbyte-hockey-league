@@ -24,7 +24,9 @@ A("...it goes through the RPC, never a direct delete",
   !/from\("game_lineups"\)[\s\S]{0,80}\.delete\(\)/.test(hub));
 A("...and clears the league's copy AND this browser's draft",
   /delete lg\._lineups\[club\+":"\+game\.id\];/.test(hub) && /delete st\[key\]; CG\.store\.set\("lineups", st\);/.test(hub));
-A("the confirmation says the players get the game back", /gets this game back in his week \(Rule 5\.2\)|Each of them gets this game back in his week/.test(hub));
+/* v3.93: a filed sheet no longer counts toward a player's week, so there is no game to give back; the confirmation
+   says only that the six come off, and must not claim otherwise */
+A("the confirmation says the six come off, and no longer claims a game is given back", /"The six come off this game\. "\+/.test(hub) && !/gets this game back in his week/.test(hub));
 A("...and warns the game is then unfiled (Rule 3.2)", /the club plays with no sheet of record \(Rule 3\.2\)/.test(hub));
 A("a refusal is shown as the rule's own message", /if \(r\.error\)\{ CG\.toast\(r\.error\.message, "err"\); return; \}/.test(hub));
 A("nothing claims success before the server answers",

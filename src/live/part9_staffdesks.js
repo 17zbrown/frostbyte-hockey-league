@@ -546,8 +546,9 @@ CG.wireCapExceptions = function(){
     var g = (lg.schedule||[]).find(function(x){ return x.id === gSel.value; });
     if (!g){ pSel.innerHTML = '<option value="">Player at his limit…</option>'; pSel.disabled = true; return; }
     pSel.disabled = true; pSel.innerHTML = '<option value="">Reading both clubs’ week…</option>';
-    /* the loader holds only the signed-in member's own club's filed sheets, and a filed sheet counts
-       against the week (Rule 5.2), so read both clubs' sheets for this week before counting */
+    /* the loader holds only the signed-in member's own club's filed sheets, and the office excuses a player whose
+       games played plus sheets filed for earlier games reach his limit (v3.93, grant_cap_exception), so read
+       both clubs' sheets for this week before counting */
     var wk = (lg.schedule||[]).filter(function(x){ return (x.stage||"regular") === (g.stage||"regular") && CG.limitWeekOf(x) === CG.limitWeekOf(g) &&
       [x.home, x.away].some(function(c){ return c === g.home || c === g.away; }); });
     var idToCode = lg._idToCode || {};
@@ -563,7 +564,8 @@ CG.wireCapExceptions = function(){
       (lg.byTeam[code]||[]).forEach(function(p){
         var load = CG.weekLoad ? CG.weekLoad(p, code, g) : null;
         /* the game itself does not count against him here; the database measures it the same way */
-        var used = load ? load.rows.filter(function(r){ return r.counts && r.id !== g.id; }).length : 0;
+        /* v3.93: games played plus the sheets filed for him in this week's earlier games, the database's own measure */
+        var used = load ? load.rows.filter(function(r){ return r.id !== g.id && (r.counts || (r.verdict === "filed" && (r.at||0) < (g.at||0))); }).length : 0;
         if (load && isFinite(load.cap) && used >= load.cap && !CG.capExceptionFor(g.id, p.id)) at.push({ p:p, code:code, used:used, cap:load.cap });
       });
     });
@@ -591,7 +593,7 @@ CG.wireCapExceptions = function(){
   document.querySelectorAll("[data-cap-revoke]").forEach(function(b){
     b.addEventListener("click", function(){
       var parts = this.getAttribute("data-cap-revoke").split("|");
-      CG.confirm("Withdraw this exception?", "He goes back to his weekly limit for that game. If his club has already dressed him in it, the sheet stands and the game is reviewed against the limit when it is final (Rule 5.2).",
+      CG.confirm("Withdraw this exception?", "He goes back to his weekly limit for that game. If his club has already dressed him in it, the sheet stands, and if he plays past his limit the game is forfeited automatically (Rule 5.2).",
         "Withdraw", function(){
           CG.sb.rpc("revoke_cap_exception", { p_game: parts[0], p_profile: parts[1] }).then(function(r){
             if (r.error){ CG.toast(r.error.message || "Couldn’t withdraw it", "err"); return; }

@@ -14,8 +14,8 @@
 -- count the lineup gate, the final-game review and the office exception all use), set_game_lineup and
 -- clear_game_lineup (the per club-week filing lock), grant_cap_exception, review_game_records (the count and its
 -- message), lineup_camp_warnings and tc_week_overages. The client mirrors it (CG.limitWeekOf).
--- The column is written only through ops_set_limit_week (commissioner or operations, logged, public ledger line):
--- the API roles get SELECT on it and nothing else.
+-- The column is written through ops_set_limit_week (commissioner or operations, logged, public ledger line). The API
+-- roles hold the games table's UPDATE privilege, but row security lets only a commissioner write a game row.
 
 alter table public.games add column if not exists limit_week smallint;
 comment on column public.games.limit_week is

@@ -8460,7 +8460,9 @@ CG.hubComplaintsLive = function(opts){
   var uid = CG.auth.user && CG.auth.user.id;
   /* MINE is the raw list on purpose: a player must always see the trade request he filed. The
      review queue is not, because that is the league office's desk and a club matter is not on it. */
-  var mine = CG.auth.user ? all.filter(function(a){ return a.profile_id===uid; }) : [];
+  /* v3.93: a club's forfeit appeal is its whole front office's (Owner, GM, AGM), whoever filed it */
+  var myClubId = (CG.myManagedTeam && CG.myManagedTeam()) ? ((CG.lg._codeToId||{})[CG.myManagedTeam().code]||null) : null;
+  var mine = CG.auth.user ? all.filter(function(a){ return a.profile_id===uid || (a.type==="forfeit_appeal" && myClubId && a.team_id===myClubId); }) : [];
   var queue = review && !opts.mineOnly ? CG.staffCases() : mine;
   /* review filter: All / Mine (assigned to me) / Unclaimed / Open */
   var flt = review ? (CG._caseFilter||"all") : null;

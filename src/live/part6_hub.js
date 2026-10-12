@@ -1043,7 +1043,7 @@ CG.AFTER._lineup = function(){
        played games by the box score plus games still to come by the filed lineup */
     var cap = CG.gameCapFor(p, game), used = CG.weekGamesFor(p.id, game, club);
     /* v3.54: a recorded league-office exception for this player in this game lets him past it */
-    if (used >= cap && !(CG.capExceptionFor && CG.capExceptionFor(game.id, p.id))) return p.tag+" is at his "+(game.stage==="playoff"?"series":"weekly")+" limit: "+used+" of "+cap+" games already played or filed (Rule "+(game.stage==="playoff"?"8.3":"5.2")+"). Drop him from a game you have already dressed to free one.";
+    if (used >= cap && !(CG.capExceptionFor && CG.capExceptionFor(game.id, p.id))) return p.tag+" is at his "+(game.stage==="playoff"?"series":"weekly")+" limit: "+used+" of "+cap+" games already "+(game.stage==="playoff"?"played or filed":"played")+" (Rule "+(game.stage==="playoff"?"8.3":"5.2")+")."+(game.stage==="playoff"?" Drop him from a game you have already dressed to free one.":" Playing him again would forfeit the game.");
     /* v3.80 (commissioner, 2026-10-02): the v3.65 roster-first check (Q14) is withdrawn, here and in set_game_lineup.
        A training-camp player may be dressed whoever else is available; his own weekly limit is checked above. */
     return null;
@@ -1140,7 +1140,7 @@ CG.AFTER._lineup = function(){
   var rm = $("#luRemove");
   if (rm) rm.addEventListener("click", function(){
     CG.confirm("Withdraw this lineup?",
-      "The six come off this game. Each of them gets this game back in his week (Rule 5.2), so you can dress him somewhere else. "+
+      "The six come off this game. "+
       "The game is then unfiled: file a lineup again before it locks at "+CG.fmtTime(game.at-30*60000)+", or the club plays with no sheet of record (Rule 3.2).",
       "Withdraw", function(){
       if (!CG.LIVE_MODE || !CG.sb){ CG.toast("Not connected, reload and retry","err"); return; }
@@ -1361,7 +1361,8 @@ CG.lcClearableGames = function(club, nightKey){
    A player's week as the lines stand, unsaved edits included: the games he has PLAYED this week (box
    scores), plus every game still to come this week that he would be dressed in, by the line pointed
    at that game or, where no line is, by the sheet already filed. A game the league office has excepted
-   him for is left out (Rule 5.2). The limit itself is still enforced when a lineup is dressed.
+   him for is left out (Rule 5.2). v3.93: dressing refuses only a player who has already played his limit; a club
+   that plays him past it forfeits that game automatically.
      over  he has already played every game his week allows, and a line still carries him;
      warn  his lines would take him past his limit this week. */
 CG.lineCapState = function(p, club, slotsOf){
@@ -1374,6 +1375,7 @@ CG.lineCapState = function(p, club, slotsOf){
   var stage = ref.stage || "regular", ahead = 0;
   (lg.schedule || []).forEach(function(g){
     if ((g.stage || "regular") !== stage || CG.limitWeekOf(g) !== CG.limitWeekOf(ref)) return;   /* v3.93: the limit week */
+    if (g.limitsExempt && stage === "regular") return;                                             /* v3.93: exempt (Rule 3.3) */
     if (g.home !== club && g.away !== club) return;
     if (g.status === "final" || g.voided) return;
     if (CG.capExceptionFor && CG.capExceptionFor(g.id, p.id)) return;
@@ -1400,6 +1402,8 @@ CG.lineCapState = function(p, club, slotsOf){
 };
 CG.lineNights = function(club){
   var seen = {}, out = [];
+  /* v3.93: a game exempt from the limits, or ruled to another week, is never the night's week reference */
+  var isRef = function(x){ return !x.limitsExempt && CG.limitWeekOf(x) === x.week; };
   (CG.lg.schedule||[]).filter(function(g){
     return (g.home===club||g.away===club) && g.status!=="final" && g.at>CG.now()-3*3600000;
   }).sort(function(a,b){ return a.at-b.at; }).forEach(function(g){
@@ -1408,7 +1412,7 @@ CG.lineNights = function(club){
     /* v3.93: every caller reads .game as the night's WEEK reference for player limits, so a night that opens
        with a made-up game ruled to count toward its original week (games.limit_week) is represented by its
        first game that counts toward the week it is played */
-    else if (CG.limitWeekOf(seen[k].game) !== seen[k].game.week && CG.limitWeekOf(g) === g.week) seen[k].game = g;
+    else if (!isRef(seen[k].game) && isRef(g)) seen[k].game = g;
   });
   return out;
 };
@@ -1438,7 +1442,7 @@ CG.hubLines = function(qs){
 
   var bar = '<div class="note '+(dirtyN?"chr":"grn")+'" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px">'+
     '<b style="font-family:var(--f-disp)">'+(dirtyN?dirtyN+" line"+(dirtyN===1?"":"s")+" with unsaved changes":"All lines saved")+'</b>'+
-    '<span class="caption" style="flex:1;min-width:200px">Names edit in place. A player may sit on any number of lines. A <b style="color:var(--amber-ink)">yellow</b> outline means his lines may take him past his weekly limit; <b style="color:var(--red-ink)">red</b> means he has already played every game his week allows. The limit itself is enforced when a lineup is dressed (Rule 5.2).'+
+    '<span class="caption" style="flex:1;min-width:200px">Names edit in place. A player may sit on any number of lines. A <b style="color:var(--amber-ink)">yellow</b> outline means his lines may take him past his weekly limit; <b style="color:var(--red-ink)">red</b> means he has already played every game his week allows. Dressing is refused only for a player who has already played his limit; a club that plays a player past it forfeits that game automatically (Rule 5.2).'+
     (capWarnN || capOverN ? ' <b>'+(capOverN ? capOverN+' over' : '')+(capOverN && capWarnN ? ', ' : '')+(capWarnN ? capWarnN+' may go over' : '')+'.</b>' : '')+
     ((CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)) ? ' <b>Pre-season:</b> your Owner, GM and AGM may sit at any position on a line; a line carrying one out of position dresses in pre-season games only (Rule 5.2).' : '')+'</span>'+
     '<span style="display:flex;gap:9px">'+
@@ -1493,8 +1497,7 @@ CG.hubLines = function(qs){
     (capped.length ? '<span class="chip chip-loss" title="Rule 5.2: these players have played every game their week allows. Dressing them again is refused, and playing them again would forfeit the game.">'+capped.length+' at the weekly limit</span>' : "")+'</div>'+
     (capped.length ? '<div class="card-b" style="border-bottom:1px solid var(--line-soft)"><span class="caption"><b>'+
       capped.map(function(p){ return esc(p.tag); }).join(", ")+'</b> '+(capped.length===1?"has":"have")+' no games left this week (Rule 5.2). '+
-      'The count includes lineups you have already filed, not just games played, so swap '+(capped.length===1?"him":"them")+' out of a line before dressing a night '+
-      (capped.length===1?"he":"they")+' cannot play.</span></div>' : "")+
+      'Swap '+(capped.length===1?"him":"them")+' out of any line still to be dressed: playing '+(capped.length===1?"him":"them")+' again would forfeit the game.</span></div>' : "")+
     '<div class="card-b"><div class="lc-board">'+POS.map(function(pos){
       return '<div class="lc-col"><div class="lc-ch">'+CG.POS_NAME[pos]+'</div>'+
         (byPos[pos]||[]).map(function(p){
@@ -1583,7 +1586,7 @@ CG.hubLines = function(qs){
                   (toDress.length ? 'Submit each game with the line set for it'+(distinct.length>1?' ('+distinct.length+' different lines tonight)':'') : 'Set a line on at least one game')+'">'+
                   (dressedN?"Redress":"Dress")+' '+toDress.length+' game'+(toDress.length===1?"":"s")+'</button>'+
                 /* v3.76: label, visibility and the click all count the same games: the ones with a sheet to withdraw */
-                (CG.lcClearableGames(club, n.key).length ? '<button class="btn btn-ghost btn-sm lc-clear" data-night="'+n.key+'" title="Withdraw the filed sheets for this night\u2019s games. Everyone on them gets those games back in his week (Rule 5.2).">Clear '+CG.lcClearableGames(club, n.key).length+'</button>' : "")
+                (CG.lcClearableGames(club, n.key).length ? '<button class="btn btn-ghost btn-sm lc-clear" data-night="'+n.key+'" title="Withdraw the filed sheets for this night\u2019s games (Rule 5.3).">Clear '+CG.lcClearableGames(club, n.key).length+'</button>' : "")
               : '<span class="lock" title="Every game this night is published to the opponent">'+CG.ic("lock",13)+'Published</span>'+
                 '<a class="btn btn-ghost btn-sm" href="#/hub/lineup?game='+games[games.length-1].id+'" title="Change a published sheet: free, up to puck drop (Rule 5.3)">Change a sheet</a>'+
                 /* v3.76: the league office may withdraw a published sheet until the game is under way */
@@ -1736,13 +1739,13 @@ CG.AFTER._lines = function(qs){
     if (!CG.LIVE_MODE || !CG.sb || !tid || !CG.SEASON || !CG.SEASON.id){ CG.toast("Not connected — reload and retry","err"); return; }
     if (!Object.keys(CG._lcDraft||{}).length) return;
     /* v3.54: "give the submitter a warning that they may be over their game limit". A warning, then
-       the manager's choice: the limit is enforced when a lineup is dressed, not when a line is saved. */
+       the manager's choice. v3.93: a club that plays a player past his limit forfeits that game automatically. */
     var sOf = function(n){ return (CG._lcDraft && CG._lcDraft[n]) ? CG._lcDraft[n] : CG.lineFromRow((lg._teamLines||{})[n]); };
     var flagged = (lg.byTeam[club]||[]).map(function(p){ var st = CG.lineCapState(p, club, sOf); return st && st.level ? { p:p, st:st } : null; }).filter(Boolean);
     if (flagged.length){
       CG.confirm("Save lines that may go over the weekly limit?",
         flagged.map(function(f){ return f.st.why; }).join(" ")+
-        " You can save these lines, but a lineup that takes a player past his limit is refused when it is dressed (Rule 5.2).",
+        " You can save and dress these lines, but if a player plays past his limit, his club forfeits that game automatically (Rule 5.2).",
         "Save anyway", doSave);
       return;
     }
@@ -1911,7 +1914,11 @@ CG.AFTER._lines = function(qs){
     var wkRefD = (CG.lineNights(club)[0] || {}).game || null;
     var used = {}, conflicts = [];
     var loadOfPid = function(pid){
-      if (used[pid] == null) used[pid] = (wkRefD ? CG.weekUsedFor(pid, club, wkRefD) : 0) || 0;
+      /* v3.93: games played plus the sheets already filed for him this week (not excepted), so the plan is
+         simulated on top of what he is already set to play, as the line builder's outline does */
+      if (used[pid] == null) used[pid] = wkRefD ? CG.weekLedger(pid, wkRefD, club, { excludeGame: "__none__" }).filter(function(r){
+        return r.verdict === "played" || (r.verdict === "filed" && !(CG.capExceptionFor && CG.capExceptionFor(r.id, pid)));
+      }).length : 0;
       return used[pid];
     };
     jobs.forEach(function(n){
@@ -1920,6 +1927,7 @@ CG.AFTER._lines = function(qs){
       var adds = {}, drops = {};
       CG.lcOpenGames(club, n.key).forEach(function(g){
         if (wkRefD && CG.limitWeekOf(g) !== CG.limitWeekOf(wkRefD)) return;   /* v3.93: counts toward another week; the database checks it */
+        if (g.limitsExempt && (g.stage || "regular") === "regular") return;   /* v3.93: exempt from the limits (Rule 3.3) */
         var six = sixFor(n.key, g.id); if (!six) return;
         var lu = (lg._lineups||{})[club+":"+g.id];
         var on = lu ? [lu.center,lu.lw,lu.rw,lu.ld,lu.rd,lu.goalie].filter(Boolean) : [];
@@ -1973,7 +1981,7 @@ CG.AFTER._lines = function(qs){
       if (!picks.length) return;
       CG.confirm("Withdraw "+picks.length+" sheet"+(picks.length===1?"":"s")+"?",
         (CG.NIGHT_LABEL[night]||night)+": "+picks.map(function(g){ return CG.fmtTime(g.at); }).join(", ")+
-        ". Everyone on those sheets gets those games back in his week (Rule 5.2), so you can dress him elsewhere. "+
+        ". "+
         "The games are then unfiled: dress them again before they lock (Rule 3.2).",
         "Withdraw", function(){
         if (!CG.LIVE_MODE || !CG.sb || !tid){ CG.toast("Not connected, reload and retry","err"); return; }
@@ -2305,7 +2313,7 @@ CG.hubRoster = function(qs){
               : '<button class="btn btn-ghost btn-sm" data-waive="'+p.id+'">Waive</button>'; })()+'</div>');
     var gp = (lg.pstats[p.id]||{}).gp||0;
     /* v3.70 (commissioner, 2026-09-28, Q3): management sees games PLAYED against games SCHEDULED. The week's
-       chip splits the box-score appearances from the games filed but not yet played, against his limit. */
+       chip shows the box-score appearances against his limit, with the sheets filed but not yet played beside it (v3.93). */
     var wkLoad = (wkRefR && CG.weekLoad) ? CG.weekLoad(p, club, wkRefR) : null;
     var rp = regPos[p.id];
     var posCell = (loan && rp && rp !== p.pos)
