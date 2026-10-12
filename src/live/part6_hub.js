@@ -1373,7 +1373,7 @@ CG.lineCapState = function(p, club, slotsOf){
   if (!load || !isFinite(load.cap)) return null;
   var stage = ref.stage || "regular", ahead = 0;
   (lg.schedule || []).forEach(function(g){
-    if ((g.stage || "regular") !== stage || g.week !== ref.week) return;
+    if ((g.stage || "regular") !== stage || CG.limitWeekOf(g) !== CG.limitWeekOf(ref)) return;   /* v3.93: the limit week */
     if (g.home !== club && g.away !== club) return;
     if (g.status === "final" || g.voided) return;
     if (CG.capExceptionFor && CG.capExceptionFor(g.id, p.id)) return;
@@ -1405,6 +1405,10 @@ CG.lineNights = function(club){
   }).sort(function(a,b){ return a.at-b.at; }).forEach(function(g){
     var k = CG.gameNight(g);
     if (!seen[k]){ seen[k] = { key:k, game:g }; out.push(seen[k]); }
+    /* v3.93: every caller reads .game as the night's WEEK reference for player limits, so a night that opens
+       with a made-up game ruled to count toward its original week (games.limit_week) is represented by its
+       first game that counts toward the week it is played */
+    else if (CG.limitWeekOf(seen[k].game) !== seen[k].game.week && CG.limitWeekOf(g) === g.week) seen[k].game = g;
   });
   return out;
 };
@@ -1479,14 +1483,14 @@ CG.hubLines = function(qs){
   var camp = [];
   roster.slice().sort(function(a,b){ return (lg.ratings[b.id].ovr)-(lg.ratings[a.id].ovr); })
     .forEach(function(p){ if (p.squad==="tc") camp.push(p); else (byPos[p.pos]||(byPos[p.pos]=[])).push(p); });
-  /* v2.83: the weekly load, shown BEFORE a line is built. The cap counts games a club has already
-     FILED, not only games that have been played, so a club can spend a player's whole week on
-     Friday and only find out when Wednesday is refused. Measured against the club's next game. */
+  /* v2.83: the weekly load, shown BEFORE a line is built. v3.93: it counts the games he has PLAYED (box
+     scores), not filed sheets; playing him past the limit forfeits the game (Rule 5.2). Measured against the
+     club's next game. */
   var wkRef = (CG.lineNights(club)[0] || {}).game || null;
   var loadOf = function(p){ return CG.weekLoad ? CG.weekLoad(p, club, wkRef) : null; };
   var capped = roster.filter(function(p){ var l = loadOf(p); return l && l.full; });
   var board = '<div class="card"><div class="card-h"><h3>Roster — '+esc(CG.TEAM[club].name)+'</h3><span class="chip">'+roster.length+' rostered</span>'+
-    (capped.length ? '<span class="chip chip-loss" title="Rule 5.2: these players are dressed or have played in every game their week allows, counting the lineups you have already filed. Dressing them again is refused.">'+capped.length+' at the weekly limit</span>' : "")+'</div>'+
+    (capped.length ? '<span class="chip chip-loss" title="Rule 5.2: these players have played every game their week allows. Dressing them again is refused, and playing them again would forfeit the game.">'+capped.length+' at the weekly limit</span>' : "")+'</div>'+
     (capped.length ? '<div class="card-b" style="border-bottom:1px solid var(--line-soft)"><span class="caption"><b>'+
       capped.map(function(p){ return esc(p.tag); }).join(", ")+'</b> '+(capped.length===1?"has":"have")+' no games left this week (Rule 5.2). '+
       'The count includes lineups you have already filed, not just games played, so swap '+(capped.length===1?"him":"them")+' out of a line before dressing a night '+
@@ -1900,10 +1904,10 @@ CG.AFTER._lines = function(qs){
       }, 0);
     };
     jobs.sort(function(a, b){ return netOf(a) - netOf(b) || a.game.at - b.game.at; });
-    /* v2.83 PRE-FLIGHT: say which nights the weekly cap will refuse, and for whom, BEFORE the
-       button is pressed. The count includes lineups already filed (Rule 5.2), so a manager can
-       spend a player's week on one night and be refused on another with no warning at all; this
-       walks the plan, simulates the nights in order, and names the conflict in the confirm. */
+    /* v2.83 PRE-FLIGHT: say which nights would take a player past the weekly limit, and for whom,
+       BEFORE the button is pressed. v3.93: the count is games PLAYED, so a plan that dresses him in
+       more games than he has left is not refused, but playing them all would forfeit a game (Rule 5.2);
+       this walks the plan, simulates the nights in order, and names the conflict in the confirm. */
     var wkRefD = (CG.lineNights(club)[0] || {}).game || null;
     var used = {}, conflicts = [];
     var loadOfPid = function(pid){
@@ -1915,6 +1919,7 @@ CG.AFTER._lines = function(qs){
          adds or a straight swap reads as a conflict that never happens */
       var adds = {}, drops = {};
       CG.lcOpenGames(club, n.key).forEach(function(g){
+        if (wkRefD && CG.limitWeekOf(g) !== CG.limitWeekOf(wkRefD)) return;   /* v3.93: counts toward another week; the database checks it */
         var six = sixFor(n.key, g.id); if (!six) return;
         var lu = (lg._lineups||{})[club+":"+g.id];
         var on = lu ? [lu.center,lu.lw,lu.rw,lu.ld,lu.rd,lu.goalie].filter(Boolean) : [];
@@ -1939,9 +1944,9 @@ CG.AFTER._lines = function(qs){
         return (CG.NIGHT_LABEL[n.key]||n.key)+": "+names.join(" + ");
       }).join(" · ")+
       ". Each dressing runs through the league’s checks; anything refused is reported by night and the rest still land. Redress any night to adjust before "+(CG.role()==="commish" ? "its games are under way." : "its lock.")+
-      (conflicts.length ? "\n\nThe weekly limit (Rule 5.2) will refuse some of this: "+conflicts.map(function(c){
-        return c.tag+" on "+c.night+" ("+c.used+" of "+c.cap+" games already filed or played, "+(c.left?("room for only "+c.left+" more"):"none left")+")";
-      }).join("; ")+". Change those lines first, or dress the rest and fix them after." : ""),
+      (conflicts.length ? "\n\nIf every game is played, some players go past the weekly limit, and a club that plays a player past it forfeits that game (Rule 5.2): "+conflicts.map(function(c){
+        return c.tag+" on "+c.night+" ("+c.used+" of "+c.cap+" games already played, "+(c.left?("room for only "+c.left+" more"):"none left")+")";
+      }).join("; ")+". Change those lines first, or dress the rest and adjust before the games." : ""),
       "Dress the week", function(){
       dressWeek.disabled = true;
       var okN = 0, qN = 0, errs = [];

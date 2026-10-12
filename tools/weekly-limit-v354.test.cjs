@@ -52,6 +52,7 @@ console.log("\n— CG.lineCapState on a stubbed week (cap 6, three games a night
       weekLoad: () => ({ played, cap: 6 }),
       gameNight: night, lcGameSlot: (club, nk) => plan[nk] == null ? null : plan[nk],
       capExceptionFor: (gid, pid) => (exc || []).some((e) => e.game_id === gid && e.profile_id === pid) };
+    vm.runInNewContext(live.slice(live.indexOf("CG.limitWeekOf = function"), live.indexOf("\n", live.indexOf("CG.limitWeekOf = function"))), { CG });   // v3.93: the real helper
     vm.runInNewContext(src, { CG, Object, isFinite });
     return CG.lineCapState({ id: "p1", tag: "Goalie" }, "BOS", (n) => lines[n] || {});
   };

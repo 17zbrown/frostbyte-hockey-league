@@ -230,22 +230,30 @@ CG.forfeitNoIce = function(g, res){
    3 on the stats page, and nothing on either told him what the difference was. */
 CG.WEEK_VERDICT = {
   played:  { counts:true,  label:"Played",                    why:"He took a shift, so the box score counts it." },
-  filed:   { counts:true,  label:"On the filed sheet",        why:"Not played yet. A filed lineup counts against the week the moment it is filed (Rule 5.2)." },
+  /* v3.93 (commissioner, 2026-10-12): only games PLAYED count, from the box score; a filed sheet for a game still to
+     come counts once its result arrives with him in it (Rule 5.2) */
+  filed:   { counts:false, label:"On the filed sheet",        why:"Not played yet. It counts toward his week once the box score arrives with him in it (Rule 5.2)." },
+  exempt:  { counts:false, label:"Exempt from the limits",    why:"The league office ruled this game counts toward no week's limits (Rule 3.3)." },
   editing: { counts:false, label:"The game you are building", why:"Counted separately while you build it." },
   sat:     { counts:false, label:"Dressed, did not play",     why:"He was on the sheet but took no shift, and the box score is the record (Rule 5.2)." },
   forfeit: { counts:false, label:"Forfeit, nobody skated",    why:"A forfeit no player took the ice for is nobody's game (Rule 3.2)." },
   voided:  { counts:false, label:"Voided",                    why:"A voided game counts for no one." },
   out:     { counts:false, label:"Not dressed",               why:"He is not on this sheet and did not play." }
 };
+/* v3.93 (Rule 3.3): the game-week a game counts toward for players' weekly limits. The league office may rule
+   that a moved game keeps its original week for limits (games.limit_week); every other game counts toward the
+   week it is played. Mirrors coalesce(limit_week, week) in player_week_games. */
+CG.limitWeekOf = function(g){ return !g ? null : (g.limitWeek != null ? g.limitWeek : g.week); };
 CG.weekLedger = function(pid, game, club, opts){
   var lg = CG.lg || {}, exclude = (opts && opts.excludeGame) || game.id;
   var stage = game.stage || "regular", rows = [];
   (lg.schedule || []).forEach(function(g){
-    if ((g.stage || "regular") !== stage || g.week !== game.week) return;
+    if ((g.stage || "regular") !== stage || CG.limitWeekOf(g) !== CG.limitWeekOf(game)) return;
     var res = (lg.allResults || lg.results || []).find(function(r){ return r.id === g.id; });
     var v = "out";
     if (g.id === exclude) v = "editing";
     else if (g.voided) v = "voided";
+    else if (g.limitsExempt) v = "exempt";
     else if (CG.forfeitNoIce(g, res)) v = "forfeit";
     else {
       var sides = CG.boxSides(g, res);
@@ -287,8 +295,8 @@ CG.weekLoad = function(p, club, game){
   var used = rows.filter(function(r){ return r.counts; }).length;
   var by = function(v){ return rows.filter(function(r){ return r.verdict === v; }).length; };
   return { used:used, cap:cap, left:Math.max(0, cap-used), full:used >= cap,
-           played:by("played"), filed:by("filed"), sat:by("sat"), forfeit:by("forfeit"),
-           rows:rows, pid:p.id, tag:p.tag, club:club, week:game.week, gameId:game.id };
+           played:by("played"), filed:by("filed"), sat:by("sat"), forfeit:by("forfeit"), exempt:by("exempt"),
+           rows:rows, pid:p.id, tag:p.tag, club:club, week:CG.limitWeekOf(game), gameId:game.id };
 };
 /* the chip the line creator and the bench both wear.
    v3.31: it says what it is MADE OF, and it opens. A hover title is invisible on a phone and easy
@@ -297,11 +305,12 @@ CG.weekLoad = function(p, club, game){
 CG.weekLoadChip = function(load, size){
   if (!load) return "";
   var cls = load.full ? "chip-loss" : (load.left <= 1 ? "chip-warn" : "");
-  var split = (load.played != null && load.filed != null && (load.played + load.filed) === load.used && load.used > 0)
-    ? load.played + "+" + load.filed : null;
+  /* v3.93: the number is games PLAYED. Sheets filed for games still to come are shown beside it (+N) and named in
+     the tooltip, but they count only once played; playing past the limit forfeits that game (Rule 5.2). */
+  var split = load.filed ? "+" + load.filed : null;
   var tip = (load.full ? "At the weekly limit (Rule 5.2). " : "")
-    + load.used + " of " + load.cap + " games used this week"
-    + (split ? ": " + load.played + " played and " + load.filed + " on a filed sheet." : ".")
+    + load.used + " of " + load.cap + " games played this week."
+    + (load.filed ? " " + load.filed + " more on a filed sheet, counted only once played. Playing him past the limit forfeits the game." : "")
     + (load.sat ? " " + load.sat + " game" + (load.sat === 1 ? "" : "s") + " he was dressed for but did not play do not count." : "")
     + (load.forfeit ? " " + load.forfeit + " forfeit" + (load.forfeit === 1 ? "" : "s") + " nobody took the ice for do not count." : "")
     + " Click for the week game by game.";
@@ -331,14 +340,15 @@ CG.weekLedgerModal = function(pid, club, gameId){
       '<span class="wk-verdict">'+esc(m.label)+'</span>'+
       '<span class="wk-why caption">'+esc(m.why)+'</span></div>';
   };
-  CG.modal((p && p.tag ? p.tag : "This player") + " · week " + game.week,
+  CG.modal((p && p.tag ? p.tag : "This player") + " · week " + CG.limitWeekOf(game),
     '<div class="wk-sum"><b class="num">'+load.used+' of '+load.cap+'</b>'+
-      '<span class="caption">games used'+(load.full?", at the limit":"")+'</span>'+
-      '<span class="wk-sum-split caption">'+load.played+' played · '+load.filed+' on a filed sheet'+
+      '<span class="caption">games played'+(load.full?", at the limit":"")+'</span>'+
+      '<span class="wk-sum-split caption">'+load.filed+' more on a filed sheet, not counted until played'+
+      (load.exempt?' · '+load.exempt+' exempt from the limits':'')+
       (load.sat?' · '+load.sat+' dressed but did not play':'')+
       (load.forfeit?' · '+load.forfeit+' forfeit not counted':'')+'</span></div>'+
     '<div class="wk-ledger">'+load.rows.map(row).join("")+'</div>'+
-    '<p class="caption" style="margin-top:12px">A filed sheet counts the moment it is filed, so a club can spend a player'+"\u2019"+'s week before a puck drops (Rule 5.2). Free a game by taking him off a sheet he has not played yet.</p>',
+    '<p class="caption" style="margin-top:12px">Only games played count: a game counts once its box score arrives with him in it, a game forfeited after disconnections included. A filed sheet does not count, but a club that plays him past his limit forfeits that game (Rule 5.2).</p>',
     '<button class="btn btn-ghost" data-close>Close</button>');
 };
 /* v3.54: has the league office excepted this player from his limit for this game (Rule 5.2)? */
@@ -347,6 +357,7 @@ CG.capExceptionFor = function(gameId, pid){
 };
 /* the cap that applies to one player in one game: the series cap in the playoffs, else the weekly cap */
 CG.gameCapFor = function(p, game){
+  if (game && game.limitsExempt && (game.stage || "regular") === "regular") return Infinity;   /* v3.93: exempt (Rule 3.3) */
   var o = { pos: p.pos, squad: p.squad, stage: game.stage || "regular" };
   return (game.stage === "playoff") ? CG.seriesCap(o) : CG.weeklyCap(o);
 };
@@ -433,7 +444,7 @@ CG.PROFILE_PUBLIC_COLS = "id,gamertag,display_name,avatar_url,role,created_at,tw
    clubs (or in the league office) and the night's first game is within 30 minutes. A "*" select on
    games now fails outright, which is the point — the code cannot leak by accident again. */
 CG.GAME_PUBLIC_COLS = "id,season_id,week,home_team_id,away_team_id,scheduled_at,home_score,away_score,went_ot,status,"+
-  "twitch_url,created_at,ea_match_id,home_ppg,home_ppo,away_ppg,away_ppo,stage,forfeit_team_id,voided";
+  "twitch_url,created_at,ea_match_id,home_ppg,home_ppo,away_ppg,away_ppo,stage,forfeit_team_id,voided,limit_week,limits_exempt";
 
 /* Last known current-season id, remembered across visits so the first query of a cold boot can
    already be scoped. Wrong-but-stale is safe: the season row is re-read in the same batch and the
@@ -819,6 +830,8 @@ CG.buildLiveLeague = async function(opts){
   var schedule = games.filter(function(g){ return !seasonId || g.season_id===seasonId; }).map(function(g){
     var cc = codeById[g.id]||{};
     return { id:g.id, week:g.week||1, stage:g.stage||"regular",
+      limitWeek: g.limit_week != null ? g.limit_week : null,   /* v3.93: the week it counts toward for player limits, when the office ruled it differs */
+      limitsExempt: !!g.limits_exempt,                          /* v3.93: the office ruled it counts toward no week's limits (Rule 3.3) */
       home:id2code[g.home_team_id], away:id2code[g.away_team_id],
       at:Date.parse(g.scheduled_at), feature:false,
       code:cc.game_code||null, server:cc.server||null, status:g.status,
@@ -8244,7 +8257,11 @@ CG.ACTION_META = {
   position_change: { label:"Position change",         icon:"users", route:"commissioner", blurb:"Request a switch to a new position." },
   /* v3.68 (commissioner, 2026-09-28, Q60): a club's front office asks the statistics department to correct
      the record (Rule 6.3); the database refuses anyone without a club seat and routes it (guard_stats_correction) */
-  stats_correction:{ label:"Statistics correction",   icon:"grid",  route:"commissioner", mgmtOnly:true, blurb:"For club management: a stat line or result the import got wrong. It goes straight to the statistics department (Rule 6.3)." }
+  stats_correction:{ label:"Statistics correction",   icon:"grid",  route:"commissioner", mgmtOnly:true, blurb:"For club management: a stat line or result the import got wrong. It goes straight to the statistics department (Rule 6.3)." },
+  /* v3.93 (commissioner, 2026-10-12): "The team management has the opportunity to appeal the forfeit if there is a mistake
+     of some kind." Filed by the forfeiting club's Owner, GM or AGM, once per game; the database checks all of it
+     (guard_forfeit_appeal) and only a commissioner decides it (decide_forfeit_appeal) */
+  forfeit_appeal:  { label:"Forfeit appeal",          icon:"flag",  route:"commissioner", mgmtOnly:true, blurb:"For club management: appeal a game your club was ruled to forfeit for playing someone over the weekly game limit (Rule 5.2). A commissioner decides it." }
 };
 CG.actionTypesFor = function(){
   var mgr = !!(CG.myManagedTeam && CG.myManagedTeam());
@@ -8415,7 +8432,13 @@ CG.actionCard = function(a, review, opts){
         ? '<button class="btn btn-chrome btn-sm" data-pos-decide="approve" data-pos-id="'+a.id+'" data-pos-line="'+esc(posLine)+'">Approve '+esc(posLine)+'</button>'+
           '<button class="btn btn-ghost btn-sm" data-pos-decide="deny" data-pos-id="'+a.id+'" data-pos-line="'+esc(posLine)+'">Deny request</button>'
         : "")+
-      (isPos ? "" :
+      /* v3.93: a forfeit appeal is decided, not merely closed: Overturn clears the forfeit and keeps the result as
+         played, Deny leaves it. Only a commissioner decides one (Rule 5.2, v3.52); the generic Resolve and Deny are off it */
+      (a.type==="forfeit_appeal" && !closed && isCommish
+        ? '<button class="btn btn-chrome btn-sm" data-ffa-decide="overturn" data-ffa-id="'+a.id+'">Overturn the forfeit</button>'+
+          '<button class="btn btn-ghost btn-sm" data-ffa-decide="deny" data-ffa-id="'+a.id+'">Deny the appeal</button>'
+        : "")+
+      (isPos || a.type==="forfeit_appeal" ? "" :
       (club ? "" :
       '<button class="btn btn-ghost btn-sm" data-case-discipline="'+a.id+'" data-target="'+esc(a.target||"")+'" data-target-id="'+esc(a.target_profile_id||"")+'">Issue discipline</button>'+
       '<button class="btn btn-ghost btn-sm" data-case-history="'+a.id+'" data-target="'+esc(a.target||"")+'">History</button>')+
@@ -8569,6 +8592,15 @@ CG.fileActionRequest = function(type){
       (pcDl?'<p class="caption">Position changes close <b>'+CG.fmtFull(pcDl)+'</b> — 11:59 PM ET on the Tuesday before the first pre-season game (Rule 2.9). After that your position is set for the season.</p>':"");
   }
   if (type==="trade_request" && (!me || !me.team)){ CG.toast("You need to be on a club roster to request a trade","err"); return; }
+  if (type==="forfeit_appeal"){
+    var mtF = CG.myManagedTeam && CG.myManagedTeam();
+    if (!mtF){ CG.toast("A forfeit appeal is filed by a club's Owner, GM or AGM (Rule 5.2)","err"); return; }
+    var ffGames = ((CG.lg && CG.lg.schedule) || []).filter(function(g){ return g.status==="final" && g.forfeit===mtF.code; })
+      .sort(function(a,b){ return (b.at||0)-(a.at||0); });
+    if (!ffGames.length){ CG.toast("Your club has no forfeit to appeal","err"); return; }
+    fields += '<label class="fld"><span>Which forfeit?</span><select id="acGame"><option value="">Pick the game…</option>'+
+      ffGames.map(function(g){ return '<option value="'+esc(g.id)+'">'+esc(CG.fmtDay(g.at)+" · "+g.away+" at "+g.home)+'</option>'; }).join("")+'</select></label>';
+  }
   if (type==="stats_correction"){
     var mt = CG.myManagedTeam && CG.myManagedTeam();
     if (!mt){ CG.toast("A statistics correction is filed by a club's Owner, GM or AGM (Rule 6.3)","err"); return; }
@@ -8595,10 +8627,13 @@ CG.fileActionRequest = function(type){
     var details = (document.getElementById("acDetails").value||"").trim();
     if (!details){ CG.toast("Add details — describe what happened","err"); return; }
     var tgt = CG.readMemberPicker("acTarget");
+    var gEl = document.getElementById("acGame");
+    if (gEl && !gEl.value){ CG.toast("Pick the forfeit you are appealing","err"); return; }
     var payload = { profile_id: CG.auth.user.id, type:type, route:meta.route, details:details,
       season_id: (CG.SEASON&&CG.SEASON.id)||null, subject: subject||null,
       target: tgt.name, target_profile_id: tgt.id };
     if (type==="trade_request") payload.team_id = (CG.lg._codeToId||{})[me.team]||null;
+    if (type==="forfeit_appeal") payload.game_id = gEl.value;   /* the database sets the club, route and subject */
     if (type==="position_change"){
       payload.current_position = document.getElementById("acCur").value;
       payload.requested_position = document.getElementById("acReq").value;
@@ -8716,6 +8751,26 @@ CG.AFTER._complaintsLive = function(){
           if (CG.reloadLeague) CG.reloadLeague(); else CG.refreshActions();
         });
       });
+  }); });
+  document.querySelectorAll("[data-ffa-decide]").forEach(function(b){ b.addEventListener("click", function(){
+    var overturn = this.getAttribute("data-ffa-decide")==="overturn", id = this.getAttribute("data-ffa-id");
+    CG.modal(overturn ? "Overturn the forfeit" : "Deny the appeal",
+      '<label class="fld"><span>Reason, shown to the club</span><textarea id="ffaResp" rows="4"></textarea></label>'+
+      '<p class="caption">'+(overturn ? "The forfeit is cleared and the result as played stands. Both clubs and the scores channel are told."
+                                     : "The forfeit stands. The club is told, with your reason.")+'</p>',
+      '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ffaGo">'+(overturn ? "Overturn" : "Deny")+'</button>');
+    document.getElementById("ffaGo").addEventListener("click", function(){
+      var txt = (document.getElementById("ffaResp").value||"").trim();
+      if (!txt){ CG.toast("Give the reason; the club sees it","err"); return; }
+      var btn = this; btn.disabled = true;
+      CG.sb.rpc("decide_forfeit_appeal", { p_request:id, p_overturn:overturn, p_response:txt }).then(function(r){
+        btn.disabled = false;
+        if (r.error){ CG.toast(r.error.message||"Couldn’t decide the appeal","err"); return; }
+        if (CG.closeOverlay) CG.closeOverlay();
+        CG.toast(overturn ? "Overturned: the result as played stands" : "Appeal denied: the forfeit stands","ok");
+        if (CG.reloadLeague) CG.reloadLeague(); else CG.refreshActions();
+      });
+    });
   }); });
   document.querySelectorAll("[data-case-history]").forEach(function(b){ b.addEventListener("click", function(){
     CG.caseHistoryModal(this.getAttribute("data-target")); }); });

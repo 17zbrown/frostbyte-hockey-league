@@ -548,7 +548,7 @@ CG.wireCapExceptions = function(){
     pSel.disabled = true; pSel.innerHTML = '<option value="">Reading both clubs’ week…</option>';
     /* the loader holds only the signed-in member's own club's filed sheets, and a filed sheet counts
        against the week (Rule 5.2), so read both clubs' sheets for this week before counting */
-    var wk = (lg.schedule||[]).filter(function(x){ return (x.stage||"regular") === (g.stage||"regular") && x.week === g.week &&
+    var wk = (lg.schedule||[]).filter(function(x){ return (x.stage||"regular") === (g.stage||"regular") && CG.limitWeekOf(x) === CG.limitWeekOf(g) &&
       [x.home, x.away].some(function(c){ return c === g.home || c === g.away; }); });
     var idToCode = lg._idToCode || {};
     CG.sb.from("game_lineups").select("game_id,team_id,center,lw,rw,ld,rd,goalie").in("game_id", wk.map(function(x){ return x.id; })).then(function(r){
