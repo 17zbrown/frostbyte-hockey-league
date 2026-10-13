@@ -2301,9 +2301,13 @@ CG.hubRoster = function(qs){
         ? '<button class="btn btn-ghost btn-sm" data-reinstate="'+p.id+'">Reinstate</button>'
         : '<div class="row-actions" style="display:inline-flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end">'+
           extBtn+squadBtn(p)+
-          '<button class="btn btn-ghost btn-sm" data-block="'+p.id+'">'+(onBlk?"Off block":"To block")+'</button>'+
-          '<button class="btn btn-ghost btn-sm" data-trade="'+p.id+'">Trade</button>'+
-          (function(){ var mv = (CG.role()!=="commish" && CG.canMovePlayer) ? CG.canMovePlayer(p) : null;
+          /* v3.98: after the movement deadline a listing, a trade and a waiver are closed; taking a player off the block is not */
+          (((CG.movesClosedForMe && CG.movesClosedForMe()) && !onBlk) ? '<button class="btn btn-ghost btn-sm" disabled title="'+esc(CG.MOVES_CLOSED)+'">To block</button>'
+            : '<button class="btn btn-ghost btn-sm" data-block="'+p.id+'">'+(onBlk?"Off block":"To block")+'</button>')+
+          ((CG.movesClosedForMe && CG.movesClosedForMe()) ? '<button class="btn btn-ghost btn-sm" disabled title="'+esc(CG.MOVES_CLOSED)+'">Trade</button>'
+            : '<button class="btn btn-ghost btn-sm" data-trade="'+p.id+'">Trade</button>')+
+          (function(){ if (CG.movesClosedForMe && CG.movesClosedForMe()) return '<button class="btn btn-ghost btn-sm" disabled title="'+esc(CG.MOVES_CLOSED)+'">Waive</button>';
+            var mv = (CG.role()!=="commish" && CG.canMovePlayer) ? CG.canMovePlayer(p) : null;
             /* Rule 2.4 minimum service: only the WAIVE waits for his games now (v3.40). A club may
                trade a player the day he signs. v3.79: it binds the club's management, never the
                league office (waive_player skips it for a commissioner). */

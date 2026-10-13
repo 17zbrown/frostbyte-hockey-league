@@ -1337,6 +1337,9 @@ CG.newsCard = function(a, lead, feature){
    in which case nothing renders — the module can never show a made-up date. */
 CG.movementDeadlineTs = function(){
   var s = CG.SEASON||{}, wk = s.trade_deadline_week;
+  /* v3.98: once the deadline has passed the database fixes it (movement_deadline_fixed), and a game moved afterwards
+     changes nothing; the site reads the same instant */
+  if (s.movement_deadline_fixed) return Date.parse(s.movement_deadline_fixed);
   if (!wk || !CG.lg || !(CG.lg.schedule||[]).length) return null;
   var last = 0;
   CG.lg.schedule.forEach(function(g){

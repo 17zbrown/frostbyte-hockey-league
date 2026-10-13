@@ -150,8 +150,9 @@ console.log("\n— it is a real table, so sorting and the phone layer apply");
 console.log("\n— wired into the live hub, above the builder");
 {
   const live = R("src/live/part_live.js");
+  /* v3.98: past the movement deadline the builder is dropped, and while it shows it is still first */
   A("the live Trade Hub renders it, with Build a trade FIRST (v3.37)",
-    /return h\+build\+inc\+outCard\+CG\.tradeBlockCard\(club\);/.test(live),
+    /return h\+\(dlShut\?'':build\)\+inc\+outCard\+CG\.tradeBlockCard\(club\);/.test(live),
     (live.match(/return h\+[^;]*;/) || [])[0]);
   A("...and the board is last, after the offers", /outCard\+CG\.tradeBlockCard\(club\);/.test(live));
   A("adding from the board scrolls back up to the builder",

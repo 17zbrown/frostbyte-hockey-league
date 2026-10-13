@@ -170,6 +170,10 @@ CG.movesLockedNow = function(){
   var ts = CG.movementDeadlineTs ? CG.movementDeadlineTs() : null;
   return !!(ts && (CG.now ? CG.now() : Date.now()) >= ts);
 };
+/* v3.98: the moves the deadline closes, for the person looking. A commissioner (and the club preview) is exempt, as in the
+   database (v3.79), so the office keeps its buttons; everyone else sees them closed with the reason. */
+CG.movesClosedForMe = function(){ return !!(CG.movesLockedNow && CG.movesLockedNow()) && CG.role() !== "commish"; };
+CG.MOVES_CLOSED = "Closed at the movement deadline (Rule 2.4).";
 
 CG.posLocksOn = function(s){ var sn = s || CG.SEASON; return !!(sn && sn.position_locks); };
 
@@ -1646,8 +1650,13 @@ CG.loadManagerData = async function(){
         .eq("team_id", myTid).order("created_at",{ascending:false}).limit(80)
         .then(function(mm){ CG.lg._mgmtMoves = (mm && !mm.error && mm.data) || []; CG._mgmtMovesCache = CG.lg._mgmtMoves; }, function(){ CG.lg._mgmtMoves = CG._mgmtMovesCache || []; }));
       /* my club's live trades (incoming + outgoing, still open) */
-      jobs.push(CG.sb.from("trades").select("*").or("from_team_id.eq."+myTid+",to_team_id.eq."+myTid).eq("status","proposed").order("created_at",{ascending:false})
+      jobs.push(CG.sb.from("trades").select("*").or("from_team_id.eq."+myTid+",to_team_id.eq."+myTid).eq("status","proposed").eq("season_id", (CG.SEASON||{}).id || "00000000-0000-0000-0000-000000000000").order("created_at",{ascending:false})
         .then(function(tr){ CG.lg._myTrades = (tr && !tr.error && tr.data) || []; }, function(){ CG.lg._myTrades = []; }));
+      /* v3.98: past the movement deadline a club signs only to replace a player whose sign-up was removed after it,
+         one signing per removal (Rule 2.4); the Sign button opens only while the club holds one */
+      CG.lg._replacements = 0;
+      if (CG.SEASON && CG.SEASON.id) jobs.push(CG.sb.from("replacement_signings").select("id").eq("team_id", myTid).eq("season_id", CG.SEASON.id).is("used_at", null)
+        .then(function(rr){ CG.lg._replacements = (rr && !rr.error && rr.data) ? rr.data.length : 0; }, function(){ CG.lg._replacements = 0; }));
       /* server vetoes + resolved servers for my club's upcoming games */
       if (upIds.length){
         jobs.push(CG.sb.from("game_vetoes").select("game_id,team_id,veto,preferred,pref1,pref2").in("game_id", upIds)
@@ -3269,7 +3278,12 @@ CG.ROUTES.register = function(){
   var statusCard = reg ? '<div class="note grn" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re registered for Season '+(s.number||1)+'.</b> '+(myCt&&onRoster
       ? 'Your contract with <b>'+esc(ctName)+'</b> is active — you’re on the roster through Season '+(myCt.end_season||snumR)+'.'
       : 'Position on file: <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"—")+'</b>. '+
-        ((reg.created_at && !isNaN(dlMs) && Date.parse(reg.created_at) > dlMs)
+        /* v3.98: a season with its own chapter (Chapter S2) sends late and undrafted sign-ups to the league-wide training camp pool */
+        (upChR
+          ? ((reg.created_at && !isNaN(dlMs) && Date.parse(reg.created_at) > dlMs)
+              ? 'You registered after the sign-up cutoff ('+dlText+'), so you’re not in the draft. You join the league-wide training camp pool, where clubs request you for a night and bid on you after six games (Chapter S2).'
+              : 'You’re in the draft pool, and the cutoff is '+dlText+'. If you’re not drafted you join the league-wide training camp pool (Chapter S2). You’ll be notified either way.')
+          : (reg.created_at && !isNaN(dlMs) && Date.parse(reg.created_at) > dlMs)
           ? (CG.isBasic(s)
               ? 'You registered after the sign-up cutoff ('+dlText+'), so you’re not in the draft — you’re placed on a club as depth once it concludes (Rule 2.8). You’ll be notified.'
               : 'You registered after the draft-eligibility deadline ('+dlText+'), so you’re not in the draft — you’re placed on a club automatically once it concludes (Rule 2.2). You’ll be notified.')
@@ -13721,7 +13735,11 @@ CG.hubFreeAgents = function(){
   var basicFA = CG.isBasic(), draftDoneFA = !!(lg.draftState && String(lg.draftState.status)==="complete");
   var canSign = basicFA ? (draftDoneFA || !!(s.starts_at && nowMs >= Date.parse(s.starts_at)))
                         : !!(faO && nowMs >= faO);   /* full: signable during the window and after it, never before */
-  var winChip = basicFA ? (canSign ? '<span class="chip chip-win">Waived players signable until the movement deadline</span>' : '<span class="chip chip-warn">Opens the moment the draft concludes</span>')
+  /* v3.98: past the movement deadline a club signs only with a replacement signing (Rule 2.4); the office is exempt */
+  var dlClosed = (CG.movesClosedForMe && CG.movesClosedForMe()), dlRepl = lg._replacements || 0;
+  if (dlClosed && !dlRepl) canSign = false;
+  var winChip = dlClosed ? (dlRepl ? '<span class="chip chip-warn">Deadline passed: '+dlRepl+' replacement signing'+(dlRepl===1?'':'s')+' available (Rule 2.4)</span>' : '<span class="chip">Signings closed at the movement deadline (Rule 2.4)</span>')
+    : basicFA ? (canSign ? '<span class="chip chip-win">Waived players signable until the movement deadline</span>' : '<span class="chip chip-warn">Opens the moment the draft concludes</span>')
     : !faO ? '<span class="chip chip-warn">No free-agency dates set yet</span>'
     : nowMs < faO ? '<span class="chip chip-warn">Opens '+CG.fmtFull(faO)+'</span>'
     : (faC && nowMs < faC) ? '<span class="chip chip-live"><span class="live-dot"></span>Window open — closes '+CG.fmtFull(faC)+'</span>'
@@ -13787,7 +13805,7 @@ CG.hubFreeAgents = function(){
           '<td class="tright"><span class="row-actions" style="display:inline-flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end">'+
             '<button class="btn btn-ghost btn-sm" data-fa-dm="'+r.profile_id+'"'+(held?' disabled title="Exclusive to '+esc(rhCode)+' until free agency opens — approaching him is tampering (Rule 2.2)"':'')+'>Approach</button>'+
             '<button class="btn btn-chrome btn-sm" data-fa-sign="'+r.id+'" data-name="'+esc(prof.gamertag||"this player")+'"'+((canSign&&!full&&!held)?"":" disabled")+
-              (held?' title="Exclusive to '+esc(rhCode)+' until free agency opens (Rule 2.2)"':(!canSign)?' title="'+(basicFA?'Signings open when the draft concludes':'Offers open with free agency')+'"':full?' title="Your active roster and training camp are both full (Rule 2.1)"':activeFull?' title="Your active roster is full, so he would join your training camp (Rule 2.1)"':'')+'>'+(basicFA?'Sign':'Offer')+'</button>'+
+              (held?' title="Exclusive to '+esc(rhCode)+' until free agency opens (Rule 2.2)"':(!canSign)?' title="'+(dlClosed?'Signings closed at the movement deadline (Rule 2.4)':basicFA?'Signings open when the draft concludes':'Offers open with free agency')+'"':full?' title="Your active roster and training camp are both full (Rule 2.1)"':activeFull?' title="Your active roster is full, so he would join your training camp (Rule 2.1)"':'')+'>'+(basicFA?'Sign':'Offer')+'</button>'+
           '</span></td></tr>';
       }).join("")+'</tbody></table></div>'+
       '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+(basicFA
@@ -13949,10 +13967,11 @@ CG.tradeBlockCard = function(club){
           return '<span class="chip" title="'+esc((CG.POS_NAME[p.pos]||p.pos)+' · '+CG.fmtMoney(p.salary))+'">'+esc(p.tag)+' <span class="mono" style="opacity:.7">'+esc(p.pos)+'</span></span>';
         }).join("")+'</div>'
       : '<p class="caption" style="margin-top:6px">You have nobody listed.</p>')+
+    (CG.movesLockedNow && CG.movesLockedNow() ? '<p class="caption" style="margin-top:8px">The trade block closed with trades at the movement deadline, and its listings came down (Rule 2.4).</p></div>' :
     '<p class="caption" style="margin-top:8px">List a player, or take one off, from the '+
       '<a href="#/hub/roster" style="border-bottom:2px solid var(--chrome);font-weight:600">Roster tab</a>. '+
       'A listing is public: it is posted to #trade-block and appears here for every club. An offer is not '+
-      '(Rule 2.3).</p></div>';
+      '(Rule 2.3).</p></div>');
 
   var body;
   if (!league.length){
@@ -13970,7 +13989,8 @@ CG.tradeBlockCard = function(club){
         if (already){
           btn = '<span class="chip chip-win">In your draft</span>';
         } else {
-          btn = '<button class="btn btn-chrome btn-sm" data-block-get="'+p.id+'" data-block-club="'+esc(p.team)+'">Add to trade</button>';
+          btn = (CG.movesClosedForMe && CG.movesClosedForMe()) ? '<span class="caption">'+esc(CG.MOVES_CLOSED)+'</span>'
+            : '<button class="btn btn-chrome btn-sm" data-block-get="'+p.id+'" data-block-club="'+esc(p.team)+'">Add to trade</button>';
         }
         return '<tr><td class="tleft"><span class="playercell"><span class="nm" data-go="'+CG.playerRoute(p)+'" style="cursor:pointer">'+esc(p.tag)+'</span>'+
             (CG.isCamp(p) ? ' '+CG.campChip("xs") : '')+'</span></td>'+
@@ -14003,6 +14023,9 @@ CG.hubTradeHubLive = function(qs){
   /* v3.72: trades stay open through the weekly roster freeze, and the page says so while it is on */
   var fzT = CG.rosterFreeze ? CG.rosterFreeze() : { on:false };
   if (fzT.on && !(CG.movesLockedNow && CG.movesLockedNow())) h+='<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+'<span><b style="font-family:var(--f-disp)">Roster freeze, trades open.</b> Call-ups and send-downs are locked until '+esc(fzT.reopens)+', but you can still propose and accept trades. Each player you receive takes the place of one you send, an active place for an active place and a camp place for a camp place, unless his position group or the active roster is full, when he joins training camp instead; an extra player joins your active roster only where both have room (Rule 2.1).</span></div>';
+  /* v3.98: after the movement deadline the hub keeps only what moves nobody: declining or withdrawing an open offer */
+  var dlShut = (CG.movesClosedForMe && CG.movesClosedForMe());
+  if (dlShut) h+='<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+'<span><b style="font-family:var(--f-disp)">Trades are closed.</b> The movement deadline has passed, so no trade can be proposed or accepted until next season (Rule 2.4). An offer still open can be declined or withdrawn.</span></div>';
   var inc='<div class="card"><div class="card-h"><h3>Incoming offers</h3><span class="chip '+(incoming.length?"chip-warn":"chip-win")+'">'+(incoming.length?incoming.length+" awaiting you":"None pending")+'</span></div>';
   if(incoming.length){
     inc+=incoming.map(function(tr){ var fromCode=lg._idToCode[tr.from_team_id];
@@ -14014,9 +14037,9 @@ CG.hubTradeHubLive = function(qs){
         CG.tradeBalanceCard(fromCode, tr.offered_profile_ids, lg._idToCode[tr.to_team_id], tr.requested_profile_ids, { compact:true })+
         '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;justify-content:flex-end">'+
           '<button class="btn btn-ghost btn-sm" data-trade-open="'+tr.id+'">Details</button>'+
-          '<button class="btn btn-ghost btn-sm" data-trade-counter="'+tr.id+'">Counter</button>'+
+          (dlShut ? '' : '<button class="btn btn-ghost btn-sm" data-trade-counter="'+tr.id+'">Counter</button>')+
           '<button class="btn btn-ghost btn-sm" data-trade-decline="'+tr.id+'">Decline</button>'+
-          '<button class="btn btn-chrome btn-sm" data-trade-accept="'+tr.id+'">Accept</button></div></div>';
+          (dlShut ? '' : '<button class="btn btn-chrome btn-sm" data-trade-accept="'+tr.id+'">Accept</button>')+'</div></div>';
     }).join("");
   } else { inc+='<div class="card-b"><p class="small" style="color:var(--steel)">No open offers right now. When another club sends you one, it lands here.</p></div>'; }
   inc+='</div>';
@@ -14052,7 +14075,7 @@ CG.hubTradeHubLive = function(qs){
   /* v3.37 (commissioner): Build a trade stays at the top of the page. The block board is a long
      table and it had pushed the builder down; the builder is the tool, so it comes first and
      everything that feeds it follows. Add to trade scrolls back up to it, below. */
-  return h+build+inc+outCard+CG.tradeBlockCard(club);
+  return h+(dlShut?'':build)+inc+outCard+CG.tradeBlockCard(club);
 };
 /* ================================================================
    TRADE INTEL (v2.72): every trade opens to its players' numbers, with a balance reading

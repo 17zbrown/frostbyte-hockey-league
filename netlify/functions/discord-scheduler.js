@@ -610,15 +610,20 @@ async function gameReminders(games, teamById, now, errors) {
 async function caseworkNudge(cfg, teamById, et, dry, errors, unconfigured) {
   const url = cfg.discord_staff_casework_webhook || cfg.discord_staff_webhook;   // staff channels only — NEVER the public default
   if (!url) { unconfigured.push("casework nudge (discord_staff_casework_webhook)"); return "no casework webhook"; }
-  const [profs, links, oa, sa, ma, ballots, cases] = await Promise.all([
+  const [profs, links, oaAll, sa, ma, ballots, cases, seasons] = await Promise.all([
     sbGet("profiles?select=id,role,departments,gamertag"),
     sbGet("discord_links?select=profile_id,discord_id"),
-    sbGet("owner_applications?status=eq.pending&select=id,profile_id"),
+    sbGet("owner_applications?status=eq.pending&select=id,profile_id,season_id"),
     sbGet("staff_applications?status=eq.pending&select=id,profile_id"),
     sbGet("management_applications?status=eq.pending&select=id,role,team_id,nominee_id"),
     sbGet("application_ballots?select=app_type,application_id,voter_id"),
     sbGet("action_requests?status=not.in.(resolved,denied)&assigned_to=not.is.null&select=id,subject,type,assigned_to"),
+    sbGet("seasons?select=id,owner_app_deadline"),
   ]);
+  // v3.98: an owner application is decided only after its season's applications close (v3.95), so nobody owes a vote
+  // before then. Season 2's open on Oct 17 and close Dec 12; without this the nudge pinged reviewers daily for two months.
+  const appsClose = Object.fromEntries(seasons.map((x) => [x.id, x.owner_app_deadline ? Date.parse(x.owner_app_deadline) : 0]));
+  const oa = oaAll.filter((a) => !(appsClose[a.season_id] > Date.now()));
   const did = Object.fromEntries(links.filter((l) => l.discord_id).map((l) => [l.profile_id, l.discord_id]));
   const gt = Object.fromEntries(profs.map((p) => [p.id, p.gamertag || "a member"]));
   const mention = (pid) => (did[pid] ? `<@${did[pid]}>` : `**${gt[pid] || "a reviewer"}**`);
