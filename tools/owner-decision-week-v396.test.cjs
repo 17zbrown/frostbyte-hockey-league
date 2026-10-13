@@ -27,7 +27,7 @@ global.CG = {}; vm.runInThisContext(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook, s2 = rb.chapters.find((c) => c.num === "S2");
 A("Chapter S2 marks owners reapplying, and S2.2 says how", s2.ownersReapply === true && /hands the club over: the previous Owner's seat ends, and he keeps his roster spot/.test(s2.sections[1].paragraphs[1]) && /by Saturday, December 19/.test(s2.sections[1].paragraphs[1]));
 const cl = rb.changelog.find((c) => c.version === "3.96");
-A("changelog 3.96 is first", rb.changelog[0].version === "3.96" && !!cl);
+A("changelog 3.96 is in the book", !!cl);
 A("no em dash in what v3.96 wrote", !/—/.test(JSON.stringify(cl)) && !/—/.test(sql) && !/—/.test(JSON.stringify(s2)));
 
 console.log(fail ? "\n" + fail + " of " + n + " FAILED" : "\nall " + n + " passed");

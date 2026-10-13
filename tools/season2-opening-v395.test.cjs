@@ -40,7 +40,7 @@ const t = JSON.stringify(s2);
 A("...the calendar rule and its Season 2 dates", /close at 11:59 PM Eastern on the Saturday of the following week/.test(t) && /Saturday, December 12, 2026 at 11:59 PM/.test(t) && /Saturday, January 9, 2027 at 9:00 PM/.test(t));
 A("...every club decided again; none decided before the close", /Every club's ownership is decided again for Season 2/.test(t) && /No owner application is decided before applications close\./.test(t));
 A("...the format: 10 rounds, 12 then 15, 5/3/1, league-wide camp, Saturday bidding, no weekly limits, 17", /ten \(10\) rounds/.test(t) && /twelve \(12\) players until the draft concludes and fifteen \(15\)/.test(t) && /five \(5\) forwards, three \(3\) defensemen and one \(1\) goaltender/.test(t)
-  && /one league-wide training camp pool/.test(t) && /every Saturday at 9:00 PM Eastern/.test(t) && /There is no weekly limit/.test(t) && /seventeen \(17\) of fifty-four \(54\)/.test(t));
+  && /one league-wide training camp pool/.test(t) && /every Saturday at 9:00 PM Eastern and runs for one hour/.test(t) && /There is no weekly limit/.test(t) && /seventeen \(17\) of fifty-four \(54\)/.test(t));
 const cl = rb.changelog.find((c) => c.version === "3.95");
 A("changelog 3.95 says what changed", !!cl && /Chapter S2/.test(cl.summary));
 A("no em dash in what v3.95 wrote", !/—/.test(t) && !/—/.test(JSON.stringify(cl)) && !/—/.test(sql.replace(/to be draft-eligible — join later/g, "")));
