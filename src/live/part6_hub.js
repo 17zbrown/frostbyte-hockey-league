@@ -2057,9 +2057,8 @@ CG.AFTER._lines = function(qs){
    ROSTER — cap sheet + waive / trade / trade-block actions
    ================================================================ */
 CG.mgmtTag = function(role){ return role==="owner"?"Owner":role==="gm"?"GM":role==="agm"?"AGM":""; };
-/* playoff-eligibility floor (Rule 8.3): a player must appear in at least this
-   share of the club's regular-season games — fractions round up. No weekly max. */
-/* v2.7: the 30% playoff floor is abolished — every rostered player is playoff-eligible. */
+/* the club's regular-season game count. (The share-based floor this once fed was abolished in v2.7; today's Rule 8.3
+   floor is a season setting, prorated for a late joiner by public.player_playoff_floor, v3.94 and v4.00.) */
 CG.clubSeasonGames = function(club){
   var n = (CG.lg.schedule||[]).filter(function(g){
     return (g.stage||"regular")==="regular" && (g.home===club || g.away===club); }).length;
@@ -2427,7 +2426,7 @@ CG.hubRoster = function(qs){
             (r.done?'<span class="chip chip-win" style="font-size:9px">eligible</span>':danger?'<span class="chip chip-loss" style="font-size:9px">can’t reach '+r.min+'</span>':'<span class="caption">needs '+r.need+'</span>')+
           '</div>';
         }).join("")+'</div>' : '<p class="caption">No roster yet.</p>')+
-      '<p class="caption" style="margin-top:12px">Rule 8.3: a player needs '+minGp+' regular-season games to be dressed in the playoffs. A player first placed after opening night (*) needs the same share of the games his club had left when he was placed, rounded up: '+Math.ceil(minGp/2)+' with half the season left. The club has '+leftGp+' regular-season game'+(leftGp===1?'':'s')+' left; a player who can no longer reach his number within his weekly limit is marked. Spread the games so the players you want in the playoffs get there.</p></div></div>';
+      '<p class="caption" style="margin-top:12px">Rule 8.3: a player needs '+minGp+' regular-season games to be dressed in the playoffs. A player first placed after opening night (*) needs the same share of the games his club had left when he was placed, rounded to the nearest game, a fraction of .4 or less down: '+CG.roundFloorShare(minGp/2)+' with half the season left. The club has '+leftGp+' regular-season game'+(leftGp===1?'':'s')+' left; a player who can no longer reach his number within his weekly limit is marked. Spread the games so the players you want in the playoffs get there.</p></div></div>';
   }
   /* v2.7: the 30% playoff floor is abolished in the full format — the basic format's floor is the Road card above.
      The card states the caps that DO exist. */

@@ -193,6 +193,10 @@ CG.rosterShapeWords = function(s){ var r = CG.FORMAT_RULES[CG.seasonFormat(s)];
 /* v3.94 (Rule 8.3): a player's own playoff floor. The season's floor, prorated for a player first placed after
    opening night (public.player_playoff_floor, loaded for every rostered player as lg.playoffFloors). Until that
    loads, the season's floor stands in. */
+/* v4.00 (commissioner, 2026-10-13): "Round down at .4". A prorated share rounds to the nearest game, a fraction of .4 or
+   less down and anything above it up, exactly as public.player_playoff_floor does. Only for words on the page: every
+   player's own figure comes from the database. */
+CG.roundFloorShare = function(x){ var f = Math.floor(x); return (x - f > 0.4) ? Math.ceil(x) : f; };
 CG.playoffFloorFor = function(pid){
   var m = CG.lg && CG.lg.playoffFloors;
   return (m && m[pid] != null) ? m[pid] : CG.playoffMinGp();
