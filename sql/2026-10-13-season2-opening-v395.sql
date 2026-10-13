@@ -1,4 +1,6 @@
 -- v3.95 (2026-10-13): Season 2 opens on the commissioner's off-season timeline, with owner applications per season.
+-- SUPERSEDED IN PART by v4.01: playoff_min_gp is no longer set by hand. The season_playoff_floor_trg trigger writes 30% of
+-- the season's length (16 for Season 2), so the 17 below and its check would fail if this record were run again.
 --
 -- Commissioner, 2026-10-12/13: the off-season after Season 1 runs "final round of playoffs end; the next week's Saturday
 -- is when Ownership applications close; the next week after that is when owners are decided on and assigned to their

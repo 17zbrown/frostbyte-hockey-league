@@ -100,7 +100,7 @@ CG.now = function(){ return Date.now(); };
    through CG.fmt(key) so it never lives in two places again. */
 CG.FORMAT_RULES = {
   /* basic (v2.51): 15 players; camp at 3 games a week; everyone else 6 a week; a 4-game series cap and a
-     16-game regular-season floor for the playoffs (the default: each season may publish its own, v2.67).
+     16-game regular-season floor for the playoffs (the format's figure; v4.01: a season's floor is 30% of its own length, written by the database).
      v3.64 (commissioner, 2026-09-28, Q29): at most 7 forwards, 5 defensemen and 3 goaltenders, which sum
      to the fifteen, so "two full lines plus three of any position" (lines 2, flex 3) is gone. Mirrors
      public.format_rules('basic'). */
@@ -118,10 +118,14 @@ CG.fmt = function(key, s){
   /* Rule 2.8 (v2.64): the round count is a commissioner-published season setting — the format's
      figure is only the default. Mirrors public.season_rules(). */
   if (key === "draft_rounds"){ var sn = s || CG.SEASON; if (sn && sn.draft_rounds) return sn.draft_rounds; }
-  /* Rule 8.3 (v2.67): so is the playoff eligibility floor. An explicit 0 means "no floor", so the
-     season's value wins whenever it is set at all, not only when it is truthy. */
-  /* v3.63 (Q64): only in the basic format; the full format's playoff figures are fixed (Appendix A) */
-  if (key === "playoff_min_gp" && CG.seasonFormat(s) === "basic"){ var sp = s || CG.SEASON; if (sp && sp.playoff_min_gp != null) return sp.playoff_min_gp; }
+  /* Rule 8.3 (v4.01, commissioner: "Keep the same percentage no matter what we end up making the season length to be"):
+     the playoff eligibility floor is 30% of the season's regular-season games. The database writes it onto the season
+     (season_playoff_floor_trg), so the season's value is read first; a season row without it works it out from the
+     season's own length the same way. v3.63 (Q64): basic format only; the full format's figures are fixed (Appendix A). */
+  if (key === "playoff_min_gp" && CG.seasonFormat(s) === "basic"){ var sp = s || CG.SEASON;
+    if (sp && sp.playoff_min_gp != null) return sp.playoff_min_gp;
+    /* the shape read exactly as the generator reads it, as the database does before a schedule is built */
+    if (sp && CG.seasonShape && CG.playoffFloorOfLength) return CG.playoffFloorOfLength(CG.seasonShape(sp).perClub); }
   return CG.FORMAT_RULES[CG.seasonFormat(s)][key];
 };
 /* Rule 5.2: the weekly appearance cap for one player — mirrors public.weekly_cap() */
@@ -197,6 +201,11 @@ CG.rosterShapeWords = function(s){ var r = CG.FORMAT_RULES[CG.seasonFormat(s)];
    less down and anything above it up, exactly as public.player_playoff_floor does. Only for words on the page: every
    player's own figure comes from the database. */
 CG.roundFloorShare = function(x){ var f = Math.floor(x); return (x - f > 0.4) ? Math.ceil(x) : f; };
+/* v4.01 (Rule 8.3): the floor is thirty percent of a season's regular-season games, rounded the same way. Worked in whole
+   numbers, as public.playoff_floor_of_length does, so a share landing exactly on .4 (48 games: 14.4) rounds down here too
+   instead of floating up past it. */
+CG.PLAYOFF_FLOOR_PCT = 30;
+CG.playoffFloorOfLength = function(games){ var t = (+games || 0) * CG.PLAYOFF_FLOOR_PCT, q = Math.floor(t / 100); return (t - q * 100 > 40) ? q + 1 : q; };
 CG.playoffFloorFor = function(pid){
   var m = CG.lg && CG.lg.playoffFloors;
   return (m && m[pid] != null) ? m[pid] : CG.playoffMinGp();
@@ -12256,7 +12265,8 @@ CG.seasonForm = function(id){
     '<label class="fld"><span>Owner salary ($M)</span><input id="ssOwnSal" type="number" min="0" step="0.25" value="'+(((s.owner_salary==null?0:s.owner_salary))/1e6)+'"></label>'+
     '<label class="fld"><span>GM salary ($M)</span><input id="ssGmSal" type="number" min="0" step="0.25" value="'+(((s.gm_salary==null?0:s.gm_salary))/1e6)+'"></label>'+
     '<label class="fld"><span>AGM salary ($M)</span><input id="ssAgmSal" type="number" min="0" step="0.25" value="'+(((s.agm_salary==null?2000000:s.agm_salary))/1e6)+'"></label>'+
-    '<label class="fld"><span>Playoff eligibility floor (regular-season games)</span><input id="ssPoMin" type="number" min="0" max="200" step="1" value="'+(s.playoff_min_gp!=null?s.playoff_min_gp:CG.fmt("playoff_min_gp", s))+'" title="Rule 8.3: regular-season games a player needs to be dressed in the playoffs. 0 means no floor."></label>'+
+    /* v4.01 (Rule 8.3): 30% of the season's regular-season games, worked out from its length; not typed */
+    '<label class="fld"><span>Playoff eligibility floor (30% of the season)</span><input id="ssPoMin" type="number" value="'+CG.fmt("playoff_min_gp", s)+'" readonly title="Rule 8.3: thirty percent of the season’s regular-season games, a fraction of .4 or less rounded down: the schedule once it is built, else the weeks, nights and puck-drop times. The full format has no floor."></label>'+
     '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||CG.fmt("roster_max", s))+'" readonly title="Set by the season format (Rule 2.1): '+CG.FORMAT_RULES.basic.roster_max+' basic, '+CG.FORMAT_RULES.full.roster_max+' full"></label>'+
     '<label class="fld"><span>Trade deadline (week)</span><input id="ssTdw" type="number" min="1" max="20" value="'+(s.trade_deadline_week||CG.fmt("trade_deadline_week", s))+'"></label>'+
     '<label class="fld"><span>Roster moves</span><select id="ssMoves">'+["auto","locked","open"].map(function(x){ return '<option'+(s.moves_lock_override===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+
@@ -12268,10 +12278,12 @@ CG.seasonForm = function(id){
   function syncFormat(){
     var f = fmtSel.value, r = CG.FORMAT_RULES[f];
     document.getElementById("ssRoster").value = r.roster_max;
-    if (isNew){ document.getElementById("ssCap").value = r.salary_cap/1e6; document.getElementById("ssTdw").value = r.trade_deadline_week; document.getElementById("ssPoMin").value = r.playoff_min_gp; }
+    if (isNew){ document.getElementById("ssCap").value = r.salary_cap/1e6; document.getElementById("ssTdw").value = r.trade_deadline_week; }
+    /* v4.01: 30% of the season's length in the basic format; the full format has no floor (Appendix A) */
+    document.getElementById("ssPoMin").value = f==="basic" ? (isNew ? CG.playoffFloorOfLength(CG.seasonShape ? CG.seasonShape({ weeks: r.weeks }).perClub : 54) : CG.fmt("playoff_min_gp", s)) : 0;
     ["ssOff","ssPre","ssFaOpen","ssFaClose"].forEach(function(id){ var el = document.getElementById(id); el.disabled = (f==="basic"); if (f==="basic") el.value = ""; el.closest("label").style.opacity = f==="basic" ? ".45" : ""; });
     document.getElementById("ssFormatNote").textContent = f==="basic"
-      ? "No pre-season, no free-agency week: a "+r.draft_rounds+"-round snake draft on a Saturday, puck drop the Wednesday after, "+r.weeks+" weeks, the deadline after week "+r.trade_deadline_week+", a "+r.roster_max+"-man roster ("+CG.rosterShapeWords({format:f})+")"+(r.camp_max>=999?" with unlimited camp":" with a training camp of up to "+r.camp_max)+", everyone "+r.cap_skater+" games a week (camp "+r.cap_camp+"), $"+(r.salary_cap/1e6)+"M cap, six of eight in the playoffs with a "+r.playoff_min_gp+"-game floor and a "+r.series_cap+"-game series cap."
+      ? "No pre-season, no free-agency week: a "+r.draft_rounds+"-round snake draft on a Saturday, puck drop the Wednesday after, "+r.weeks+" weeks, the deadline after week "+r.trade_deadline_week+", a "+r.roster_max+"-man roster ("+CG.rosterShapeWords({format:f})+")"+(r.camp_max>=999?" with unlimited camp":" with a training camp of up to "+r.camp_max)+", everyone "+r.cap_skater+" games a week (camp "+r.cap_camp+"), $"+(r.salary_cap/1e6)+"M cap, six of eight in the playoffs with a floor of 30% of the regular season ("+CG.playoffFloorOfLength(CG.seasonShape ? CG.seasonShape({ weeks: r.weeks }).perClub : 54)+" games at "+r.weeks+" weeks) and a "+r.series_cap+"-game series cap."
       : "The richer model on the shelf: two dark weeks, a two-week pre-season with random loans, a "+r.draft_rounds+"-round linear draft, a free-agency week, "+r.weeks+" weeks, a "+r.roster_max+"-man roster (9 F / 6 D / "+r.quota.G+" G), goaltenders "+r.cap_goalie+" games a week, $"+(r.salary_cap/1e6)+"M cap, multi-season contracts, extensions and pick trading.";
     document.getElementById("ssSpaceHelp").textContent = f==="basic"
       ? "Give “Draft night” a Saturday and Auto-space fills the rest: sign-ups open until 11:59 PM ET the Thursday before it, puck drop the Wednesday after, this season’s run of regular-season weeks, and playoffs the game week after the last one. Every leg steps over the weeks holding a holiday you have ticked in Holidays. The sign-up cutoff is a draft-eligibility cutoff, not a hard close — registration stays open, and anyone who signs up late is placed on a club as depth after the draft. Nothing saves until you hit Save."
@@ -12363,10 +12375,6 @@ CG.seasonForm = function(id){
     if(document.getElementById("ssRegOpen").value==="1" && otherOpen){ CG.toast("Sign-ups are already open for "+(otherOpen.name||"another season")+" — one season takes sign-ups at a time (Rule 1.1). Close that one first.","err"); return; }
     function iso(elId){ var v=document.getElementById(elId).value; return v ? CG.etISO(v.slice(0,10), v.slice(11,16)) : null; }
     var fmtV=document.getElementById("ssFormat").value, fr=CG.FORMAT_RULES[fmtV];
-    /* Rule 8.3 (v2.67): the box takes a whole number of games, 0 included (no floor); a typed
-       negative or a non-number is refused rather than quietly saved as "no floor" */
-    var poRaw=document.getElementById("ssPoMin").value.trim();
-    if (poRaw!=="" && !/^\d{1,3}$/.test(poRaw)){ CG.toast("The playoff eligibility floor is a whole number of regular-season games (0 for no floor)","err"); return; }
     var cap=Math.round(parseFloat(document.getElementById("ssCap").value||String(fr.salary_cap/1e6))*1e6);
     if (fmtV==="basic" && (iso("ssPre")||iso("ssFaOpen")||iso("ssFaClose"))){ CG.toast("A basic-format season has no pre-season or free-agency window — clear those dates or pick the full format","err"); return; }
     var rec={ name:name, number:num, status:document.getElementById("ssStatus").value, format:fmtV,
@@ -12383,9 +12391,7 @@ CG.seasonForm = function(id){
       gm_salary:Math.round(parseFloat(document.getElementById("ssGmSal").value||"0")*1e6),
       agm_salary:Math.round(parseFloat(document.getElementById("ssAgmSal").value||"2")*1e6),
       trade_deadline_week:parseInt(document.getElementById("ssTdw").value,10)||fr.trade_deadline_week,
-      /* Rule 8.3 (v2.67): the playoff floor is the season's to publish; an empty box falls back to
-         the format's figure (null), 0 is a real answer (no floor) */
-      playoff_min_gp:(poRaw === "" ? null : parseInt(poRaw,10)),
+      /* Rule 8.3 (v4.01): the playoff floor is not sent; the database works it out from the season's length */
       moves_lock_override:document.getElementById("ssMoves").value };
     if (isNew) rec.weeks = fr.weeks;
     var btn=this; btn.disabled=true;
