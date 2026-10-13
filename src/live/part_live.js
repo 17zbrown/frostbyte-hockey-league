@@ -3808,12 +3808,20 @@ CG.activeFranchiseSet = function(){
   });
   return set;
 };
+/* v3.96 (commissioner, 2026-10-13): "If we add expansion clubs, we will do that manually as needed." An applicant
+   chooses among the league's current clubs; the database refuses anything else (guard_owner_app_picks), and a new club
+   is added by the league office before it can be chosen. */
 CG.franchiseOptions = function(selected){
-  var active = CG.activeFranchiseSet();
-  return '<option value="">Choose a franchise…</option>'+CG.NHL_FRANCHISES.map(function(name){
-    var taken = active[name];
-    return '<option value="'+esc(name)+'"'+(selected===name?" selected":"")+'>'+esc(name)+(taken?" · already an active club":"")+'</option>';
+  var clubs = (CG.TEAMS||[]).map(function(t){ return ((t.city ? t.city+" " : "") + t.name).trim(); }).filter(Boolean).sort();
+  return '<option value="">Choose a club…</option>'+clubs.map(function(name){
+    return '<option value="'+esc(name)+'"'+(selected===name?" selected":"")+'>'+esc(name)+'</option>';
   }).join("");
+};
+/* v3.96: a season whose owners all reapply hands a club over on approval. The published rule is the marker: its
+   rulebook chapter (Chapter S2) carries ownersReapply, mirroring app_config owners_reapply_<n> in the database. */
+CG.ownersReapply = function(seasonId){
+  var s = (CG.SEASONS||[]).find(function(x){ return x.id === seasonId; });
+  return !!(s && ((CG.CONTENT && CG.CONTENT.rulebook && CG.CONTENT.rulebook.chapters) || []).some(function(c){ return c.upcomingSeason === s.number && c.ownersReapply; }));
 };
 /* ---------------------------------------------------------------- *
  * Which of the three the review board is awarding.
@@ -3825,14 +3833,17 @@ CG.franchiseOptions = function(selected){
  * the commissioners, which is honest, where quietly substituting a different club
  * was not.
  * ---------------------------------------------------------------- */
-CG.ownerAppClubStatus = function(name){
+CG.ownerAppClubStatus = function(name, a){
   var code = CG.activeFranchiseSet()[name];
   var team = code ? (CG.TEAMS||[]).find(function(t){ return t.code===code; }) : null;
-  if (team && team.owner) return { ok:false, chip:'<span class="chip chip-loss chip-xs">Already has an owner</span>' };
-  if (team)               return { ok:true,  chip:'<span class="chip chip-win chip-xs">Club is open</span>' };
-  if (CG.NHL_FRANCHISES.indexOf(name) >= 0)
-                          return { ok:true,  chip:'<span class="chip chip-chrome chip-xs">Would be founded</span>' };
-  return { ok:false, chip:'<span class="chip chip-warn chip-xs">Not a franchise we know</span>' };
+  /* v3.96: no club is founded from an application, and in a season whose owners all reapply the club passes over */
+  if (!team) return { ok:false, chip:'<span class="chip chip-warn chip-xs">Not a CGHL club</span>' };
+  var holder = team.owner || null;   /* CG.TEAMS carries the Owner's profile id as owner */
+  if (a && holder && holder === a.profile_id) return { ok:true, chip:'<span class="chip chip-win chip-xs">Their club now</span>' };
+  if (team.owner && a && CG.ownersReapply(a.season_id))
+    return { ok:true, chip:'<span class="chip chip-chrome chip-xs">Held now: passes to them if approved</span>' };
+  if (team.owner) return { ok:false, chip:'<span class="chip chip-loss chip-xs">Already has an owner</span>' };
+  return { ok:true, chip:'<span class="chip chip-win chip-xs">Club is open</span>' };
 };
 CG.ownerAppClubPicker = function(a){
   var picks = [a.preferred_club, a.franchise_2, a.franchise_3].filter(Boolean);
@@ -3871,7 +3882,7 @@ CG.ownerAppClubPicker = function(a){
   }
 
   h += '<div class="stack" style="gap:8px">'+picks.map(function(name, i){
-    var st = CG.ownerAppClubStatus(name), on = (awarded.toLowerCase() === name.toLowerCase());
+    var st = CG.ownerAppClubStatus(name, a), on = (awarded.toLowerCase() === name.toLowerCase());
     return '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:9px 0'+(i?';border-top:1px solid var(--line-soft)':"")+'">'+
       '<span class="chip chip-xs" style="flex:none">'+["1st","2nd","3rd"][i]+'</span>'+
       '<b class="fx-txt" style="font-family:var(--f-disp);font-size:14px;flex:1;min-width:120px">'+esc(name)+'</b>'+
@@ -3895,7 +3906,7 @@ CG.franchisePicksLine = function(a){
   var picks = [a.preferred_club, a.franchise_2, a.franchise_3].filter(Boolean);
   if (!picks.length) return '<span>No franchise selected</span>';
   return '<span>Franchise: '+picks.map(function(name,i){
-    return '<b>'+["1st","2nd","3rd"][i]+' '+esc(name)+'</b>'+(active[name]?' <span class="chip chip-warn" style="font-size:8px;padding:1px 5px">taken</span>':"");
+    return '<b>'+["1st","2nd","3rd"][i]+' '+esc(name)+'</b>'+(active[name]?"":' <span class="chip chip-warn" style="font-size:8px;padding:1px 5px">not a CGHL club</span>');
   }).join(" · ")+'</span>';
 };
 CG.ROUTES.owner = function(){
@@ -3942,7 +3953,7 @@ CG.ROUTES.owner = function(){
     '<label class="fld"><span>EA ID *</span><input id="ow-ea" placeholder="Your EA account name" value="'+esc(a.ea_id||p.ea_id||"")+'"></label>'+
     '<label class="fld"><span>Typical availability</span><input id="ow-avail" placeholder="e.g. Weeknights after 9 PM ET" value="'+esc(a.availability||"")+'"></label>'+
     '<label class="fld"><span>League / management experience</span><textarea id="ow-exp" rows="2" placeholder="Leagues you’ve played or managed in…">'+esc(a.experience||"")+'</textarea></label>'+
-    '<div class="fld"><span>Franchise choices *</span><p class="caption" style="margin:2px 0 8px">Pick the NHL franchises you’d most like to run, in order. Your second and third choices cover you if an earlier pick is already an active club.</p>'+
+    '<div class="fld"><span>Franchise choices *</span><p class="caption" style="margin:2px 0 8px">Pick the clubs you’d most like to run, in order. Your second and third choices cover you if the club you want most goes to someone else. New clubs are added by the league office.</p>'+
       '<div class="grid g3" style="gap:10px">'+
         '<label class="fld"><span style="font-size:11px">1st choice *</span><select id="ow-fr1">'+CG.franchiseOptions(a.preferred_club)+'</select></label>'+
         '<label class="fld"><span style="font-size:11px">2nd choice</span><select id="ow-fr2">'+CG.franchiseOptions(a.franchise_2)+'</select></label>'+
@@ -11015,6 +11026,7 @@ CG.AUTOMATIONS = [
   { key:"staff-briefing", staleAfterMin:2160, name:"Staff briefing", every:"Daily inside the database", desc:"Posts the standing backlog (open cases, pending applications, unmatched EA imports, finals missing box scores, active suspensions) to #staff-general — suppressed when nothing needs attention.", rpc:"staff_briefing" },
   { key:"night-recap", staleAfterMin:45,       name:"Game night recap",          every:"Every 15 min inside the database", desc:"Posts each game night once to the news channel: the best stories of the night, the results and the three stars. It goes out when the last game is final, or four hours after the last puck drop if a game is still held.", rpc:"night_recap_sweep" },
   { key:"weekly-potw", staleAfterMin:11520,      name:"Players of the Week",       every:"Mondays inside the database", desc:"Names the week’s best forward, defenseman and goaltender from the imported box scores (at least three games that week, all at that position), and publishes the announcement.", rpc:"compute_potw_guarded" },
+  { key:"owner-decision-watch", noRun:true, staleAfterMin:120, name:"Owner decision deadline", every:"Hourly inside the database", desc:"Once a season's owner applications close, tells the commissioners and the applications department two days before the decision deadline, and at it, which applications are still pending and which clubs' Owners are not yet approved for the season (Chapter S2)." },
   { key:"watchdog", staleAfterMin:45,         name:"Automation watchdog",       every:"Every 15 min inside the database", desc:"Watches every job above — a dead or failing automation pings the commissioners in-app and on Discord.", rpc:"automation_watchdog_guard" }
 ];
 CG.admAutomationsLive = function(){
