@@ -209,7 +209,8 @@ const flushBoot = async (w) => { const p = w.CG.initAuth(); await tick(); w.reso
       /CG\.applySession = async function\(session, quiet\)/.test(live));
     A("a quiet run leaves the messages page alone", /if\(!quiet&&location\.hash\.indexOf\("\/messages"\)/.test(live));
     A("...and the case surfaces", /if\(!quiet\) CG\.rerenderIfShowingCases\(\)/.test(live));
-    A("...and an admin's View-as preview", /if \(!quiet\)\{\n    CG\._va = null;/.test(live));
+    /* v4.02 (commissioner): the View-as preview is removed, so there is nothing left for a quiet run to spare */
+    A("...and the View-as preview is gone entirely", !/CG\._va\b/.test(live) && !/renderViewAsBar\(\)/.test(live));
     A("a refused patch write records its fingerprint",
       (live.match(/CG\._idPatchFailedFp = JSON\.stringify\(idPatch\)/g) || []).length === 2);
     A("an abandoned OAuth round-trip falls back to the sign-in button",

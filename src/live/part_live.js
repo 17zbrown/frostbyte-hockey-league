@@ -1454,10 +1454,6 @@ CG.applySession = async function(session, quiet){
   if (CG.auth.user && (CG.auth.role==="staff" || CG.auth.role==="commish")){ CG.loadStaffAttention(); CG.loadStaffExtras(); }
   else { CG._staffAttention = null; CG._staffExtras = null; }
   CG.enforceBan();
-  if (!quiet){
-    CG._va = null;                      /* any fresh session ends a stale preview */
-    if (CG.renderViewAsBar) CG.renderViewAsBar();
-  }
 };
 CG.teardownDMs = function(){
   CG._dm.msgs=[]; CG._dm.profiles={}; CG._dm.active=null; CG._dm.loaded=false; CG._dm.compose=false;
@@ -2417,52 +2413,8 @@ CG._wrapHubDashboard = function(){
   };
 };
 
-/* ------------------------------------------------------------------ *
- * Admin "View as…" — render any page as any role for a preview.
- * Client-only: never writes, never changes the real role. Gated on the
- * profiles.is_admin capability. All real actions still run under the real
- * account via RLS, so a preview can look but not act as someone else.
- * ------------------------------------------------------------------ */
-CG.VIEW_ROLES = [
-  ["guest","Signed out"], ["member","Member"], ["mgmt","Team management"], ["staff","Staff"], ["commish","Commissioner"]
-];
-CG.isAdmin = function(){ return !!(CG.auth && CG.auth.profile && CG.auth.profile.is_admin); };
-CG.viewAs = function(role){
-  if (!CG.isAdmin() && !CG._va) return;              /* admin, or already mid-preview (profile is nulled for guest) */
-  if (role==null){                                   /* exit preview → restore reality */
-    if (CG._va){ CG.auth.role = CG._va.role; CG.auth.profile = CG._va.profile; CG._va = null; }
-  } else {
-    if (!CG._va) CG._va = { role:CG.auth.role, profile:CG.auth.profile };  /* stash reality once */
-    CG.auth.role = (role==="guest") ? "guest" : role;
-    CG.auth.profile = (role==="guest") ? null : CG._va.profile;            /* guest = no profile */
-  }
-  CG.renderViewAsBar();
-  if (CG.renderChrome) CG.renderChrome();
-  if (CG.router) CG.router();
-  window.scrollTo(0,0);
-};
-CG.renderViewAsBar = function(){
-  var el = document.getElementById("cgViewAs");
-  if (!CG.isAdmin() && !(CG._va)){ if (el) el.remove(); return; }
-  if (!el){ el = document.createElement("div"); el.id = "cgViewAs"; document.body.appendChild(el); }
-  var active = CG._va ? CG.auth.role : null;                 /* the role currently being previewed */
-  var chips = CG.VIEW_ROLES.map(function(r){
-    var on = active===r[0];
-    return '<button type="button" data-va="'+r[0]+'" aria-pressed="'+on+'" class="cgva-chip'+(on?" on":"")+'">'+r[1]+'</button>';
-  }).join("");
-  el.className = CG._va ? "previewing" : "";
-  el.innerHTML =
-    '<div class="cgva-inner">'+
-      '<span class="cgva-tag">'+(CG._va?CG.ic("eye",13)+' Previewing':CG.ic("eye",13)+' View as')+'</span>'+
-      '<span class="cgva-chips">'+chips+'</span>'+
-      (CG._va?'<button type="button" class="cgva-exit" data-va-exit>Exit preview</button>':'')+
-      (CG._va?'<span class="cgva-note">Actions still use your real account.</span>':'')+
-    '</div>';
-  el.querySelectorAll("[data-va]").forEach(function(b){ b.addEventListener("click", function(){
-    var r=this.getAttribute("data-va"); CG.viewAs(active===r?null:r);
-  }); });
-  var ex=el.querySelector("[data-va-exit]"); if(ex) ex.addEventListener("click", function(){ CG.viewAs(null); });
-};
+/* v4.02 (commissioner, 2026-10-13): the admin "View as" preview bar at the bottom of the screen is removed, with
+   CG.viewAs and CG.renderViewAsBar; nothing else used them. */
 CG.persona = function(){
   var role = CG.role(), p = CG.auth.profile;
   var label = (CG.PERSONAS[role]||{}).label || (role.charAt(0).toUpperCase()+role.slice(1));
@@ -7630,10 +7582,9 @@ CG.AFTER._admEAStats = function(){
 /* The role is derived from the seat pointers (CG.computeRole), but it was computed ONCE, on the
    auth event. A GM approved while signed in, or one the Owner removed, kept the old role until a
    hard refresh: the Team HQ tab (which reads the seats live) and the routes behind it (which read
-   CG.auth.role) disagreed. Every league rebuild now re-derives it. A "View as…" preview is left
-   alone — it is deliberately not reality. */
+   CG.auth.role) disagreed. Every league rebuild now re-derives it. */
 CG.refreshRole = function(){
-  if (CG._va || !CG.auth || !CG.auth.user || !CG.auth.profile || !CG.computeRole) return false;
+  if (!CG.auth || !CG.auth.user || !CG.auth.profile || !CG.computeRole) return false;
   var r = CG.computeRole(CG.auth.profile);
   if (r === CG.auth.role) return false;
   CG.auth.role = r;

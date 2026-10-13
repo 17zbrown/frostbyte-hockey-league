@@ -143,7 +143,8 @@ function finish(){
     A("the Owner's Remove button calls owner_remove_manager", /CG\.sb\.rpc\("owner_remove_manager", \{ p_team_code:m\.club, p_role:role \}\)/.test(live));
     A("...and a GM/AGM sees who decides instead", /Only the Owner changes this seat/.test(live) && /Only the Owner nominates/.test(live));
     A("the role is re-derived on every league rebuild", /CG\.refreshRole = function\(\)/.test(live) && (live.match(/CG\.refreshRole\(\);/g) || []).length >= 2);
-    A("...leaving a View-as preview alone", /if \(CG\._va \|\| !CG\.auth/.test(live));
+    /* v4.02: the View-as preview is removed, so refreshRole has no preview to step around */
+    A("...and it needs no View-as exception any more", /CG\.refreshRole = function\(\)\{\n  if \(!CG\.auth \|\| !CG\.auth\.user/.test(live));
     A("a seat or request notice refreshes the hub without a reload", /\(n\.type === "role" \|\| n\.type === "request"\) && CG\.liveReload/.test(live));
     A("the approval notice deep-links to Management", /case "mgmtapprovals": return "#\/hub\/management";/.test(live));
     A("the reviewer copy names the Owner as the one who clears a held seat", /the club’s Owner removes the sitting manager \(or a commissioner vacates the seat\) first/.test(live) && /Only the club’s Owner \(or a commissioner\) can vacate a seat/.test(desks));
