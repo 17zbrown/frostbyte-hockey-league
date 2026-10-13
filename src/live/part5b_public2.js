@@ -401,7 +401,7 @@ CG.ROUTES.rulebook = function(param, qs){
       return (s.id+" "+s.title+" "+s.paragraphs.join(" ")).toLowerCase().indexOf(q)>=0;
     });
     if (!secs.length) return "";
-    return '<div class="card'+(ch.shelved?' rb-shelved':'')+'" style="margin-bottom:18px" id="ch'+ch.num+'"><div class="card-h"><h3>'+(ch.shelved?'Appendix '+ch.num:'Chapter '+ch.num)+' — '+esc(ch.title)+'</h3>'+(ch.shelved?'<span class="chip">not in force</span>':'')+'</div><div class="card-b">'+
+    return '<div class="card'+(ch.shelved?' rb-shelved':'')+'" style="margin-bottom:18px" id="ch'+ch.num+'"><div class="card-h"><h3>'+(ch.upcomingSeason ? esc(ch.title) : (ch.shelved?'Appendix '+ch.num:'Chapter '+ch.num)+' — '+esc(ch.title))+'</h3>'+(ch.upcomingSeason?'<span class="chip chip-chrome">Season '+ch.upcomingSeason+'</span>':'')+(ch.shelved?'<span class="chip">not in force</span>':'')+'</div><div class="card-b">'+
       (ch.intro ? '<div class="note" style="margin-bottom:12px">'+esc(ch.intro)+'</div>' : '')+
       secs.map(function(s){
         var text = edits[s.id] ? edits[s.id] : s.paragraphs.join("\n\n");

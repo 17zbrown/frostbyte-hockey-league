@@ -768,7 +768,9 @@ CG.homeFigures = function(){
   var members = (lg._profilesRaw || []).length;
   if (members) fig(members, "Accounts", "People registered on the site", null, "#/players");
 
-  var signed = lg.registrationsCount || (lg._registrationsRaw || []).length || 0;
+  /* v3.95: this season's sign-ups only. From the movement deadline the pool also holds the next season's, and the
+     two were added together under this season's name */
+  var signed = (lg._registrationsRaw || []).filter(function(r){ return !r.season_id || !s.id || r.season_id === s.id; }).length;
   var clubs  = (CG.TEAMS || []).length;
   var spots  = clubs * (s.roster_max || CG.fmt("roster_max", s));
   if (signed) fig(signed, "Signed up for Season " + (s.number || 1),
@@ -776,6 +778,12 @@ CG.homeFigures = function(){
     spots ? Math.max(0, Math.min(1, signed / spots)) : null,
     CG.isRegisteredNow() ? "#/players" : "#/register");
 
+  /* v3.95: the next season's sign-ups, once they open while this one is still being played */
+  var sNext = (CG.regSeason && CG.regSeason()) || null;
+  if (sNext && s.id && sNext.id !== s.id){
+    var signedNext = (lg._registrationsRaw || []).filter(function(r){ return r.season_id === sNext.id; }).length;
+    fig(signedNext, "Signed up for " + (sNext.name || ("Season " + sNext.number)), "Registration is open", null, CG.isRegisteredNow() ? "#/players" : "#/register");
+  }
   if (clubs) fig(clubs, "Clubs", "Each with an owner, GM and assistant GM", null, "#/teams");
 
   var days = CG.daysToStart(), start = CG.seasonStartMs();
@@ -785,7 +793,7 @@ CG.homeFigures = function(){
   if (figs.length < 2) return "";                 /* not enough real numbers to be worth a band */
   return '<section class="sec-tight"><div class="shell">' +
     '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">League</span>' +
-    '<h2 class="h-sec">Season 1 at a glance</h2></div>' +
+    '<h2 class="h-sec">' + esc(s.name || "The season") + ' at a glance</h2></div>' +
     (CG.isRegisteredNow() ? '<a class="sec-link" href="#/players">The player pool</a>' : '<a class="sec-link" href="#/register">Sign up to play</a>') + '</div>' +
     '<div class="figs" data-rv="up">' + figs.join("") + '</div></div></section>';
 };
@@ -1120,7 +1128,7 @@ CG.ROUTES.home = function(){
        slot carries the sign-up state instead. */
     var signed = lg.players.length, signedFloor = CG.TEAMS.length * 6;
     html += '<section class="sec-tight"><div class="shell"><div class="statline">'+
-      '<div><b class="num">'+esc((CG.SEASON&&CG.SEASON.name)||"Off-season")+'</b><span>inaugural season</span></div>'+
+      '<div><b class="num">'+esc((CG.SEASON&&CG.SEASON.name)||"Off-season")+'</b><span>'+((CG.SEASON&&CG.SEASON.number)===1?"inaugural season":"season")+'</span></div>'+
       '<div style="cursor:pointer" data-go="#/schedule"><b class="num">'+(days!=null?days:"—")+'</b><span>day'+(days===1?"":"s")+' to puck drop'+(start?" · "+CG.fmtDay(start):"")+'</span></div>'+
       '<div style="cursor:pointer" data-go="#/teams"><b class="num">'+CG.TEAMS.length+'</b><span>clubs</span></div>'+
       (signed >= signedFloor
@@ -1678,7 +1686,7 @@ CG.ROUTES.schedule = function(param, qs){
           var s = CG.SEASON || {};
           var draftTxt = s.draft_at ? " — "+CG.fmtFull(Date.parse(s.draft_at)) : "";
           var dropTxt  = s.starts_at ? CG.fmtDate(Date.parse(s.starts_at)) : "the season opener";
-          return '<div class="empty"><div class="e-art">'+CG.ic("cal",22)+'</div><b>The Season 1 slate posts after the draft</b>'+
+          return '<div class="empty"><div class="e-art">'+CG.ic("cal",22)+'</div><b>The '+esc(s.name||"season")+' slate posts after the draft</b>'+
             '<p>Clubs are built on draft night'+esc(draftTxt)+', and the schedule goes up once the rosters that will play it exist. Puck drops '+esc(dropTxt)+'.</p>'+
             (CG.isRegisteredNow() ? '' : '<a class="btn btn-chrome" href="#/register" style="margin-top:16px">Register to play</a>')+'</div>';
         })()
@@ -2056,7 +2064,7 @@ CG.ROUTES.team = function(code, qs){
         /* "Live" is a semantic status. Before a single game exists it is simply untrue, and a
            green pill on an 0-0-0 club dilutes the token everywhere else it is used. */
         :((CG.lg.schedule&&CG.lg.schedule.length)?'<span class="chip chip-win">Live — updates after every final</span>'
-                                                 :'<span class="chip">Season 1 — not yet under way</span>'))+
+                                                 :'<span class="chip">'+esc((CG.SEASON&&CG.SEASON.name)||"The season")+': not yet under way</span>'))+
     '</div>'+
   '</div></section>';
   var tabs = '<div class="shell" style="margin-top:22px"><div class="tabs" role="tablist">'+

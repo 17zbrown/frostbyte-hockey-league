@@ -32,7 +32,7 @@ const rb = CG.CONTENT.rulebook;
 let r83 = ""; for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === "8.3") r83 = s.paragraphs[3];
 A("Rule 8.3 states the proration and the keep-your-first-date clause", /needs the same share of that figure as the share of his club's regular-season games still to be played when he was first placed, rounded up/.test(r83) && /keeps the date he was first placed/.test(r83));
 const cl = rb.changelog.find((c) => c.version === "3.94");
-A("changelog 3.94 is first and says what changed", rb.changelog[0].version === "3.94" && !!cl && /prorated/.test(cl.summary));
+A("changelog 3.94 says what changed", !!cl && /prorated/.test(cl.summary));
 A("no em dash in what v3.94 wrote", !/—/.test(JSON.stringify(cl)) && !/—/.test(sql) && !/—/.test(r83.slice(r83.indexOf("A player first placed"))));
 
 console.log(fail ? "\n" + fail + " of " + n + " FAILED" : "\nall " + n + " passed");

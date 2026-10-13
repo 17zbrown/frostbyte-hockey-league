@@ -1369,7 +1369,9 @@ CG.applySession = async function(session, quiet){
       oneProfile(),
       sidA ? one(CG.sb.from("season_registrations").select("*").eq("season_id", sidA).eq("profile_id", uid).maybeSingle()) : null,
       one(CG.sb.from("staff_applications").select("*").eq("profile_id", uid).maybeSingle()),
-      one(CG.sb.from("owner_applications").select("*").eq("profile_id", uid).maybeSingle())
+      /* v3.95: an owner application is made for one season, the one taking registrations */
+      one((sidA ? CG.sb.from("owner_applications").select("*").eq("profile_id", uid).eq("season_id", sidA)
+                : CG.sb.from("owner_applications").select("*").eq("profile_id", uid).order("created_at",{ascending:false}).limit(1)).maybeSingle())
     ]);
     if (mine[0]) CG.auth.profile = mine[0];
     else if (!CG.auth.profile) CG.auth.profile = null;      /* nothing to fall back to */
@@ -3213,8 +3215,14 @@ CG.ROUTES.register = function(){
      "sign up by the deadline" forever, with no date and no change after Monday night */
   var dlIso = s.signup_deadline_at || s.registration_deadline || null, dlMs = dlIso ? Date.parse(dlIso) : NaN;
   var dlPast = !isNaN(dlMs) && dlMs < CG.now(), dlText = isNaN(dlMs) ? "the deadline" : CG.fmtFull(dlMs);
+  /* v3.95: a season with its own chapter (Chapter S2) points to it; its training camp is league-wide, not a club's */
+  var upChR = ((CG.CONTENT && CG.CONTENT.rulebook && CG.CONTENT.rulebook.chapters) || []).find(function(c){ return c.upcomingSeason && c.upcomingSeason === s.number; });
   var head = CG.pageHead(open ? "Season "+(s.number||1)+" · registration open" : "Registration",
-    "Register for the season", CG.isBasic(s)
+    "Register for the season", upChR
+      ? (dlPast
+        ? "The sign-up cutoff for the draft passed "+dlText+". You can still register, and you join the league-wide training camp pool instead of the draft. What changes this season is in the rulebook, Chapter S2."
+        : "One form puts you in the player pool. Sign up by "+dlText+" and you're in the draft"+(s.draft_at ? " on "+CG.fmtFull(Date.parse(s.draft_at)) : "")+". This season runs a new format, with a league-wide training camp and Saturday bidding: see the rulebook, Chapter S2.")
+      : CG.isBasic(s)
       ? (dlPast
         ? "The sign-up cutoff passed "+dlText+". You can still register — you're placed on a club as depth after the draft, on a one-season deal at the league minimum; you just won't be in the draft itself (Rule 2.8)."
         : "One form puts you in the player pool. Sign up by "+dlText+" and you're in the draft; after the cutoff — or if you join mid-season — you're placed on a club as depth automatically, up until the movement deadline (Rule 2.8).")
@@ -3925,7 +3933,12 @@ CG.ROUTES.owner = function(){
       : "");
   var statusCard = CG.auth.ownerApp ? '<div class="note '+(a.status==="approved"?"grn":a.status==="denied"?"red":"chr")+'" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your application is '+esc((a.status||"pending").toUpperCase())+'.</b> Resubmit below to update it — the commissioners review every application.</div>' : "";
   statusCard = conflictNote + closedNote + statusCard;
-  var body = '<div class="card"><div class="card-h"><h3>'+(CG.auth.ownerApp?"Update application":"Owner application")+'</h3><span class="chip chip-chrome">Season</span></div><div class="card-b">'+
+  /* v3.95: a season with its own chapter in the rulebook (Chapter S2) says what is different about it */
+  var upCh = ((CG.CONTENT && CG.CONTENT.rulebook && CG.CONTENT.rulebook.chapters) || []).find(function(c){ return c.upcomingSeason && c.upcomingSeason === s.number; });
+  if (upCh && !deadlineClosed) statusCard = '<div class="note chr" style="margin-bottom:18px">Every club is decided again for '+esc(s.name||("Season "+s.number))+', so current Owners apply too. '+
+    (s.owner_app_deadline ? 'Applications close <b>'+CG.fmtFull(Date.parse(s.owner_app_deadline))+'</b>, and the league office decides them the week after. ' : '')+
+    '<a href="#/rulebook?rule='+esc(upCh.sections[0].id)+'" style="font-weight:700;border-bottom:2px solid var(--chrome)">What changes in '+esc(s.name||("Season "+s.number))+'</a></div>' + statusCard;
+  var body = '<div class="card"><div class="card-h"><h3>'+(CG.auth.ownerApp?"Update application":"Owner application")+'</h3><span class="chip chip-chrome">'+esc(s.name||"Season")+'</span></div><div class="card-b">'+
     '<label class="fld"><span>EA ID *</span><input id="ow-ea" placeholder="Your EA account name" value="'+esc(a.ea_id||p.ea_id||"")+'"></label>'+
     '<label class="fld"><span>Typical availability</span><input id="ow-avail" placeholder="e.g. Weeknights after 9 PM ET" value="'+esc(a.availability||"")+'"></label>'+
     '<label class="fld"><span>League / management experience</span><textarea id="ow-exp" rows="2" placeholder="Leagues you’ve played or managed in…">'+esc(a.experience||"")+'</textarea></label>'+
@@ -3962,11 +3975,12 @@ CG.submitOwnerApp = async function(){
   if(!pitch){ CG.toast("Add a short pitch","err"); return; }
   var picks=[fr1,fr2,fr3].filter(Boolean);
   if(new Set(picks).size!==picks.length){ CG.toast("Your franchise choices must be different","err"); return; }
-  var payload={ season_id: CG.SEASON?CG.SEASON.id:null, profile_id: CG.auth.user.id, ea_id:ea,
+  /* v3.95: the season taking registrations (the database stamps it too, and never moves an application) */
+  var payload={ season_id: _s.id||null, profile_id: CG.auth.user.id, ea_id:ea,
     availability:v("ow-avail")||null, experience:v("ow-exp")||null,
     preferred_club:fr1, franchise_2:fr2, franchise_3:fr3,
     pitch:pitch, status:"pending", updated_at:new Date().toISOString() };
-  var r=await CG.sb.from("owner_applications").upsert(payload,{onConflict:"profile_id"}).select().maybeSingle();
+  var r=await CG.sb.from("owner_applications").upsert(payload,{onConflict:"profile_id,season_id"}).select().maybeSingle();
   if(r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
   CG.auth.ownerApp=r.data||payload; /* keep the row (with its id) so the office chat appears at once */
   CG.toast("Application submitted — the commissioners will review it","ok"); CG.router();
@@ -9983,6 +9997,9 @@ CG.hubApplicationDetail = function(id, type){
     eyebrow = isOwner ? "OWNER" : "STAFF"; eyeClass = isOwner ? "chip" : "chip-chrome";
     lede = isOwner ? "Application to own a club." : "Application to join the league staff.";
     if (isOwner){
+      /* v3.95: applications are per season */
+      var appSeason = (CG.SEASONS||[]).find(function(x){ return x.id === a.season_id; });
+      fields += row("Season", appSeason ? esc(appSeason.name || ("Season "+appSeason.number)) : "");
       fields += row("Club choice", esc(a.team_choice==="build" ? "Build a new franchise" : a.team_choice==="random" ? "Take a random open club" : (a.team_choice||"—")));
       fields += row("Proposed name", a.proposed_name?esc(a.proposed_name):"");
       fields += row("Proposed location", a.proposed_location?esc(a.proposed_location):"");
