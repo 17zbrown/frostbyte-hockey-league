@@ -94,7 +94,7 @@ A("...both clubs: a commissioner rules; one appeal; from 12 October 2026", /no f
 A("Rules 10.1 and 5.3 no longer say a filed sheet counts", /a lineup filed for a game not yet played does not count toward his week \(Rule 5\.2\)/.test(sec("10.1").paragraphs[0]) && !/returns the game to every player on it/.test(sec("5.3").paragraphs[0]));
 A("Rule 3.3: original week, or no week at all", /counts toward the week it was originally scheduled in, or toward no week at all, for players' weekly game limits \(Rule 5\.2\)/.test(sec("3.3").paragraphs[0]));
 const cl = rb.changelog.find((c) => c.version === "3.93");
-A("changelog 3.93 is first and says what changed", rb.changelog[0].version === "3.93" && !!cl && /count only games played/.test(cl.summary) && cl.items.some((i) => /Islanders at Stars/.test(i)));
+A("changelog 3.93 says what changed", !!cl && /count only games played/.test(cl.summary) && cl.items.some((i) => /Islanders at Stars/.test(i)));
 const added = [JSON.stringify(cl), r52, two.slice(two.indexOf("create or replace function public._limit_forfeit_check"))].join(" ");
 A("no em dash in what v3.93 wrote (the anchors it replaced aside)", !/—/.test(added.replace(/% has already played or been dressed in % games this % — the limit is/g, "")));
 

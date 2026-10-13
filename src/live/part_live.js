@@ -186,14 +186,33 @@ CG.rosterShapeWords = function(s){ var r = CG.FORMAT_RULES[CG.seasonFormat(s)];
   return r.lines ? (w[r.lines]||r.lines)+" full lines plus "+(w[r.flex]||r.flex)+" players of any position" : r.quota.F+" F / "+r.quota.D+" D / "+r.quota.G+" G"; };
 /* the road to the playoff floor for every rostered player of a club (Rule 8.3) — GP counted from the
    regular-season record, games left from the club's unplayed regular-season schedule */
+/* v3.94 (Rule 8.3): a player's own playoff floor. The season's floor, prorated for a player first placed after
+   opening night (public.player_playoff_floor, loaded for every rostered player as lg.playoffFloors). Until that
+   loads, the season's floor stands in. */
+CG.playoffFloorFor = function(pid){
+  var m = CG.lg && CG.lg.playoffFloors;
+  return (m && m[pid] != null) ? m[pid] : CG.playoffMinGp();
+};
 CG.playoffRoad = function(lg, clubCode){
-  var min = CG.playoffMinGp(), out = [];
-  if (!min || !lg || !lg.byTeam || !lg.byTeam[clubCode]) return out;
-  var left = (lg.schedule||[]).filter(function(g){ return g.stage==="regular" && g.status!=="final" && (g.home===clubCode || g.away===clubCode); }).length;
+  var out = [];
+  if (!CG.playoffMinGp() || !lg || !lg.byTeam || !lg.byTeam[clubCode]) return out;
+  var rem = (lg.schedule||[]).filter(function(g){ return g.stage==="regular" && g.status!=="final" && !g.voided && (g.home===clubCode || g.away===clubCode); });
+  var left = rem.length;
+  /* v3.94: what he can still play, week by week, under his weekly limit (a camp player's 3 makes the difference);
+     a game exempt from the limits has none */
+  var weeks = {}, exemptLeft = 0;
+  rem.forEach(function(g){ if (g.limitsExempt){ exemptLeft++; return; } var w = CG.limitWeekOf(g); (weeks[w] = weeks[w] || []).push(g); });
   (lg.byTeam[clubCode]||[]).forEach(function(pl){
     if (!pl.spotId) return;
+    var min = CG.playoffFloorFor(pl.id);
     var gp = ((lg.pstats||{})[pl.id]||{}).gp || 0, need = Math.max(0, min - gp);
-    out.push({ pid:pl.id, tag:pl.tag, pos:pl.pos, squad:pl.squad, gp:gp, need:need, done:need===0, reachable:need <= left, left:left });
+    var cap = CG.weeklyCap({ squad: pl.squad, pos: pl.pos }), canPlay = exemptLeft;
+    Object.keys(weeks).forEach(function(w){
+      var used = CG.weekUsedFor ? (CG.weekUsedFor(pl.id, clubCode, weeks[w][0]) || 0) : 0;
+      canPlay += Math.max(0, Math.min(weeks[w].length, cap - used));
+    });
+    out.push({ pid:pl.id, tag:pl.tag, pos:pl.pos, squad:pl.squad, gp:gp, min:min, need:need, done:need===0,
+               reachable:need <= canPlay, left:left, canPlay:canPlay, prorated: min < CG.playoffMinGp() });
   });
   return out.sort(function(a,b){ return (a.done?1:0)-(b.done?1:0) || (b.need-a.need) || String(a.tag).localeCompare(String(b.tag)); });
 };
@@ -1573,6 +1592,12 @@ CG.loadManagerData = async function(){
     if (CG.SEASON && CG.SEASON.id && CG.auth && CG.auth.user){
       jobs.push(CG.sb.from("weekly_cap_exceptions").select("id,game_id,profile_id,team_id,reason,granted_by,created_at").eq("season_id", CG.SEASON.id)
         .then(function(r){ if (r && !r.error) CG.lg.capExceptions = r.data || []; }, function(){}));
+    }
+    /* v3.94: every rostered player's playoff floor (Rule 8.3), prorated for a player placed after opening night.
+       Public record, so it loads for everyone; until it lands CG.playoffFloorFor falls back to the season's floor. */
+    if (CG.SEASON && CG.SEASON.id){
+      jobs.push(CG.sb.rpc("playoff_floors", { p_season: CG.SEASON.id })
+        .then(function(r){ if (r && !r.error){ var m = {}; (r.data||[]).forEach(function(x){ m[x.profile_id] = x.floor; }); CG.lg.playoffFloors = m; } }, function(){}));
     }
     /* my club's private draft board (ranked wishlist; RLS keeps it club-only) */
     if (myBoardTeam && myBoardTeam.id && CG.SEASON && CG.SEASON.id){

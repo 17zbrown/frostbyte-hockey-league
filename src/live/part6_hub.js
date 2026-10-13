@@ -364,11 +364,11 @@ CG.hubDashboard = function(){
       }
     }
     if (CG.playoffMinGp && CG.playoffMinGp() && me.spotId){
-      var myGp = (lg.pstats[me.id]||{}).gp||0, myMin = CG.playoffMinGp(), myLeft = (lg.schedule||[]).filter(function(g){ return g.stage==="regular" && g.status!=="final" && (g.home===me.team || g.away===me.team); }).length;
+      var myGp = (lg.pstats[me.id]||{}).gp||0, myMin = CG.playoffFloorFor(me.id), myLeft = (lg.schedule||[]).filter(function(g){ return g.stage==="regular" && g.status!=="final" && (g.home===me.team || g.away===me.team); }).length;
       cards.push('<div class="card"><div class="card-h"><h3>Playoff eligibility</h3>'+(myGp>=myMin?'<span class="chip chip-win">eligible</span>':(myMin-myGp)<=myLeft?'<span class="chip chip-warn">'+(myMin-myGp)+' to go</span>':'<span class="chip chip-loss">out of reach</span>')+'</div><div class="card-b">'+
         '<div style="display:flex;align-items:center;gap:12px"><b class="num" style="font-size:26px">'+myGp+'<span class="caption" style="font-size:12px"> / '+myMin+'</span></b>'+
         '<span style="flex:1;height:8px;border-radius:4px;background:var(--line);overflow:hidden"><i style="display:block;height:100%;width:'+Math.round(Math.min(1,myGp/myMin)*100)+'%;background:'+(myGp>=myMin?"var(--green)":"var(--chrome)")+'"></i></span></div>'+
-        '<p class="caption" style="margin-top:10px">'+(myGp>=myMin?'You have the '+myMin+' regular-season games the playoffs need (Rule 8.3).':'You need '+myMin+' regular-season games to dress in the playoffs (Rule 8.3) — '+(myMin-myGp)+' more, with '+myLeft+' club game'+(myLeft===1?'':'s')+' left. Mark yourself available and talk to your GM.')+'</p></div></div>');
+        '<p class="caption" style="margin-top:10px">'+(myMin < CG.playoffMinGp() ? 'You joined after opening night, so your number is prorated from '+CG.playoffMinGp()+' to the games your club had left (Rule 8.3). ' : '')+(myGp>=myMin?'You have the '+myMin+' regular-season games the playoffs need (Rule 8.3).':'You need '+myMin+' regular-season games to dress in the playoffs (Rule 8.3) — '+(myMin-myGp)+' more, with '+myLeft+' club game'+(myLeft===1?'':'s')+' left. Mark yourself available and talk to your GM.')+'</p></div></div>');
     }
     if (lg.pstats[me.id].gp){
       var last3 = lg.glog[me.id].slice(-3).reverse();
@@ -2415,15 +2415,15 @@ CG.hubRoster = function(qs){
     tail += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Road to '+minGp+' — playoff eligibility</h3>'+
       (shortGp.length ? '<span class="chip chip-warn">'+shortGp.length+' still short</span>' : '<span class="chip chip-win">everyone eligible</span>')+'</div><div class="card-b">'+
       (prRoad.length ? '<div class="stack" style="gap:9px">'+prRoad.map(function(r){
-          var pct = Math.round(Math.min(1, r.gp/minGp)*100), danger = !r.reachable;
+          var pct = Math.round(Math.min(1, r.gp/Math.max(1, r.min))*100), danger = !r.reachable;
           return '<div style="display:flex;align-items:center;gap:12px">'+
             '<span style="flex:0 0 140px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b style="font-size:13px">'+esc(r.tag)+'</b> <small class="caption">'+esc(r.pos||"")+(r.squad==="tc"?" · camp":"")+'</small></span>'+
             '<span style="flex:1;height:8px;border-radius:4px;background:var(--line);overflow:hidden"><i style="display:block;height:100%;width:'+pct+'%;background:'+(r.done?"var(--green)":danger?"var(--red)":"var(--chrome)")+'"></i></span>'+
-            '<span class="num" style="flex:0 0 52px;text-align:right;font-weight:700'+(danger?';color:var(--red)':'')+'">'+r.gp+' / '+minGp+'</span>'+
-            (r.done?'<span class="chip chip-win" style="font-size:9px">eligible</span>':danger?'<span class="chip chip-loss" style="font-size:9px">can’t reach '+minGp+'</span>':'<span class="caption">needs '+r.need+'</span>')+
+            '<span class="num" style="flex:0 0 52px;text-align:right;font-weight:700'+(danger?';color:var(--red)':'')+'"'+(r.prorated?' title="Prorated: placed after opening night (Rule 8.3)"':'')+'>'+r.gp+' / '+r.min+(r.prorated?'*':'')+'</span>'+
+            (r.done?'<span class="chip chip-win" style="font-size:9px">eligible</span>':danger?'<span class="chip chip-loss" style="font-size:9px">can’t reach '+r.min+'</span>':'<span class="caption">needs '+r.need+'</span>')+
           '</div>';
         }).join("")+'</div>' : '<p class="caption">No roster yet.</p>')+
-      '<p class="caption" style="margin-top:12px">Rule 8.3: a player needs '+minGp+' regular-season games to be dressed in the playoffs. The club has '+leftGp+' regular-season game'+(leftGp===1?'':'s')+' left; a player who can no longer reach '+minGp+' is marked. Spread the games so the players you want in the playoffs get there.</p></div></div>';
+      '<p class="caption" style="margin-top:12px">Rule 8.3: a player needs '+minGp+' regular-season games to be dressed in the playoffs. A player first placed after opening night (*) needs the same share of the games his club had left when he was placed, rounded up: '+Math.ceil(minGp/2)+' with half the season left. The club has '+leftGp+' regular-season game'+(leftGp===1?'':'s')+' left; a player who can no longer reach his number within his weekly limit is marked. Spread the games so the players you want in the playoffs get there.</p></div></div>';
   }
   /* v2.7: the 30% playoff floor is abolished in the full format — the basic format's floor is the Road card above.
      The card states the caps that DO exist. */
@@ -2442,7 +2442,7 @@ CG.hubRoster = function(qs){
     (CG.seriesCap({ pos:"C" })===CG.seriesCap({ pos:"G" })
       ? 'In the playoffs every player may be dressed in at most '+CG.seriesCap({ pos:"C" })+' games of a series'
       : 'In the playoffs a skater may be dressed in at most '+CG.seriesCap({ pos:"C" })+' games of a series and a goaltender in at most '+CG.seriesCap({ pos:"G" }))+
-    (CG.playoffMinGp()?', and only a player with '+CG.playoffMinGp()+' regular-season games can be dressed at all — the Road to '+CG.playoffMinGp()+' card above tracks it':'')+' (Rule 8.3).</p></div></div>';
+    (CG.playoffMinGp()?', and only a player with '+CG.playoffMinGp()+' regular-season games (prorated for a player placed after opening night) can be dressed at all — the Road to '+CG.playoffMinGp()+' card above tracks it':'')+' (Rule 8.3).</p></div></div>';
   var loanN = loans.length;
   h += '<div class="card"><div class="card-h"><h3>Roster — '+(roster.length-loanN)+' under contract'+(loanN?' · '+loanN+' on pre-season loan':'')+'</h3>'+
     '<span class="chip">'+blockN+' on the block</span></div>'+
@@ -2455,7 +2455,7 @@ CG.hubRoster = function(qs){
         var oo = (CG._clubOffers||[]).filter(function(o){ return o.player_id===r.id && !o.immediate; })[0];
         return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1"><b>'+esc(r.tag)+'</b> <span class="caption">was '+CG.fmtMoney(r.salary)+' through Season '+r.end+'</span>'+(oo?' <span class="chip chip-live">'+(CG.offerAwaitsClub(oo)?'His ask':'Offer out')+'</span>':'')+'</span>'+
           '<button class="btn btn-chrome btn-sm" data-extend="'+esc(r.id)+'">Re-sign</button></div>'; }).join("")+'</div></div>' : '')+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+(CG.playoffMinGp() ? 'A player needs '+CG.playoffMinGp()+' regular-season games to be dressed in the playoffs — the Road to '+CG.playoffMinGp()+' card tracks it (Rule 8.3). ' : 'Every rostered player is playoff-eligible — there is no games-played floor (Rule 8.3). ')+'Owner, GM, and AGM carry management contracts (Rule 2.6) and are protected from waivers and trades. Waiving a player releases him immediately and clears his cap hit; '+(CG.isBasic() ? 'he becomes a free agent at once, with no waiver period or claim, and any club may sign him outright at the salary he was already earning, to the end of the season, until the movement deadline. A club whose active roster is full signs him into its training camp (Rule 2.2).' : 'any club may then sign him under the free-agency rules (Rule 2.2).')+'</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+(CG.playoffMinGp() ? 'A player needs '+CG.playoffMinGp()+' regular-season games to be dressed in the playoffs, prorated for a player placed after opening night — the Road to '+CG.playoffMinGp()+' card tracks it (Rule 8.3). ' : 'Every rostered player is playoff-eligible — there is no games-played floor (Rule 8.3). ')+'Owner, GM, and AGM carry management contracts (Rule 2.6) and are protected from waivers and trades. Waiving a player releases him immediately and clears his cap hit; '+(CG.isBasic() ? 'he becomes a free agent at once, with no waiver period or claim, and any club may sign him outright at the salary he was already earning, to the end of the season, until the movement deadline. A club whose active roster is full signs him into its training camp (Rule 2.2).' : 'any club may then sign him under the free-agency rules (Rule 2.2).')+'</span></div></div>';
   h += tail;
   return h;
 };

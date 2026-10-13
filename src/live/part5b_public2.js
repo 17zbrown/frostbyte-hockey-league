@@ -106,11 +106,12 @@ CG.ROUTES.awards = function(param, qs){
        eligible to be eligible to receive the award." */
     var floor = CG.playoffMinGp ? CG.playoffMinGp() : 0;
     var perGame = function(p, k){ var st = lg.pstats[p.id]; return st && st.gp ? (st[k]||0)/st.gp : 0; };
-    var eligibleNow = function(p){ var st = lg.pstats[p.id]; return !!st && st.gp >= Math.max(1, floor); };
+    /* v3.94: each player's own floor, prorated for a player placed after opening night (Rule 8.3) */
+    var eligibleNow = function(p){ var st = lg.pstats[p.id]; return !!st && st.gp >= Math.max(1, CG.playoffFloorFor ? CG.playoffFloorFor(p.id) : floor); };
     body += '<div class="note chr" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Voted awards are decided by the league\u2019s players.</b> '+
       'Every rostered player and every member of league staff casts one vote per award, for a player on another club, and can change it until the award is decided. '+
       'The statistical titles are not voted on: they go to the best per-game average in the official record. '+
-      'Only a playoff-eligible player can win either kind'+(floor ? ' ('+floor+' regular-season games)' : '')+' (Rules 9.2 and 9.3).</div>'+
+      'Only a playoff-eligible player can win either kind'+(floor ? ' ('+floor+' regular-season games, prorated for a player placed after opening night)' : '')+' (Rules 9.2 and 9.3).</div>'+
       CG.awardBallotCard(lg)+
       '<div class="grid g3">'+
       [["Most Valuable Player", mvps],
