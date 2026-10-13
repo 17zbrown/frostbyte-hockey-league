@@ -94,7 +94,8 @@ console.log("\n— the owner-application deadline is enforced, not just displaye
 {
   A("the route computes a deadline-closed state from the season", /var deadlineClosed = !!\(s\.owner_app_deadline && Date\.parse\(s\.owner_app_deadline\) <= CG\.now\(\)\);/.test(live));
   A("...shows a closed notice", /Owner applications closed on/.test(live));
-  A("...disables the submit button when closed", /\(lockedFromOwning\|\|deadlineClosed\)\?" disabled"/.test(live));
+  /* v3.99: and while the member is not signed up for the season (only a signed-up player can apply) */
+  A("...disables the submit button when closed", /\(lockedFromOwning\|\|deadlineClosed\|\|needSignup\)\?" disabled"/.test(live));
   A("...and submitOwnerApp bails before writing after the deadline",
     /_s\.owner_app_deadline && Date\.parse\(_s\.owner_app_deadline\) <= CG\.now\(\)\)\{ CG\.toast\("Owner applications closed/.test(live));
   /* the REAL gate is the DB trigger guard_owner_app_deadline (BEFORE INSERT/UPDATE), verified by a

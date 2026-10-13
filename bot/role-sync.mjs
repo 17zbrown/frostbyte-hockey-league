@@ -112,10 +112,13 @@ export function createRoleSyncer(env, opts = {}) {
     const curSeason = (seasons || []).find((s) => s.status === "active") || (seasons || [])[0] || null;
     const regSeason = (seasons || []).filter((s) => s.registration_open).sort((a, b) => (b.number || 0) - (a.number || 0))[0] || curSeason;
     const posSeason = curSeason;
+    /* v3.98: the season in play keeps its registrants Player and Free Agent until it ends; null while it is the season
+       taking sign-ups, exactly as the sweep's `playing` set is empty then */
+    const playSeason = (curSeason && curSeason.status === "active" && regSeason && curSeason.id !== regSeason.id) ? curSeason : null;
     const rfaYears = Math.max(1, parseInt((rfaCfg && rfaCfg[0] && rfaCfg[0].value) || "4", 10) || 4);
     /* v2.48: rights classes exist only in the full season format (Rule 2.2) */
     const rightsOn = !!curSeason && curSeason.format === "full";
-    slow = { roleId, regSeason, posSeason, regOpen: !!(regSeason && regSeason.registration_open), rfaYears, rightsOn };
+    slow = { roleId, regSeason, posSeason, playSeason, regOpen: !!(regSeason && regSeason.registration_open), rfaYears, rightsOn };
     slowAt = Date.now();
     return slow;
   }
@@ -157,6 +160,11 @@ export function createRoleSyncer(env, opts = {}) {
         const reg = await sbGet(`season_registrations?season_id=eq.${C.regSeason.id}&profile_id=eq.${encodeURIComponent(profileId)}&select=profile_id,position`);
         isRegistered = !!(reg && reg[0]);
         for (const r of reg || []) if (r.position) pos = r.position;    // sign-up position, from the season taking sign-ups
+      }
+      let isPlaying = false;
+      if (C.playSeason) {
+        const pr = await sbGet(`season_registrations?season_id=eq.${C.playSeason.id}&profile_id=eq.${encodeURIComponent(profileId)}&select=profile_id`);
+        isPlaying = !!(pr && pr[0]);
       }
       let inCamp = false;
       if (C.posSeason) {
@@ -200,6 +208,7 @@ export function createRoleSyncer(env, opts = {}) {
       const desired = desiredRolesFor(m, {
         roleId: C.roleId, teamRoleId,
         registered: isRegistered ? new Set([profileId]) : new Set(),
+        playing: isPlaying ? new Set([profileId]) : new Set(),
         regOpen: C.regOpen,
         mgmtRoleByProfile: seat ? { [profileId]: seat } : {},
         deptByProfile: (p.role === "staff" || p.role === "commissioner") ? { [profileId]: p.departments || [] } : {},

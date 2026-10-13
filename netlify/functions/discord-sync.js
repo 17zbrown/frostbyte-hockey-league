@@ -1736,7 +1736,7 @@ function cutShort(sum, left) {
 }
 async function syncLinkedMembers(ctx, sum, outOfTime) {
   const { links, bannedIds, guildBans, memberById, memberListOk, markGuild, avatarById, tagOwner, inputsOk,
-    roleId, teamRoleId, registered, regOpen, mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, camp, managedIds,
+    roleId, teamRoleId, registered, playing, regOpen, mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, camp, managedIds,
     timeoutUntil, timeoutsApplied } = ctx;
   const linked = links.filter((m) => m.discord_id);
   for (let i = 0; i < linked.length; i++) {
@@ -1829,7 +1829,7 @@ async function syncLinkedMembers(ctx, sum, outOfTime) {
       // (2) role sync — desired managed roles for this member. The rules live in
       // shared/roles.mjs, shared verbatim with the gateway bot's instant per-member sync.
       if (inputsOk) {
-        const desired = desiredRolesFor(m, { roleId, teamRoleId, registered, regOpen,
+        const desired = desiredRolesFor(m, { roleId, teamRoleId, registered, playing, regOpen,
           mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, camp });
         const { next, changed } = applyManagedRoles(mem.roles, desired, managedIds);
         if (changed) {
@@ -2850,15 +2850,23 @@ export async function runSweep(opts = {}) {
   // Current-season registration drives the three participation roles. `registered` is populated
   // year-round (not only while the window is open) so Player and Free Agent stay coherent all
   // season; `regOpen` is the narrower "sign-ups still open" flag that drives Not Signed Up.
-  let regOpen = false; const registered = new Set();
+  let regOpen = false; const registered = new Set(), playing = new Set(); let regSeasonId = null;
   try {
     const s = (await sbGet("seasons?select=id,registration_open&registration_open=is.true&order=number.desc&limit=1"))[0]
       || (await sbGet("seasons?select=id,registration_open,status&status=neq.complete&order=number.asc&limit=1"))[0];   /* v2.36: the season in play, never the newest */
     if (s) {
       regOpen = !!s.registration_open;   /* Rule 1.1 (v2.8): the deadline never closes registration */
       for (const r of await sbGet(`season_registrations?season_id=eq.${s.id}&select=profile_id`)) registered.add(r.profile_id);
+      regSeasonId = s.id;
     }
   } catch (e) { inputsOk = false; inputsErr.push("registrations"); sum.errors.push({ regStatus: String(e.message || e) }); }
+  /* v3.98 (commissioner): the season IN PLAY keeps its registrants Player and Free Agent until it ends (shared/roles.mjs).
+     A failed load leaves managed roles untouched this run, like every other input, rather than stripping them. */
+  try {
+    const act = (await sbGet("seasons?select=id&status=eq.active&order=number.asc&limit=1"))[0];
+    if (act && act.id !== regSeasonId)
+      for (const r of await sbGet(`season_registrations?season_id=eq.${act.id}&select=profile_id`)) playing.add(r.profile_id);
+  } catch (e) { inputsOk = false; inputsErr.push("in-play registrations"); sum.errors.push({ playing: String(e.message || e) }); }
 
   if (!inputsOk) sum.errors.push({ inputs: "load failed (" + inputsErr.join("; ") + ") — managed roles left untouched this run" });
   /* The two member passes are the only part of the sweep whose cost scales with the server, and
@@ -2885,7 +2893,7 @@ export async function runSweep(opts = {}) {
   catch (e) { timeoutsApplied = {}; }
   const timeoutsBefore = JSON.stringify(timeoutsApplied);
   const ctx = { links, bannedIds, guildBans, memberById, memberListOk, markGuild, avatarById, tagOwner, inputsOk,
-    roleId, teamRoleId, registered, regOpen, mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, camp, managedIds,
+    roleId, teamRoleId, registered, playing, regOpen, mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, camp, managedIds,
     timeoutUntil, timeoutsApplied };
   await syncLinkedMembers(ctx, sum, outOfTime);
   if (JSON.stringify(timeoutsApplied) !== timeoutsBefore) {

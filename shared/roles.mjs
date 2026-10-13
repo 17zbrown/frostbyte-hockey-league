@@ -75,7 +75,12 @@ export function desiredRolesFor(m, ctx) {
   const camp = ctx.camp || new Set();   /* profiles whose roster spot this season is in training camp (v2.72) */
   const rookies = ctx.rookies || new Set();
   const desired = new Set();
-  const isRegistered = registered.has(m.profile_id);
+  /* v3.98 (commissioner, 2026-10-13): a player registered for the season IN PLAY keeps Player and Free Agent until that
+     season ends, even after the next season's sign-ups open at the movement deadline: a waived player can still be signed
+     as a replacement (Rule 2.4). `playing` is empty whenever the season in play is the one taking sign-ups. Not Signed Up
+     below still reads `registered` alone, so it follows the season taking sign-ups. */
+  const playing = ctx.playing || new Set();
+  const isRegistered = registered.has(m.profile_id) || playing.has(m.profile_id);
   const onRoster = !!(m.team_id && teamRoleId[m.team_id]);
   /* A club seat holder is MANAGEMENT, not a free agent, even while registered and unrostered
      pre-draft — matching the site's own taxonomy (CG.poolState returns "Management", never a

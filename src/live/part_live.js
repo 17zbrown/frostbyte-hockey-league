@@ -3298,6 +3298,10 @@ CG.ROUTES.register = function(){
         ? ' <button class="btn btn-ghost btn-sm" id="regWithdraw" style="color:var(--red);margin-left:6px">Withdraw my sign-up</button>'
         : reg ? ' <span class="caption">Need out? You’ve already been placed — message the league office.</span>' : '')+
       '</div>' : "";
+  /* v3.99 (commissioner): the seasons do not overlap, so a player on a Season 1 roster signs up for Season 2 like anyone */
+  if (!reg && CG.SEASON && CG.SEASON.id !== s.id && p && ((CG.lg && CG.lg._rosteredIds) || {})[p.id])
+    statusCard = '<div class="note chr" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Playing out '+esc(CG.SEASON.name||("Season "+CG.SEASON.number))+'?</b> '+
+      'Sign up for '+esc(s.name||("Season "+(s.number||1)))+' now as well. The seasons don’t overlap, so it changes nothing about your current club, and it is what lets you apply to own a club.</div>';
   if (myCt && !reg){
     statusCard = '<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">'+(myCt.status==="signed"
         ? 'Your next deal with '+esc(ctName)+' is signed through Season '+(myCt.end_season||snumR)+' — it comes into force with Season '+(myCt.start_season||snumR)+'’s cap year, and a contract doesn’t replace registration.'
@@ -3957,7 +3961,16 @@ CG.ROUTES.owner = function(){
         '<span style="flex:1">You’re on <b>Media</b> only, which is the one staff department that may also run a club (Rule 2.7). Take on a second department and you’d have to give the club seat up.</span></div>'
       : "");
   var statusCard = CG.auth.ownerApp ? '<div class="note '+(a.status==="approved"?"grn":a.status==="denied"?"red":"chr")+'" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your application is '+esc((a.status||"pending").toUpperCase())+'.</b> Resubmit below to update it — the commissioners review every application.</div>' : "";
-  statusCard = conflictNote + closedNote + statusCard;
+  /* v3.99 (commissioner, 2026-10-13): only a member signed up to play in the season may apply to own a club. The
+     database refuses it too (guard_owner_app_signed_up), and withdrawing the sign-up withdraws a pending application. */
+  var needSignup = !lockedFromOwning && !deadlineClosed && !(CG.isRegisteredNow && CG.isRegisteredNow());
+  var signupNote = needSignup
+    ? '<div class="note red" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("flag",15)+
+      '<span style="flex:1"><b>Sign up to play first.</b> Only a player signed up for '+esc(s.name||("Season "+(s.number||1)))+' can apply to own a club'+
+      (CG.auth.ownerApp && CG.auth.ownerApp.status==="withdrawn" ? ', and your application was withdrawn when your sign-up was' : '')+'.</span>'+
+      '<a class="btn btn-chrome btn-sm" href="#/register">Sign up to play</a></div>'
+    : "";
+  statusCard = conflictNote + closedNote + signupNote + statusCard;
   /* v3.95: a season with its own chapter in the rulebook (Chapter S2) says what is different about it */
   var upCh = ((CG.CONTENT && CG.CONTENT.rulebook && CG.CONTENT.rulebook.chapters) || []).find(function(c){ return c.upcomingSeason && c.upcomingSeason === s.number; });
   if (upCh && !deadlineClosed) statusCard = '<div class="note chr" style="margin-bottom:18px">Every club is decided again for '+esc(s.name||("Season "+s.number))+', so current Owners apply too. '+
@@ -3974,7 +3987,7 @@ CG.ROUTES.owner = function(){
         '<label class="fld"><span style="font-size:11px">3rd choice</span><select id="ow-fr3">'+CG.franchiseOptions(a.franchise_3)+'</select></label>'+
       '</div></div>'+
     '<label class="fld"><span>Why you? (pitch) *</span><textarea id="ow-pitch" rows="4" placeholder="Tell the commissioners why you’d make a great owner…">'+esc(a.pitch||"")+'</textarea></label>'+
-    '<button class="btn btn-chrome" id="ow-submit"'+((lockedFromOwning||deadlineClosed)?" disabled":"")+'>'+(CG.auth.ownerApp?"Update application":"Submit application")+'</button>'+
+    '<button class="btn btn-chrome" id="ow-submit"'+((lockedFromOwning||deadlineClosed||needSignup)?" disabled":"")+'>'+(CG.auth.ownerApp?"Update application":"Submit application")+'</button>'+
   '</div></div>';
   /* once they've applied, a chat with the league office sits between the status and the form */
   var chat = CG.auth.ownerApp && CG.auth.ownerApp.id ? CG.appChatSection("owner", CG.auth.ownerApp.id, {office:false}) : "";
@@ -3991,6 +4004,8 @@ CG.submitOwnerApp = async function(){
   if(r0==="commish"||r0==="staff"){ CG.toast((r0==="commish"?"Commissioners":"Staff")+" can’t own or manage a club — you can still play as a member","err"); return; }
   var _s=(CG.regSeason&&CG.regSeason())||CG.SEASON||{};
   if(_s.owner_app_deadline && Date.parse(_s.owner_app_deadline) <= CG.now()){ CG.toast("Owner applications closed on "+CG.fmtFull(Date.parse(_s.owner_app_deadline)),"err"); return; }
+  /* v3.99: only a signed-up player can apply (the database refuses it too) */
+  if(!(CG.isRegisteredNow && CG.isRegisteredNow())){ CG.toast("Sign up to play in "+(_s.name||("Season "+(_s.number||1)))+" first: only a signed-up player can apply","err"); location.hash="#/register"; return; }
   function v(id){ var el=document.getElementById(id); return el?(el.value||"").trim():""; }
   function sv(id){ var el=document.getElementById(id); return el?(el.value||"").trim()||null:null; }
   var ea=v("ow-ea"), pitch=v("ow-pitch");
@@ -4006,7 +4021,10 @@ CG.submitOwnerApp = async function(){
     preferred_club:fr1, franchise_2:fr2, franchise_3:fr3,
     pitch:pitch, status:"pending", updated_at:new Date().toISOString() };
   var r=await CG.sb.from("owner_applications").upsert(payload,{onConflict:"profile_id,season_id"}).select().maybeSingle();
-  if(r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
+  if(r.error){
+    var em=String(r.error.message||"");
+    CG.toast(/SIGN_UP_FIRST:/.test(em) ? em.replace(/^.*SIGN_UP_FIRST:\s*/,"") : "Couldn’t submit: "+em,"err"); return;
+  }
   CG.auth.ownerApp=r.data||payload; /* keep the row (with its id) so the office chat appears at once */
   CG.toast("Application submitted — the commissioners will review it","ok"); CG.router();
 };
