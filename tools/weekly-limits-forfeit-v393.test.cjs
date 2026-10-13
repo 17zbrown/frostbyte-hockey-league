@@ -81,6 +81,8 @@ A("the night's week reference is never an exempt game", /var isRef = function\(x
 A("Dress the week projects played plus filed sheets", /r\.verdict === "played" \|\| \(r\.verdict === "filed" && !\(CG\.capExceptionFor && CG\.capExceptionFor\(r\.id, pid\)\)\)/.test(hub));
 A("no screen says a filed sheet counts or that dressing is where the limit is enforced", !/games already played or filed \(Rule "\+\(game\.stage==="playoff"\?"8\.3":"5\.2"\)\+"\)\. Drop him/.test(hub) && !/The limit itself is enforced when a lineup is dressed/.test(hub) && !/is refused when it is dressed/.test(hub) && !/gets those games back in his week/.test(hub) && !/The count includes lineups you have already filed/.test(hub));
 
+A("placement of a late sign-up stops at the movement deadline on the sign-up path too", /and not public\.moves_locked\(v_season\.id\)   -- v3\.93: placement closes at the movement deadline \(Rule 2\.4\)/.test(R("sql/2026-10-12-placement-closes-at-deadline-v393.sql")));
+
 console.log("— the rulebook and changelog");
 global.CG = {}; vm.runInThisContext(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook;
