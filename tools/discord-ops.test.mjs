@@ -46,7 +46,6 @@ globalThis.fetch = async (url, opts = {}) => {
 };
 
 const ops = (await import(new URL("../netlify/functions/discord-ops.js", import.meta.url).pathname)).default;
-const { handler: join } = await import(new URL("../netlify/functions/discord-join.js", import.meta.url).pathname);
 const req = (qs, init = {}) => new Request("https://chelgamingleague.com/api/discord-ops" + qs, init);
 
 console.log("— the ops door: nothing without the key, and a miss is a 404 (never a 401)");
@@ -149,38 +148,12 @@ console.log("\n— the redirect and the wiring");
   A("discord-sync no longer parses a request of its own", !/req\.url/.test(syncSrc.slice(syncSrc.indexOf("export async function runSweep"))));
 }
 
-console.log("\n— discord-join: a session for the POST, the ops key for the diagnostic, 401 otherwise");
+/* v4.04: discord-join.js is deleted. The sign-in auto-join it served was retired on 2026-07-19 and nothing called it;
+   removing it takes a public endpoint off Netlify (commissioner: keep Netlify usage down). */
 {
-  const ev = (method, extra = {}) => ({ httpMethod: method, headers: {}, queryStringParameters: {}, body: null, ...extra });
-  reset();
-  let r = await join(ev("GET"));
-  A("GET without the key -> 401", r.statusCode === 401);
-  A("...with no Discord call and no app_config write", discordCalls.length === 0 && !cfg["rl_discord-join_result"]);
-  reset();
-  r = await join(ev("GET", { queryStringParameters: { key: "the-key" } }));
-  A("GET with the key -> the diagnostic", r.statusCode === 200 && !!JSON.parse(r.body).diagnostic);
-  reset();
-  r = await join(ev("GET", { headers: { "X-Diag-Key": "the-key" } }));
-  A("...the header form works, in any case", r.statusCode === 200);
-  reset();
-  r = await join(ev("POST", { body: JSON.stringify({ access_token: "discord-oauth" }) }));
-  A("POST without a session -> 401", r.statusCode === 401);
-  A("...before any Discord call (the bot's invalid-request budget is not spent)", discordCalls.length === 0 && authChecks.length === 0);
-  reset();
-  r = await join(ev("POST", { headers: { authorization: "Bearer bad-jwt" }, body: JSON.stringify({ access_token: "discord-oauth" }) }));
-  A("POST with a bad session -> 401", r.statusCode === 401 && authChecks.length === 1 && discordCalls.length === 0);
-  reset();
-  r = await join(ev("POST", { headers: { Authorization: "Bearer service-key" }, body: JSON.stringify({ access_token: "discord-oauth" }) }));
-  A("the service key is not a session here either", r.statusCode === 401 && authChecks.length === 0);
-  reset();
-  r = await join(ev("POST", { headers: { Authorization: "Bearer good-jwt" }, body: JSON.stringify({}) }));
-  A("a valid session passes the gate (the next check, the missing token, answers)", r.statusCode === 400 && /access_token/.test(r.body));
-  reset();
-  r = await join(ev("PUT"));
-  A("any other method -> 401", r.statusCode === 401);
-  reset();
-  r = await join(ev("POST", { queryStringParameters: { diag: "1" } }));
-  A("?diag=1 on a POST is the diagnostic, so it needs the key too", r.statusCode === 401);
+  const fsx = await import("node:fs");
+  A("the retired discord-join function is gone, with its route", !fsx.existsSync(new URL("../netlify/functions/discord-join.js", import.meta.url)) &&
+    !/\/api\/discord-join/.test(fsx.readFileSync(new URL("../netlify.toml", import.meta.url), "utf8")));
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

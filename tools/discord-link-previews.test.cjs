@@ -78,7 +78,6 @@ const ls = (d, re) => fsx.readdirSync(path.join(__dirname, "..", d)).filter((f) 
 const MARK = /\/messages|\/webhooks\/|\/threads|\/callback|_webhook|discord\.com\/api/;
 /* Files that name a Discord endpoint but write no message. Adding one here needs a reason. */
 const NO_MESSAGES = {
-  "netlify/functions/discord-join.js": "guild reads and the member PUT that adds a user to the server",
   "bot/role-sync.mjs": "member role PATCHes only",
 };
 const lanes = [...ls("netlify/functions", /\.js$/), ...ls("bot", /\.mjs$/), ...ls("tools/discord", /\.mjs$/)];

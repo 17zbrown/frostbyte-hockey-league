@@ -1,12 +1,19 @@
 # Netlify configuration for Chel Gaming Hockey League
-# Serverless functions (EA stats, screenshots, Discord) + a static site whose single
+# Serverless functions (EA stats, Discord) + a static site whose single
 # index.html is generated at deploy time from src/live/ (so git doesn't carry a ~700KB
 # blob per edit). No dependencies — the build is a pure Node file concatenation (~1s).
 
 [build]
-  command = "node src/live/build.cjs index.html && node src/live/build.cjs preview.html preview_layer.js"
+  # v4.04: preview.html (the local design preview) is no longer built here; it was blocked at the edge anyway, and building
+  # and uploading a second 2.6 MB copy of the app on every deploy cost Netlify usage for nothing. Build it locally with
+  # node src/live/build.cjs preview.html preview_layer.js.
+  command = "node src/live/build.cjs index.html"
   publish = "."
   functions = "netlify/functions"
+  # v4.04 (commissioner: "maximize the efficiency of this project so I dont use up all of our netlify usage"): skip the
+  # deploy when a push changes only database records, tools, docs or the VM bot's own files. Fail-safe: anything it
+  # cannot be sure of builds. See tools/netlify-ignore.sh.
+  ignore = "sh tools/netlify-ignore.sh"
 
 # HTTPS_PROXY (the IPRoyal residential proxy that lets the EA functions reach proclubs.ea.com from
 # Netlify's blocked datacenter IPs) is configured in the site's env vars with the "builds" scope on,
@@ -72,23 +79,10 @@
   # function candidate — assets placed there are not shipped.
   included_files = ["src/live/part3_content.js", "assets/role-icons/*", "assets/role-icons/**"]
 
-# The front-end calls /api/parse-screenshots; route that to the serverless function.
-[[redirects]]
-  from = "/api/parse-screenshots"
-  to = "/.netlify/functions/parse-screenshots"
-  status = 200
-
 # The EA stats fetcher POSTs raw match data here (auth: x-ingest-key header).
 [[redirects]]
   from = "/api/ingest-stats"
   to = "/.netlify/functions/ingest-stats"
-  status = 200
-
-# Sign-in-with-Discord doubles as a server invite: the front-end POSTs the user's
-# Discord OAuth token here and the bot adds them to the guild.
-[[redirects]]
-  from = "/api/discord-join"
-  to = "/.netlify/functions/discord-join"
   status = 200
 
 # The request-reachable door to the Discord sweep (diag / register / setup / reconcile / run-now).
