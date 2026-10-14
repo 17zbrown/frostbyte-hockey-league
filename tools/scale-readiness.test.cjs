@@ -25,11 +25,12 @@ console.log("— whole-table reads don't get slower one round trip at a time");
 console.log("— one league rebuild per game, not per stat row");
 {
   /* v2.57: the handler passes the changed game so the rebuild is a delta (two reads), jittered */
-  A("the public channel listens to games only", /table:"games" \}, function\(p\)\{ CG\.liveReload\(\{ game:[^\n]*\n      \.subscribe\(\);/.test(live));
+  /* v4.05: the public channel listens to the league pulse (one row, at most every 10 s), not to games rows */
+  A("the public channel listens to the league pulse only", /\.on\("postgres_changes",\{ event:"UPDATE", schema:"public", table:"live_pulse" \}, function\(p\)\{ CG\.pulseApply\(p && p\.new\); \}\)/.test(live) && !/table:"games" \}, function\(p\)/.test(live));
   A("...and a games change is a delta rebuild, not the whole boot", /CG\._deltaBoot = async function/.test(live) && /\(opts\.delta \|\| opts\.roster\) && CG\._bootCache/.test(live));
   A("...spread over a jitter window so open tabs don't stampede", /1000 \+ Math\.floor\(Math\.random\(\)\*8000\)/.test(live));
   A("...not to game_stats", !/table:"game_stats" \}, function\(\)\{ CG\.liveReload\(\); \}\)/.test(live));
-  A("...and says why", /patches games to final/.test(live));
+  A("...and says why", /game_stats is still never listened to directly/.test(live));
 }
 
 console.log("— draft night can't spin itself");

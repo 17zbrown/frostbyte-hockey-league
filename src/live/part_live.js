@@ -559,6 +559,36 @@ CG._deltaBoot = async function(cached, gameIds, roster){
   }
   return q;
 };
+/* v4.05: the league pulse's delta. Re-runs only the boot slots whose data changed (CG._bootLoaders, the same queries a
+   fresh page load runs), merges box scores for the named games, and keeps what it had for any slot that fails, so a
+   transient error never blanks a page. */
+CG._deltaSlots = async function(cached, opts, hint){
+  var q = cached.slice(), loaders = CG._bootLoaders(hint), failed = { slots: [], statsIds: null, statsAll: false };
+  var slots = (opts.slots || []).filter(function(i){ return i >= 0 && i < loaders.length && i !== 12; });
+  /* a slot the last full load could not read is read again, so one transient error never sticks */
+  q.forEach(function(r, i){ if (i !== 12 && r && r.error && slots.indexOf(i) < 0) slots.push(i); });
+  var statsAll = !!opts.statsAll || !!(q[12] && q[12].error);
+  var res = await Promise.all(slots.map(function(i){
+    return Promise.resolve().then(loaders[i]).then(function(r){ return r; }, function(e){ return { data:null, error:e }; });
+  }));
+  slots.forEach(function(i, k){ var r = res[k]; if (r && !r.error) q[i] = r; else failed.slots.push(i); });
+  if (statsAll){
+    var all = await Promise.resolve().then(loaders[12]).then(function(r){ return r; }, function(e){ return { data:null, error:e }; });
+    if (all && !all.error) q[12] = all; else failed.statsAll = true;
+  } else if (opts.statsIds && opts.statsIds.length && q[12] && !q[12].error){
+    var ids = opts.statsIds.filter(function(x){ return typeof x === "string" && CG._UUID_RE.test(x); });
+    if (ids.length){
+      var fresh = await CG.sb.from("game_stats").select("*").in("game_id", ids).then(function(r){ return r; }, function(e){ return { error:e }; });
+      if (!fresh.error){
+        var keep = (q[12].data||[]).filter(function(r){ return ids.indexOf(r.game_id) < 0; });
+        q[12] = { data: keep.concat(fresh.data||[]), error:null };
+      } else failed.statsIds = ids;
+    }
+  }
+  /* what could not be read is retried by liveReload, so a version the page already marked as seen is not lost */
+  CG._deltaFailed = (failed.slots.length || failed.statsAll || failed.statsIds) ? failed : null;
+  return q;
+};
 /* The masked view: game_code / server come back null unless the database lets THIS reader see
    them. Scoped to the games around now — codes only exist to be read on the night. */
 CG._codesToday = function(){
@@ -583,12 +613,17 @@ CG.refreshCodes = function(){
       var code = c.game_code || null, server = c.server || null;
       if (g.code !== code || g.server !== server){ g.code = code; g.server = server; n++; }
     });
+    /* v4.05: the boot cache holds this answer too, so a later slot rebuild never puts an older code back */
+    if (CG._bootCache) CG._bootCache[CG.BOOT_CODES] = r;
     if (n){
-      var ov = document.getElementById("overlay-root");
-      if (!(ov && ov.innerHTML.trim())){
-        var y = window.pageYOffset;
-        if (CG.rerenderKeepScroll) CG.rerenderKeepScroll(); else if (CG.router) CG.router();
-        window.scrollTo(0, y);
+      if (CG.quietRepaint) CG.quietRepaint();
+      else {
+        var ov = document.getElementById("overlay-root");
+        if (!(ov && ov.innerHTML.trim())){
+          var y = window.pageYOffset;
+          if (CG.rerenderKeepScroll) CG.rerenderKeepScroll(); else if (CG.router) CG.router();
+          window.scrollTo(0, y);
+        }
       }
     }
     return n;
@@ -627,44 +662,42 @@ CG.armCodeWatch = function(){
     CG.refreshCodes();
   }, 60000);
 };
-CG.buildLiveLeague = async function(opts){
-  opts = opts || {};
+/* v4.05: the boot queries as thunks, one per slot, so the league pulse can re-run exactly the slots whose data changed
+   and nothing else. The full boot runs them all at once, as before; tools/boot-index.test.cjs counts them. */
+CG._bootLoaders = function(_hintUsed){
   var sb = CG.sb;
-  CG.LIVE = CG.LIVE || {}; CG.LIVE.partial = {};
-  var _hintUsed = CG._seasonHint();      /* which season the box-score query is scoped to */
-  if (!sb) throw new Error("Supabase client unavailable");
-  var q = ((opts.delta || opts.roster) && CG._bootCache) ? await CG._deltaBoot(CG._bootCache, opts.delta, opts.roster) : await Promise.all([
-    sb.from("teams").select("*"),
-    sb.from("divisions").select("*").order("sort_order"),
-    sb.from("seasons").select("*").order("number", { ascending:false }),
+  return [
+    function(){ return sb.from("teams").select("*"); },
+    function(){ return sb.from("divisions").select("*").order("sort_order"); },
+    function(){ return sb.from("seasons").select("*").order("number", { ascending:false }); },
     /* Explicit column list, not "*": this load runs for signed-out visitors too, and anon's
        grant on profiles is now column-scoped so identity columns (discord_id, discord_username,
        platform_gamertag) and moderation columns (is_admin, ban_reason, banned_at, banned_by)
        can't be scraped from the public API. Anything needing those reads them from the
        signed-in user's own profile row (CG.auth.profile) or a staff-only query. */
-    CG.sbAll("profiles",CG.PROFILE_PUBLIC_COLS,"id"),
-    CG.sbAll("roster_spots","*","id"),
-    CG.sbAll("contracts","*","id"),
-    CG.sbAll("games",CG.GAME_PUBLIC_COLS,"scheduled_at"),
-    CG.sbAll("transactions","*","occurred_at",false),
-    CG.sbAll("news","*","published_at",false),
+    function(){ return CG.sbAll("profiles",CG.PROFILE_PUBLIC_COLS,"id"); },
+    function(){ return CG.sbAll("roster_spots","*","id"); },
+    function(){ return CG.sbAll("contracts","*","id"); },
+    function(){ return CG.sbAll("games",CG.GAME_PUBLIC_COLS,"scheduled_at"); },
+    function(){ return CG.sbAll("transactions","*","occurred_at",false); },
+    function(){ return CG.sbAll("news","*","published_at",false); },
     /* both orders go through the builder: sbAll applies filterFn before its own orderCol, so
        passing season_number as orderCol would demote it below round and invert the sort */
-    CG.sbAll("draft_picks","id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped",null,true,
-      function(qb){ return qb.order("season_number").order("round"); }),
+    function(){ return CG.sbAll("draft_picks","id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped",null,true,
+      function(qb){ return qb.order("season_number").order("round"); }); },
     /* The registration BOARD is public record, read through a SECURITY DEFINER pool. Reading the
        table directly here meant RLS silently hid everyone else's rows from members and guests, so
        every public surface undercounted the sign-ups — the directory called 46 of 47 registered
        members "Not signed up". Notes and scouting marks stay staff-only; staff and commissioners
        reload the full table (with scout_ovr) after auth exactly as before. */
-    CG.sb.rpc("registration_pool").then(function(r){
+    function(){ return CG.sb.rpc("registration_pool").then(function(r){
       return { data: (r.data||[]).map(function(x){
         return { id:x.id, profile_id:x.profile_id, season_id:x.season_id, status:x.status,
                  position:x.position, scout_ovr:null, created_at:x.created_at,
                  profiles:{ gamertag:x.gamertag, ea_id:x.ea_id } };
       }), error:r.error };
-    }),
-    sb.from("leagues").select("*").order("sort_order"),
+    }); },
+    function(){ return sb.from("leagues").select("*").order("sort_order"); },
     /* Scoped to the season being viewed. game_stats is the largest thing this boot loads (~12
        lines per game), and unscoped it would carry every season ever played forever — Season 2
        starting at Season 1's final row count. season_id is filled by trg_game_stats_season.
@@ -672,25 +705,35 @@ CG.buildLiveLeague = async function(opts){
     /* Scoped to the season being viewed — see CG._seasonHint above for why the id comes from a
        stored hint and what happens without one. Career totals do NOT come from this load; they
        come from the career_games_played aggregate below. */
-    CG.sbAll("game_stats","*","id",true, function(qb){
+    function(){ return CG.sbAll("game_stats","*","id",true, function(qb){
       return _hintUsed ? qb.eq("season_id", _hintUsed) : qb;
-    }),
-    sb.from("feature_flags").select("key,enabled"),
-    sb.from("site_config").select("key,value"),
+    }); },
+    function(){ return sb.from("feature_flags").select("key,enabled"); },
+    function(){ return sb.from("site_config").select("key,value"); },
     /* v3.51: the suspension_record view, not the table. The public sees a suspension's length and
        headings; the member and league staff also see the reason, and staff the issuing official
        (commissioner, 2026-09-28, Q61). The table itself is no longer readable from the site. */
-    CG.sbAll("suspension_record","*","created_at",false),
-    CG.sbAll("awards","*","week"),
+    function(){ return CG.sbAll("suspension_record","*","created_at",false); },
+    function(){ return CG.sbAll("awards","*","week"); },
     /* Career games, ACROSS ALL SEASONS, as ~200 aggregate rows. The box-score load above is
        scoped to one season, so counting career games from it would report 0 for every returning
        player — and the OVR surfaces would call a settled rating "provisional" league-wide. */
     /* v3.74: a rating per position (player_position_overalls), one of them the headline */
-    CG._posOvrLoad(),
-    CG.sb.rpc("career_games_played"),
+    function(){ return CG._posOvrLoad(); },
+    function(){ return CG.sb.rpc("career_games_played"); },
     /* tonight's lobby codes and server picks through the masked view (Rule 4.2) */
-    CG._codesToday()
-  ]);
+    function(){ return CG._codesToday(); }
+  ];
+};
+CG.buildLiveLeague = async function(opts){
+  opts = opts || {};
+  var sb = CG.sb;
+  CG.LIVE = CG.LIVE || {}; CG.LIVE.partial = {};
+  var _hintUsed = CG._seasonHint();      /* which season the box-score query is scoped to */
+  if (!sb) throw new Error("Supabase client unavailable");
+  var q = ((opts.delta || opts.roster) && CG._bootCache) ? await CG._deltaBoot(CG._bootCache, opts.delta, opts.roster)
+        : (opts.slots && CG._bootCache) ? await CG._deltaSlots(CG._bootCache, opts, _hintUsed)
+        : await Promise.all(CG._bootLoaders(_hintUsed).map(function(f){ return f(); }));
   CG._bootCache = q;
   if (q[12] && q[12].error){
     CG.LIVE.partial.game_stats = String((q[12].error && q[12].error.message) || q[12].error);
@@ -7753,8 +7796,76 @@ function pvBusyInteracting(){
   var a = document.activeElement, tn = a && a.tagName;
   if (tn === "INPUT" || tn === "TEXTAREA" || tn === "SELECT" || (a && a.isContentEditable)) return true;
   var ov = document.getElementById("overlay-root");
-  return !!(ov && ov.innerHTML.trim());   /* a modal / drawer / palette is open */
+  if (ov && ov.innerHTML.trim()) return true;   /* a modal / drawer / palette is open */
+  var mn = document.getElementById("mobilenav");
+  if (mn && mn.classList && mn.classList.contains("open")) return true;   /* v4.05: the phone menu is open */
+  return CG._pageDirty();                        /* v4.05: typed or changed but not saved, even after leaving the field */
 }
+/* v4.05: anything on the page that differs from how it was drawn. A repaint would put it back, so it waits. */
+CG._pageDirty = function(){
+  var app = document.getElementById("app"); if (!app) return false;
+  var els = app.querySelectorAll("input, textarea, select");
+  for (var i = 0; i < els.length; i++){
+    var e = els[i], t = (e.type || "").toLowerCase();
+    if (t === "hidden" || t === "button" || t === "submit" || t === "reset" || t === "file") continue;
+    if (t === "checkbox" || t === "radio"){ if (e.checked !== e.defaultChecked) return true; continue; }
+    if (e.tagName === "SELECT"){
+      if (e.multiple){
+        for (var j = 0; j < e.options.length; j++){ if (e.options[j].selected !== e.options[j].defaultSelected) return true; }
+        continue;
+      }
+      /* a single select with no selected attribute shows its first enabled option when drawn, so that is clean */
+      var def = -1, k;
+      for (k = 0; k < e.options.length; k++){ if (e.options[k].defaultSelected){ def = k; break; } }
+      if (def < 0){ for (k = 0; k < e.options.length; k++){ if (!e.options[k].disabled){ def = k; break; } } }
+      if (e.options.length && e.selectedIndex !== (def < 0 ? 0 : def)) return true;
+      continue;
+    }
+    if (e.value !== e.defaultValue) return true;
+  }
+  return false;
+};
+/* v4.05: the one door for automatic repaints. A hidden tab, or a page someone is using, OWES the repaint instead of
+   dropping it, and it lands the moment they are done (seamless-interactions rule: an update never resets the page). */
+CG.quietRepaint = function(){
+  if (document.visibilityState === "hidden"){ CG._repaintOwed = true; return; }
+  if (pvBusyInteracting()){ CG._repaintOwed = true; CG._armRepaintCheck(); return; }
+  CG._repaintOwed = false;
+  var y = window.pageYOffset;
+  if (CG.renderChrome) CG.renderChrome();
+  if (CG.router) CG.router();
+  window.scrollTo(0, y);
+};
+CG._armRepaintCheck = function(){
+  if (CG._repaintTimer) return;
+  CG._repaintOwedSince = CG._repaintOwedSince || Date.now();
+  CG._repaintTimer = setInterval(function(){
+    if (!CG._repaintOwed){ clearInterval(CG._repaintTimer); CG._repaintTimer = null; CG._repaintOwedSince = 0; CG._hideRepaintPill(); return; }
+    if (document.visibilityState === "hidden") return;
+    if (pvBusyInteracting()){
+      /* a minute later, offer it: a field changed and saved in place can look unsaved for good */
+      if (Date.now() - CG._repaintOwedSince > 60000) CG._showRepaintPill();
+      return;
+    }
+    clearInterval(CG._repaintTimer); CG._repaintTimer = null; CG._repaintOwedSince = 0; CG._hideRepaintPill();
+    CG.quietRepaint();
+  }, 1500);
+};
+CG._showRepaintPill = function(){
+  if (document.getElementById("cgRepaintPill") || !document.body) return;
+  var b = document.createElement("button");
+  b.id = "cgRepaintPill"; b.type = "button"; b.className = "cg-update-pill";
+  b.textContent = "New updates. Show them";
+  b.addEventListener("click", function(){
+    CG._repaintOwed = false; CG._repaintOwedSince = 0; CG._hideRepaintPill();
+    var y = window.pageYOffset;
+    if (CG.renderChrome) CG.renderChrome();
+    if (CG.router) CG.router();
+    window.scrollTo(0, y);
+  });
+  document.body.appendChild(b);
+};
+CG._hideRepaintPill = function(){ var b = document.getElementById("cgRepaintPill"); if (b) b.remove(); };
 /* opts.game: the games row that changed (from the realtime payload). A games-only change is a
    DELTA rebuild — two reads, not nineteen — and it waits a random 1–9 s so a hundred open tabs
    spread over the window instead of hitting the database in the same second. A call with no game
@@ -7771,66 +7882,289 @@ function pvBusyInteracting(){
 CG._LG_CARRY = ["_appBallots","_appMsgs","_draftPicksRaw","_lineups","_gameLinePlan","_mgmtApps","_mgmtMoves","_mgmtPolicy","_mgmtPolicyAt",
   "_myBoard","_myTrades","_ownerApps","_registrationsRaw","_servers","_staffApps","_vetoes","_actionReqs","_actionMsgs","draftState",
   "_teamLines","_linePlan","capExceptions","playoffFloors","_replacements","_regLoadError"];
-CG._carryLg = function(from, to){
+CG._carryLg = function(from, to, skip){
   if (!from || !to) return;
-  CG._LG_CARRY.forEach(function(k){ if (from[k] !== undefined) to[k] = from[k]; });
+  /* v4.05: keys whose data the rebuild just re-read are not carried; loadManagerData re-reads the office's copy */
+  CG._LG_CARRY.forEach(function(k){ if (skip && skip.indexOf(k) >= 0) return; if (from[k] !== undefined) to[k] = from[k]; });
   if (to._draftPicksRaw && CG.mapDraftData) CG.mapDraftData(to, to._draftPicksRaw, to._registrationsRaw||[]);
 };
 CG.liveReload = function(opts){
   opts = opts || {};
   if (opts.game){ (CG._liveGames = CG._liveGames || []).push(opts.game); }
   else if (opts.roster){ CG._liveRoster = true; }
-  else { CG._liveFullOwed = true; }   /* a full reload is owed — a later delta must not downgrade it */
+  else if (opts.slots){
+    /* v4.05: the league pulse names the data that changed; only those slots are re-read */
+    var sq = CG._liveSlots = CG._liveSlots || {};
+    opts.slots.forEach(function(i){ sq[i] = 1; });
+    if (opts.statsAll) CG._liveStatsAll = true;
+    else (opts.statsIds || []).forEach(function(id){ (CG._liveStatsIds = CG._liveStatsIds || {})[id] = 1; });
+    if (opts.manager) CG._liveManager = true;
+  }
+  else if (!opts.resume){ CG._liveFullOwed = true; }   /* a full reload is owed — a later delta must not downgrade it */
   var wait = opts.jitterMs ? 1000 + Math.floor(Math.random()*opts.jitterMs)
            : (opts.game || opts.roster) ? 1000 + Math.floor(Math.random()*8000) : 1000;
   /* a full reload already on the clock covers any delta: keep its timer (and its spread) */
-  if (CG._liveT && CG._liveFullOwed && (opts.game || opts.roster)) return;
+  if (CG._liveT && CG._liveFullOwed && (opts.game || opts.roster || opts.slots)) return;
   clearTimeout(CG._liveT);
   CG._liveT = setTimeout(function run(){
     CG._liveT = null;
     if (CG._liveBusy){ CG._liveAgain = true; return; }   /* fold overlapping bursts into one */
+    /* v4.05: a hidden tab keeps what is queued and runs it when it is looked at again */
+    if (document.visibilityState === "hidden"){ CG._liveHiddenOwed = true; return; }
     var full = !!CG._liveFullOwed, delta = full ? null : CG._liveGames, roster = full ? false : !!CG._liveRoster;
     CG._liveFullOwed = false; CG._liveGames = null; CG._liveRoster = false;
-    if (!full && !delta && !roster) return;              /* nothing queued (a retry that found the work already done) */
+    var slots = null, statsIds = null, statsAll = false, manager = false, skipCarry = null;
+    if (full){ CG._liveSlots = null; CG._liveStatsIds = null; CG._liveStatsAll = false; CG._liveManager = false; }
+    else if (!delta && !roster && (CG._liveSlots || CG._liveStatsAll || CG._liveStatsIds)){
+      slots = Object.keys(CG._liveSlots || {}).map(Number);
+      statsAll = !!CG._liveStatsAll; statsIds = CG._liveStatsIds ? Object.keys(CG._liveStatsIds) : null;
+      manager = !!CG._liveManager;
+      CG._liveSlots = null; CG._liveStatsIds = null; CG._liveStatsAll = false; CG._liveManager = false;
+      /* the sign-up pool or the pick list re-read: the fresh public copy stands, and the office re-reads its own */
+      if (slots.indexOf(9) >= 0 || slots.indexOf(10) >= 0){ skipCarry = ["_draftPicksRaw", "_registrationsRaw"]; manager = true; }
+    } else if (CG._liveSlots || CG._liveStatsAll || CG._liveStatsIds){ CG._liveAgain = true; }   /* slots run next, manager flag kept */
+    if (!full && !delta && !roster && !slots) return;              /* nothing queued (a retry that found the work already done) */
     CG._liveBusy = true;
     var prev = CG.lg;
-    CG.buildLiveLeague(full ? {} : { delta: delta || null, roster: roster }).then(function(lg){
-      if (!full) CG._carryLg(prev, lg);
+    CG.buildLiveLeague(full ? {} : slots ? { slots: slots, statsIds: statsIds, statsAll: statsAll } : { delta: delta || null, roster: roster }).then(function(lg){
+      if (!full) CG._carryLg(prev, lg, skipCarry);
       CG.lg = lg;
       CG.refreshRole();
       /* a game or roster changing does not move availability or trades; the manager state came across */
-      return full ? Promise.all([CG.loadManagerData(), CG.loadAvailability(), CG.loadTrades()]) : null;
+      if (full) return Promise.all([CG.loadManagerData(), CG.loadAvailability(), CG.loadTrades()]);
+      /* v4.05: a sign-up change re-reads the office's own registration view (with scouting marks) too */
+      var r0 = CG.role ? CG.role() : "guest";
+      return (manager && (r0 === "mgmt" || r0 === "staff" || r0 === "commish")) ? CG.loadManagerData() : null;
     }).then(function(){
-      /* don't yank the page out from under an active interaction — the data is
-         already fresh in memory, so the next navigation shows it. Otherwise
-         re-draw in place and hold the scroll position. */
-      if (!pvBusyInteracting()){
-        var y = window.pageYOffset;
-        if (CG.renderChrome) CG.renderChrome();
-        if (CG.router) CG.router();
-        window.scrollTo(0, y);
+      /* v4.05: don't yank the page out from under an active interaction. The data is fresh in memory and the repaint
+         is owed, landing the moment the person is done; otherwise re-draw in place and hold the scroll position. */
+      CG.quietRepaint();
+      /* what the delta could not read is asked for again, a little later each time (at most three times) */
+      var f = slots ? CG._deltaFailed : null; CG._deltaFailed = null;
+      if (f && (CG._liveRetries || 0) < 3){
+        CG._liveRetries = (CG._liveRetries || 0) + 1;
+        CG.liveReload({ slots: f.slots, statsIds: f.statsIds, statsAll: f.statsAll, jitterMs: 15000 * CG._liveRetries });
+      } else if (!f) CG._liveRetries = 0;
+    }).catch(function(){
+      /* v4.05: a pulse rebuild that failed outright is queued again, later each time, so the change is not lost */
+      if (slots && (CG._liveRetries || 0) < 3){
+        CG._liveRetries = (CG._liveRetries || 0) + 1;
+        CG.liveReload({ slots: slots, statsIds: statsIds, statsAll: statsAll, manager: manager, jitterMs: 15000 * CG._liveRetries });
       }
-    }).catch(function(){}).then(function(){
+    }).then(function(){
       CG._liveBusy = false;
       /* what queued while we were busy is still flagged: run it as queued (a delta stays a delta) */
       if (CG._liveAgain){ CG._liveAgain = false; CG._liveT = setTimeout(run, 0); }
     });
   }, wait);
 };
-/* one public channel — scores/standings/stats are the same for everyone, so this
-   runs for signed-out viewers too. Idempotent: subscribed once for the session. */
+/* ================================================================
+   v4.05: THE LEAGUE PULSE. Commissioner, 2026-10-14: "How can me make the entire website auto refresh changes so people
+   dont have to go manually refresh the page all the time?" and "maximize the efficiency of this project so I dont use
+   up all of our netlify usage."
+   The database marks every real change to the league's public tables and, at most every 10 seconds, makes ONE update
+   to public.live_pulse naming the kinds of data that changed (sql/2026-10-14-live-pulse-v405.sql). Every open page
+   listens to that one row on the channel it already had, and re-reads only the slots that changed, spread over a few
+   seconds so a crowd of tabs never asks at once, and only while the page is visible. A page someone is using is never
+   redrawn under them: the repaint waits until they are done. Nothing here ever asks Netlify for anything.
+   ================================================================ */
+/* the kinds of data the pulse names, the boot slots that carry them, how far a crowd of tabs spreads its re-reads */
+CG.LIVE_DOMAINS = {
+  scores:     { slots:[6, CG.BOOT_PPO], jitter:8000 },
+  stats:      { slots:[CG.BOOT_PPO, CG.BOOT_CAREER], jitter:8000 },
+  codes:      { codes:true, jitter:2500 },   /* the masked view's slot, for signed-in readers only (see _pulseFlush) */
+  rosters:    { slots:[4, 5], jitter:13000 },
+  wire:       { slots:[7], jitter:17000 },
+  news:       { slots:[8, 16], jitter:25000 },
+  league:     { slots:[0, 1, 2, 11, 13, 14], jitter:25000 },
+  signups:    { slots:[10], jitter:17000, manager:true },
+  discipline: { slots:[15], jitter:25000 },
+  picks:      { slots:[9], jitter:17000 },
+  people:     { slots:[3], jitter:25000 }
+};
+/* pages that read no league data: what changes while they are open is owed and fetched on the next page that does */
+CG.LIVE_QUIET_ROUTES = { rulebook:1, brand:1, forums:1, forum:1, thread:1, messages:1, pickup:1, signin:1 };
+CG._pulseSeen = null; CG._pulseOwed = {}; CG._pulseOwedStats = null; CG._pulseOwedStatsAll = false;
+CG._readPulse = function(){
+  if (!CG.sb) return Promise.resolve(null);
+  return CG.sb.from("live_pulse").select("v,d,site_build,at").eq("id", 1).maybeSingle()
+    .then(function(r){ return (r && !r.error && r.data) || null; }, function(){ return null; });
+};
+/* what this page already has: read just before the boot loaded the league, so nothing between the two is missed */
+CG._pulseBaseline = function(row){
+  CG._pulseSeen = {};
+  var d = (row && row.d) || {};
+  Object.keys(d).forEach(function(k){ CG._pulseSeen[k] = +((d[k] || {}).v) || 0; });
+};
+CG.pulseApply = function(row){
+  if (!row) return;
+  if (CG._checkBuild) CG._checkBuild(row.site_build);
+  if (!CG._pulseSeen){ CG._pulseBaseline(row); return; }
+  var d = row.d || {}, fresh = [];
+  Object.keys(d).forEach(function(k){ var v = +((d[k] || {}).v) || 0; if (v > (CG._pulseSeen[k] || 0)) fresh.push(k); });
+  if (!fresh.length) return;
+  if (fresh.indexOf("stats") >= 0){
+    /* the box scores that changed, by game; a gap in the log (a long-hidden tab) re-reads the season's box scores */
+    var sv = CG._pulseSeen.stats || 0, log = (d.stats && d.stats.log) || [];
+    var newer = log.filter(function(e){ return e && +e[0] > sv; });
+    var gap = !newer.length || (log.length >= 24 && +log[log.length - 1][0] > sv) || newer.some(function(e){ return !Array.isArray(e[1]); });
+    if (gap) CG._pulseOwedStatsAll = true;
+    else newer.forEach(function(e){ e[1].forEach(function(id){ (CG._pulseOwedStats = CG._pulseOwedStats || {})[id] = 1; }); });
+  }
+  fresh.forEach(function(k){ CG._pulseSeen[k] = +d[k].v; CG._pulseOwed[k] = true; });
+  CG._pulseFlush();
+};
+CG._pulseRoute = function(){ return (location.hash.replace(/^#\/?/, "").split(/[\/?]/)[0]) || "home"; };
+CG._pulseFlush = function(){
+  if (document.visibilityState === "hidden") return;            /* a hidden tab owes it */
+  if (CG.LIVE_QUIET_ROUTES[CG._pulseRoute()]) return;           /* nothing on this page reads league data */
+  var owed = Object.keys(CG._pulseOwed); if (!owed.length) return;
+  var slots = {}, jitter = 1000, manager = false;
+  var signedIn = !!(CG.role && CG.role() !== "guest");
+  var ds = CG.lg && CG.lg.draftState, drafting = !!(ds && ds.status === "live");
+  owed.forEach(function(k){
+    var m = CG.LIVE_DOMAINS[k]; if (!m) return;
+    /* draft night: the draft room has its own channel; elsewhere the picks' roster changes spread over a minute */
+    if (drafting && (k === "rosters" || k === "picks")){
+      if (/^#\/draft/.test(location.hash)) return;
+      jitter = Math.max(jitter, 60000);
+    }
+    (m.slots || []).forEach(function(i){ slots[i] = 1; });
+    /* lobby codes and server picks: a score or code change re-reads the masked view, but only for someone it will
+       answer (Rule 4.2); the boot slot keeps the newest answer, so no rebuild puts an older code back */
+    if ((m.codes || k === "scores") && signedIn) slots[CG.BOOT_CODES] = 1;
+    if (m.manager || k === "picks") manager = true;
+    jitter = Math.max(jitter, m.jitter || 5000);
+  });
+  var statsAll = CG._pulseOwedStatsAll, statsIds = CG._pulseOwedStats ? Object.keys(CG._pulseOwedStats) : null;
+  CG._pulseOwed = {}; CG._pulseOwedStats = null; CG._pulseOwedStatsAll = false;
+  var sl = Object.keys(slots).map(Number);
+  if (sl.length || statsAll || (statsIds && statsIds.length))
+    CG.liveReload({ slots: sl, statsIds: statsIds, statsAll: statsAll, manager: manager, jitterMs: jitter });
+};
+/* catch up after a gap the channel cannot cover (joining, waking a hidden tab, coming back online) with one read of the
+   one row, spread so a crowd that reconnects together does not read together */
+CG.pulseCatchUp = function(delay){
+  clearTimeout(CG._pulseCatchT);
+  CG._pulseCatchT = setTimeout(function(){
+    CG._pulseCaughtAt = Date.now();
+    CG._readPulse().then(function(row){ if (row) CG.pulseApply(row); });
+  }, Math.max(0, delay || 0));
+};
+/* one public channel, subscribed once for the session, guests included */
 CG.subscribeLeague = function(){
   if (!CG.sb || CG._leagueChannel) return;
   try {
-    /* ONLY games. Every ingest path writes game_stats (a DELETE plus a 12-row POST, which fires
-       up to a dozen realtime events) and THEN patches games to final — so the games event already
-       means "this game's results are in", and it arrives once instead of a dozen times.
-       Subscribing to game_stats too made every connected tab, guests included, rebuild the whole
-       league a dozen times per game. */
+    /* v4.05: the league pulse, not the games table. One row, updated at most every 10 seconds and only when something
+       public really changed, names every kind of data that did; the old games listener rebuilt the league once per
+       games row. game_stats is still never listened to directly. */
     CG._leagueChannel = CG.sb.channel("league-live")
-      .on("postgres_changes",{ event:"*", schema:"public", table:"games" }, function(p){ CG.liveReload({ game: (p && (p.new && p.new.id || p.old && p.old.id)) || "?" }); })
-      .subscribe();
+      .on("postgres_changes",{ event:"UPDATE", schema:"public", table:"live_pulse" }, function(p){ CG.pulseApply(p && p.new); })
+      .subscribe(function(status){
+        if (status !== "SUBSCRIBED") return;
+        CG.pulseCatchUp(CG._pulseJoined ? 2000 + Math.floor(Math.random() * 28000) : Math.floor(Math.random() * 1000));
+        CG._pulseJoined = true;
+      });
   } catch(e){}
+};
+/* ---- new site versions ----
+   The build stamps a content id into the page (meta cg-build) and /version.json. The database reads version.json every
+   10 minutes and copies the id into the pulse, so no member's page ever polls Netlify. A page running an older build
+   takes the new one at the next click, when it is looked at again after half an hour away, or after 15 idle minutes,
+   and never while it is hidden, while a form is half done, while a dialog is open or during a live draft. */
+CG.BUILD = (function(){ try { var m = document.querySelector('meta[name="cg-build"]'); return (m && m.getAttribute("content")) || null; } catch(e){ return null; } })();
+CG._isLiveHost = function(){ return /(^|\.)chelgamingleague\.com$/.test(location.hostname || ""); };
+CG._updateState = function(){ try { return JSON.parse(sessionStorage.getItem("cg_update") || "null"); } catch(e){ return null; } };
+CG._checkBuild = function(site){
+  var hex = /^[0-9a-f]{12}$/;
+  if (!site || !hex.test(site) || !CG.BUILD || !hex.test(CG.BUILD)) return;
+  /* the build the league had recorded when this page loaded is only a baseline: the database reads the live site every
+     10 minutes, so for a while after a deploy it still names the OLD build to a page that already runs the new one.
+     Only a CHANGE seen after loading means a new version was published. */
+  if (CG._siteBuildSeen === undefined){ CG._siteBuildSeen = site; return; }
+  if (site === CG._siteBuildSeen) return;
+  CG._siteBuildSeen = site;
+  if (site === CG.BUILD){ CG._updateReady = null; CG._hideUpdatePill(); return; }
+  if (!CG._isLiveHost()) return;                                  /* a local or preview build never reloads itself */
+  var st = CG._updateState();
+  if (st && st.target === site && st.tries >= 2 && Date.now() - st.at < 600000) return;   /* the edge has not caught up */
+  if (CG._updateReady === site) return;
+  CG._updateReady = site;
+  clearTimeout(CG._updatePillT);
+  CG._updatePillT = setTimeout(function(){ if (CG._updateReady) CG._showUpdatePill(); }, 30000);
+};
+CG._navBusy = function(){
+  if (CG._oauthPending) return true;
+  var ds = CG.lg && CG.lg.draftState;
+  if (ds && (ds.status === "live" || ds.status === "paused")) return true;   /* draft night: every desk, every route */
+  if (CG._unsavedWork()) return true;
+  var ov = document.getElementById("overlay-root");
+  return !!(ov && ov.innerHTML.trim());
+};
+/* v4.05: work held only in memory, which a reload would lose: unsaved lines and their names, a trade being built or
+   countered, a draft board waiting to save */
+CG._unsavedWork = function(){
+  var some = function(o){ return !!(o && typeof o === "object" && Object.keys(o).length); };
+  var t = CG._liveTrade;
+  if (t && ((t.offP || []).length || (t.reqP || []).length || (t.offK || []).length || (t.reqK || []).length)) return true;
+  return some(CG._lcDraft) || some(CG._lcName) || !!CG._counteringId || !!CG._boardPending || !!CG._boardQueueT;
+};
+CG._applyUpdate = function(why){
+  if (!CG._updateReady) return false;
+  if (why !== "pill" && (CG._navBusy() || (why !== "nav" && pvBusyInteracting()))) return false;
+  var st = CG._updateState(), target = CG._updateReady;
+  var tries = (st && st.target === target) ? (st.tries || 0) + 1 : 1;
+  try {
+    sessionStorage.setItem("cg_update", JSON.stringify({ target: target, tries: tries, at: Date.now() }));
+    sessionStorage.setItem("cg_scroll", JSON.stringify({ h: location.hash, y: window.pageYOffset, at: Date.now() }));
+  } catch(e){}
+  location.reload();
+  return true;
+};
+CG._showUpdatePill = function(){
+  if (document.getElementById("cgUpdatePill") || !document.body) return;
+  var b = document.createElement("button");
+  b.id = "cgUpdatePill"; b.type = "button"; b.className = "cg-update-pill";
+  b.textContent = "The site was updated. Refresh";
+  b.addEventListener("click", function(){ CG._applyUpdate("pill"); });
+  document.body.appendChild(b);
+};
+CG._hideUpdatePill = function(){ var b = document.getElementById("cgUpdatePill"); if (b) b.remove(); };
+/* armed once, after the first boot: the triggers that keep a page current */
+CG.armLiveWatch = function(){
+  if (CG._liveWatchArmed) return;
+  CG._liveWatchArmed = true;
+  /* after a version reload: confirm it landed (or count the try), and put the reader back where they were */
+  var st = CG._updateState();
+  if (st && st.target === CG.BUILD){ try { sessionStorage.removeItem("cg_update"); } catch(e){} }
+  try {
+    var sc = JSON.parse(sessionStorage.getItem("cg_scroll") || "null");
+    sessionStorage.removeItem("cg_scroll");
+    if (sc && sc.h === location.hash && Date.now() - sc.at < 60000) setTimeout(function(){ window.scrollTo(0, sc.y || 0); }, 60);
+  } catch(e){}
+  CG._lastInput = Date.now();
+  ["pointerdown", "keydown", "wheel", "touchstart"].forEach(function(ev){
+    window.addEventListener(ev, function(){ CG._lastInput = Date.now(); }, { passive: true, capture: true });
+  });
+  document.addEventListener("visibilitychange", function(){
+    if (document.visibilityState === "hidden"){ CG._hiddenAt = Date.now(); return; }
+    var away = CG._hiddenAt ? Date.now() - CG._hiddenAt : 0; CG._hiddenAt = 0;
+    if (CG._updateReady && away >= 30 * 60000 && CG._applyUpdate("return")) return;
+    if (CG._liveHiddenOwed){ CG._liveHiddenOwed = false; CG.liveReload({ resume: true, jitterMs: 1700 }); }
+    CG._pulseFlush();
+    if (CG._repaintOwed) CG.quietRepaint();
+    if (Date.now() - (CG._pulseCaughtAt || 0) > 30000) CG.pulseCatchUp(300 + Math.floor(Math.random() * 1700));
+  });
+  window.addEventListener("online", function(){ CG.pulseCatchUp(2000 + Math.floor(Math.random() * 18000)); });
+  window.addEventListener("hashchange", function(){
+    if (CG._updateReady && CG._applyUpdate("nav")) return;
+    setTimeout(CG._pulseFlush, 200 + Math.floor(Math.random() * 1300));   /* what a quiet page owed */
+  });
+  /* idle tabs take a new version spread over ten minutes, never all in the same minute */
+  var idleAfter = 15 * 60000 + Math.floor(Math.random() * 10 * 60000);
+  setInterval(function(){
+    if (CG._updateReady && document.visibilityState !== "hidden" && Date.now() - (CG._lastInput || 0) >= idleAfter) CG._applyUpdate("idle");
+  }, 60000);
 };
 CG.admTeamsLive = function(){
   var teams = (CG.TEAMS||[]).slice();
@@ -14351,8 +14685,12 @@ CG.bootLive = async function(){
      app and re-boots the whole thing on every network transition for the rest of the session. */
   CG.LIVE.error = null;
   if (CG.ensureSb) CG.ensureSb();
+  /* v4.05: the league pulse, read BEFORE the league loads: anything that changes from here on is newer than what the
+     page will hold, so it is caught; reading it after would miss what changed in between */
+  var pulseRow = (CG._readPulse && !CG._pulseSeen) ? await CG._readPulse() : null;
   try {
     CG.lg = await CG.buildLiveLeague();
+    if (pulseRow && !CG._pulseSeen){ CG._pulseBaseline(pulseRow); CG._checkBuild(pulseRow.site_build); }
     /* surface Register in the nav while the open season is taking sign-ups */
     if (CG.SEASON && CG.SEASON.registration_open && CG.NAV && !CG.NAV.some(function(n){ return n[1]==="#/register"; })){
       CG.NAV.push(["Register","#/register"]);
@@ -14405,8 +14743,9 @@ CG.bootLive = async function(){
     return;
   }
   CG.renderChrome();
-  CG.subscribeLeague();   /* scores, standings and stats now update live for everyone */
+  CG.subscribeLeague();   /* v4.05: every public change reaches every open page through the league pulse */
   CG.armCodeWatch();      /* Rule 4.2: tonight's codes reach a tab that was open before T-30 */
+  if (CG.armLiveWatch) CG.armLiveWatch();   /* v4.05: hidden tabs catch up, new site versions arrive at the next click */
   /* land back where the user was before the OAuth round-trip (stashed by CG.signIn just
      before redirecting; consumed only within 10 minutes so a stale stash can't hijack boot) */
   var ret = null;

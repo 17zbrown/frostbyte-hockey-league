@@ -170,6 +170,12 @@
 # Fingerprint-free assets that change rarely. index.html deliberately stays uncached — it is
 # regenerated on every deploy and carries the whole app, so a stale copy is the one thing we
 # can't afford.
+# v4.05: the build id the database reads every 10 minutes; never cached, so a new deploy is seen at once
+[[headers]]
+  for = "/version.json"
+  [headers.values]
+    Cache-Control = "no-cache"
+    Content-Type = "application/json"
 [[headers]]
   for = "/favicon.svg"
   [headers.values]

@@ -80,5 +80,19 @@ if (oversized.length) {
   );
 }
 
+/* v4.05: the build id. A hash of the page's own bytes, so a deploy that changes nothing a visitor runs (a function, a
+   record) keeps the same id and reloads nobody. It is stamped into the page (meta cg-build, read as CG.BUILD) and written
+   to version.json beside it, which the database reads every 10 minutes and copies into the league pulse; an open page
+   running an older id takes the new build at its next click. Only the live build gets one: a preview never reloads. */
+if (!LAYER) {
+  const crypto = require("crypto");
+  const id = crypto.createHash("sha256").update(head + "\n" + body).digest("hex").slice(0, 12);
+  if (!head.includes('<meta charset="utf-8">')) throw new Error("charset meta not found for the build id");
+  head = head.replace('<meta charset="utf-8">', `<meta charset="utf-8">\n<meta name="cg-build" content="${id}">`);
+  const m = body.match(/"changelog":\[\{"version":"([0-9.]+)"/);
+  fs.writeFileSync(path.join(path.dirname(path.resolve(OUT)), "version.json"),
+    JSON.stringify({ build: id, version: m ? m[1] : null, commit: process.env.COMMIT_REF || null }) + "\n");
+}
+
 fs.writeFileSync(OUT, head + "\n" + body);
 console.log(`built ${OUT} (${(head.length + body.length)} bytes)`);
