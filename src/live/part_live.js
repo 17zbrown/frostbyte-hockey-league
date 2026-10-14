@@ -7764,8 +7764,13 @@ function pvBusyInteracting(){
    emptied a manager's Trade Hub, lineups cache and draft board until the next full load). The
    draft data is carried too and re-mapped against the NEW roster, so a drafted player leaves the
    pool the moment the roster refetch lands. */
+/* v4.03: six later additions were never carried, so every final on a game night wiped a manager's saved lines and night
+   plan, emptied the officials' cap exceptions, dropped playoff floors back to the season figure and closed the Sign button
+   (replacement signings read as 0) until the next full load. tools/lg-carry.test.cjs now fails if anything
+   loadManagerData puts on CG.lg is missing here. */
 CG._LG_CARRY = ["_appBallots","_appMsgs","_draftPicksRaw","_lineups","_gameLinePlan","_mgmtApps","_mgmtMoves","_mgmtPolicy","_mgmtPolicyAt",
-  "_myBoard","_myTrades","_ownerApps","_registrationsRaw","_servers","_staffApps","_vetoes","_actionReqs","_actionMsgs","draftState"];
+  "_myBoard","_myTrades","_ownerApps","_registrationsRaw","_servers","_staffApps","_vetoes","_actionReqs","_actionMsgs","draftState",
+  "_teamLines","_linePlan","capExceptions","playoffFloors","_replacements","_regLoadError"];
 CG._carryLg = function(from, to){
   if (!from || !to) return;
   CG._LG_CARRY.forEach(function(k){ if (from[k] !== undefined) to[k] = from[k]; });
