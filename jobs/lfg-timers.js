@@ -1,4 +1,4 @@
-// Netlify Scheduled Function — the pickup lobby clock. Sole owner of every timer on lfg_lobbies,
+// Scheduled job (a Supabase Edge Function fired by pg_cron since v4.06): the pickup lobby clock. Sole owner of every timer on lfg_lobbies,
 // so there is exactly one writer and no two jobs can clobber each other's state.
 //
 //   (1) Per-player queue timer. Each signup holds its own spot for 30 minutes from the moment it was
@@ -20,9 +20,9 @@
 //
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, DISCORD_BOT_TOKEN. Node 18+.
 
-import { noLinkPreviews, noLinkPreviewsEdit } from "../../shared/discord-links.cjs";
+import { noLinkPreviews, noLinkPreviewsEdit } from "../shared/discord-links.cjs";
 
-export const config = { schedule: "*/2 * * * *" };
+/* v4.06: no schedule here. The database decides which host runs this job (public.job_hosts) and pg_cron's edge-lfg-timers fires it every 2 minutes (edge/serve-job.mjs). */
 
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;

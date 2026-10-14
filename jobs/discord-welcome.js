@@ -1,4 +1,4 @@
-// Netlify Scheduled Function — welcomes new Discord members in #welcome every 5 min.
+// Scheduled job (a Supabase Edge Function fired by pg_cron since v4.06): welcomes new Discord members in #welcome every 5 min.
 //
 // There is no always-on gateway bot here (everything is serverless), so instead of
 // listening for a live guildMemberAdd event we sweep the guild's member list on a
@@ -16,9 +16,9 @@
 // Env: DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 // No-ops safely if any are missing. Node 18+ (global fetch, no dependencies).
 
-import { noLinkPreviews, noLinkPreviewsEdit } from "../../shared/discord-links.cjs";
+import { noLinkPreviews, noLinkPreviewsEdit } from "../shared/discord-links.cjs";
 
-export const config = { schedule: "*/5 * * * *" };
+/* v4.06: no schedule here. The database decides which host runs this job (public.job_hosts) and pg_cron's edge-discord-welcome fires it every 5 minutes (edge/serve-job.mjs). */
 
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;

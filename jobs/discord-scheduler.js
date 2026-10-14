@@ -1,4 +1,4 @@
-// Netlify Scheduled Function — time-based Discord posts (runs every 5 min, gated to America/New_York,
+// Scheduled job (a Supabase Edge Function fired by pg_cron since v4.06): time-based Discord posts (runs every 5 min, gated to America/New_York,
 // de-duped so nothing ever double-posts across the 5-min cadence).
 //   (A) #schedule  — Tuesdays 5:00pm ET: the week's slate + 3 featured matchups.
 //   (B) #standings — Friday nights, once every game that week is final: a standings snapshot.
@@ -7,16 +7,10 @@
 // De-dupe: each one-shot post claims a row in public.discord_post_log (unique kind+ref); only the
 // first claimant posts. Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, DISCORD_BOT_TOKEN. Node 18+.
 
-import fs from "node:fs";
-import path from "node:path";
 import crypto from "node:crypto";
-import { fileURLToPath } from "node:url";
-import { noLinkPreviews, noLinkPreviewsEdit } from "../../shared/discord-links.cjs";
+import { noLinkPreviews, noLinkPreviewsEdit } from "../shared/discord-links.cjs";
 
-export const config = { schedule: "*/5 * * * *" };
-
-/* this file is ESM ("type":"module"), so there is no require() or __dirname at runtime */
-const HERE = path.dirname(fileURLToPath(import.meta.url));
+/* v4.06: no schedule here. The database decides which host runs this job (public.job_hosts) and pg_cron's edge-discord-scheduler fires it every 5 minutes (edge/serve-job.mjs). */
 
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -162,25 +156,22 @@ const fmtTime = (iso) => new Intl.DateTimeFormat("en-US", { timeZone: "America/N
 const fmtDay = (iso) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric" }).format(new Date(iso));
 
 /* ---------- #rules — mirror the published rulebook, and keep it mirrored ----------
-   The rulebook is CG.CONTENT.rulebook in the site bundle, so this reads that same file
-   (bundled via netlify.toml included_files) — one source of truth, no second copy to drift.
+   The rulebook is CG.CONTENT.rulebook in the site bundle. v4.06: the card needs only its current version and its chapter
+   titles, and the site build publishes exactly those as `rulesCard` in version.json (src/live/build.cjs). The database
+   already reads that file every 10 minutes for the live pulse (live_site_build_check) and keeps the card in
+   app_config.rules_card, so this job reads the published card without opening a file: a Supabase Edge Function has no
+   repo files on disk. One source of truth still, the deployed rulebook.
    Messages are EDITED in place against stored ids, so a new version updates the channel
    rather than appending another 16-message wall. A content hash makes it a cheap no-op
    on every tick until the rules actually change. */
 const RULES_BRAND = 0xFFE500;
-export function readRulebook() {
-  const roots = [process.env.LAMBDA_TASK_ROOT, process.cwd(), HERE,
-                 path.join(HERE, "..", ".."), path.join(HERE, "..", "..", "..")].filter(Boolean);
-  for (const r of roots) {
-    const p = path.join(r, "src", "live", "part3_content.js");
-    try {
-      if (!fs.existsSync(p)) continue;
-      const CG = {};
-      new Function("CG", fs.readFileSync(p, "utf8"))(CG);
-      if (CG.CONTENT && CG.CONTENT.rulebook) return CG.CONTENT.rulebook;
-    } catch (e) { /* try the next candidate root */ }
-  }
-  return null;
+/* The card as published, or null when it is missing or not the shape build.cjs writes. */
+export function readRulesCard(value) {
+  let rb;
+  try { rb = typeof value === "string" ? JSON.parse(value) : value; } catch (e) { return null; }
+  if (!rb || !Array.isArray(rb.changelog) || !rb.changelog.length || !rb.changelog[0] || !rb.changelog[0].version) return null;
+  if (!Array.isArray(rb.chapters) || !rb.chapters.length || !rb.chapters.every((c) => c && c.num != null && c.title)) return null;
+  return rb;
 }
 /* Posting 16 messages back-to-back trips Discord's per-channel limit, so this honours Retry-After
    instead of dropping the tail of the rulebook. */
@@ -238,14 +229,17 @@ export function buildRulesLink(rb) {
 async function rulesUpkeep(errors) {
   const out = { checked: 1, posted: 0, edited: 0, removed: 0, skipped: null };
   if (!BOT || !GUILD) { out.skipped = "no bot/guild"; return out; }
-  const rb = readRulebook();
-  if (!rb) { out.skipped = "rulebook not readable"; return out; }
+  let cfg;
+  try { cfg = await sbGet("app_config?key=in.(rules_sync_hash,rules_message_ids,rules_card)&select=key,value"); }
+  catch (e) { errors.push(`rules state read: ${String(e.message || e)}`); return out; }
+  const get = (k) => (cfg.find((c) => c.key === k) || {}).value || "";
+  /* v4.06: a missing card is a FAILED run, never a quiet skip. "rulebook not readable" used to be recorded as a skip, so
+     #rules could fall behind for good while every result row said ok:true. */
+  const rb = readRulesCard(get("rules_card"));
+  if (!rb) { errors.push("rules card: app_config.rules_card is missing or malformed (the site build publishes it in version.json; live_site_build_check copies it)"); return out; }
   const card = buildRulesLink(rb);
   const hash = crypto.createHash("sha256").update(JSON.stringify(card)).digest("hex").slice(0, 32);
 
-  let cfg = [];
-  try { cfg = await sbGet("app_config?key=in.(rules_sync_hash,rules_message_ids)&select=key,value"); } catch (e) {}
-  const get = (k) => (cfg.find((c) => c.key === k) || {}).value || "";
   let ids = [];
   try { ids = JSON.parse(get("rules_message_ids") || "[]"); } catch (e) { ids = []; }
   if (get("rules_sync_hash") === hash && ids.length === 1) return out;   // already in sync
@@ -336,16 +330,17 @@ export default async (req) => {
     if (!world) return json({ skipped: "no season" });
     const { season, teamById, cfg, games } = world;
 
-    // (A) weekly schedule — Tuesday 5:00-5:09pm ET
-    if (et.wd === 2 && et.hr === 17 && et.mi < 10) sum.schedule = await weeklySchedule(games, teamById, cfg, sum.errors, sum.unconfigured);
+    // (A) weekly schedule — Tuesday from 5:00pm ET. v4.06: the window is half an hour, not two ticks, so one tick lost to
+    //     a failed run cannot cost the week's post; the claim in weeklySchedule still lets only one through.
+    if (et.wd === 2 && et.hr === 17 && et.mi < 30) sum.schedule = await weeklySchedule(games, teamById, cfg, sum.errors, sum.unconfigured);
     // (B) standings — Friday 11pm ET through Saturday 2am ET, once the week's games are all final
     if ((et.wd === 5 && et.hr >= 23) || (et.wd === 6 && et.hr < 2)) sum.standings = await weeklyStandings(games, teamById, cfg, sum.errors, sum.unconfigured);
     // (C) team reminders — ~30 min before a club's first game of the night
     sum.reminders = await gameReminders(games, teamById, now, sum.errors);
     // (D) casework nudge — daily 12pm ET: @ reviewers who still owe an application vote, and staff
     //     sitting on a claimed case. (E) sign-up reminder — unpinged, and pausable from app_config.
-    if (forceRun === "casework" || (et.hr === 12 && et.mi < 10)) sum.casework = await caseworkNudge(cfg, teamById, et, dry, sum.errors, sum.unconfigured);
-    if (forceRun === "signups"  || (et.hr === 18 && et.mi < 10)) sum.signups  = await signupReminder(cfg, et, dry, sum.errors, sum.unconfigured);
+    if (forceRun === "casework" || (et.hr === 12 && et.mi < 30)) sum.casework = await caseworkNudge(cfg, teamById, et, dry, sum.errors, sum.unconfigured);
+    if (forceRun === "signups"  || (et.hr === 18 && et.mi < 30)) sum.signups  = await signupReminder(cfg, et, dry, sum.errors, sum.unconfigured);
     // (F) availability + lineup reminder — self-gating on the week's own deadline minus 24 hours,
     //     so it needs no clock window here (a holiday-shifted week moves its own reminder with it).
     sum.availability = await availabilityReminder(season, games, teamById, cfg, now, dry, forceRun === "availability", sum.errors, sum.unconfigured);
@@ -945,8 +940,9 @@ async function availabilityReminder(season, games, teamById, cfg, now, dry, forc
   }
   return `week ${wk}: reminded ${posted} club${posted === 1 ? "" : "s"} (${(missing || []).length} players outstanding), management ${mgmt}`;
 }
-/* The scheduler is a SCHEDULED function, and Netlify refuses external HTTP to those, so ?run= is
-   unreachable in production. /api/discord-ops?post=availability-reminder calls this instead: the
+/* The scheduler is a SCHEDULED job and its ?run= is unreachable in production: the Supabase wrapper hands it a clean
+   request (edge/serve-job.mjs), as Netlify did by refusing HTTP to scheduled functions.
+   /api/discord-ops?post=availability-reminder calls this instead: the
    same step, the same claims, forced past the 24-hour window so the office can send it early or
    re-send a week that failed. One implementation, two doors. */
 export async function runAvailabilityReminder({ dry = false } = {}) {

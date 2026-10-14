@@ -1,4 +1,5 @@
-// Netlify Scheduled Function — keeps Discord in sync with the site every 2 min.
+// Scheduled job, every 2 minutes (a Supabase Edge Function fired by pg_cron since v4.06; edge/serve-job.mjs): keeps Discord
+// in sync with the site.
 //  (1) Username sync: sets each profile's gamertag to the member's current Discord
 //      display name (server nick > global name > username), so name changes flow in.
 //  (2) Role sync: reconciles each member's MANAGED Discord roles with the DB —
@@ -14,8 +15,8 @@
 // reaching its last line inside the 30-second limit.
 //
 // The sweep body is exported as runSweep() and the diagnostic / setup entry points as `ops`:
-// Netlify refuses external HTTP calls to a scheduled function, so netlify/functions/discord-ops.js
-// (an ordinary HTTP function) imports them and is the only way to reach them by request.
+// netlify/functions/discord-ops.js (an ordinary HTTP function) imports them and is the only way to
+// reach them by request. The scheduled run itself is the Supabase Edge Function edge/discord-sync.
 //
 import fs from "node:fs";
 import path from "node:path";
@@ -25,16 +26,18 @@ import { fileURLToPath } from "node:url";
    sides importing one module is what stops the two processes from ever disagreeing about what a
    member's roles should be — they can only disagree about when. */
 import { STAFF_DEPARTMENTS, POS_LABEL, POSITION_ROLES, MANAGED_STATIC,
-  desiredRolesFor, applyManagedRoles, managedRoleIds } from "../../shared/roles.mjs";
-import { buildDepartureEmbed } from "../../shared/departure-card.mjs";
-import { buildNoticeEmbed } from "../../bot/club-notices.mjs";
-import { noLinkPreviews, noLinkPreviewsEdit } from "../../shared/discord-links.cjs";
-const HERE = path.dirname(fileURLToPath(import.meta.url));
+  desiredRolesFor, applyManagedRoles, managedRoleIds } from "../shared/roles.mjs";
+import { buildDepartureEmbed } from "../shared/departure-card.mjs";
+import { buildNoticeEmbed } from "../bot/club-notices.mjs";
+import { noLinkPreviews, noLinkPreviewsEdit } from "../shared/discord-links.cjs";
+/* This file's folder, for the role-icon fallback below. v4.06: guarded, because on Supabase the module URL
+   need not be a file: URL, and a throw here would stop the whole sweep from loading over one icon. */
+const HERE = (() => { try { return path.dirname(fileURLToPath(import.meta.url)); } catch (e) { return ""; } })();
 
 // Env: DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 // No-ops safely if the bot token / guild id aren't set. Node 18+ (global fetch).
 
-export const config = { schedule: "*/2 * * * *" };
+/* v4.06: no schedule here. The database decides which host runs this job (public.job_hosts) and pg_cron's edge-discord-sync fires it every 2 minutes (edge/serve-job.mjs). */
 
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -711,8 +714,15 @@ async function fetchClubLogoPng(logoUrl) {
    manifest's own instruction to "bump the version to force a re-apply" made the two disagree and
    parked the icon in `stale-render` permanently. The marker is a single string in this file now. */
 function readRoleIcon(code) {
-  const roots = [process.env.LAMBDA_TASK_ROOT, process.cwd(), HERE,
-                 path.join(HERE, "..", ".."), path.join(HERE, "..", "..", "..")].filter(Boolean);
+  /* v4.06: the Supabase build carries the artwork inside the bundle (edge/discord-sync.entry.mjs sets this map), because
+     an Edge Function has no repo files on disk to read. Netlify and local runs still read the file below. */
+  const packed = globalThis.__CGHL_ROLE_ICONS && globalThis.__CGHL_ROLE_ICONS[code];
+  if (packed) return { data: packed };
+  let roots = [];
+  try {
+    roots = [process.env.LAMBDA_TASK_ROOT, process.cwd(), HERE, HERE && path.join(HERE, ".."),
+             HERE && path.join(HERE, "..", ".."), HERE && path.join(HERE, "..", "..", "..")].filter(Boolean);
+  } catch (e) { return null; }
   for (const r of roots) {
     /* assets/, not netlify/functions/: Netlify treats every subdirectory of the functions dir as a
        function candidate, so bundled assets have to sit outside it. */
@@ -815,8 +825,11 @@ async function syncRoleIcons(guildRoles, teams, roleId, sum) {
      with no way to tell whether the included_files glob, the path or the deploy is at fault. */
   if (todo.length && !readRoleIcon("STAFF")) {
     const probe = [];
-    const roots = [process.env.LAMBDA_TASK_ROOT, process.cwd(), HERE,
-                   path.join(HERE, ".."), path.join(HERE, "..", "..")].filter(Boolean);
+    let roots = [];
+    try {
+      roots = [process.env.LAMBDA_TASK_ROOT, process.cwd(), HERE,
+               HERE && path.join(HERE, ".."), HERE && path.join(HERE, "..", "..")].filter(Boolean);
+    } catch (e) { probe.push({ roots: String(e.message || e) }); }
     for (const r of roots) {
       let listing = "unreadable";
       try { listing = fs.readdirSync(r).slice(0, 14).join(","); } catch (e) { listing = String(e.code || e); }
@@ -2951,7 +2964,8 @@ export async function runSweep(opts = {}) {
   }
 }
 
-/* the scheduled entry point: Netlify calls this every two minutes with no useful request */
+/* the scheduled entry point: the host the database names (edge/serve-job.mjs, or the Netlify stand-in) calls this every two
+   minutes with no useful request */
 export default async () => {
   const r = await runSweep();
   return new Response(JSON.stringify(r.body), { status: r.status, headers: { "content-type": "application/json" } });

@@ -1,4 +1,4 @@
-// Netlify Scheduled Function — runs every 2 minutes.
+// Scheduled job (a Supabase Edge Function fired by pg_cron since v4.06), every 2 minutes.
 // Detects which members (profiles.twitch) are ACTUALLY live on Twitch and flips
 // profiles.live accordingly, so the site's LIVE badges + the "Live Now" Twitch
 // chips light up on their own — no manual Go Live toggle needed.
@@ -7,7 +7,7 @@
 // Env: TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 // Node 18+ runtime (global fetch, no dependencies).
 
-export const config = { schedule: "*/2 * * * *" };
+/* v4.06: no schedule here. The database decides which host runs this job (public.job_hosts) and pg_cron's edge-twitch-live-sync fires it every 2 minutes (edge/serve-job.mjs). */
 
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -58,8 +58,13 @@ export default async () => {
   const withHandle = profs.filter((p) => cleanHandle(p.twitch));
   if (!withHandle.length) return new Response("no twitch handles set", { status: 200 });
 
-  // 2. mint an app access token (client-credentials)
-  const tokRes = await fetch(`https://id.twitch.tv/oauth2/token?client_id=${encodeURIComponent(TW_ID)}&client_secret=${encodeURIComponent(TW_SECRET)}&grant_type=client_credentials`, { method: "POST" });
+  // 2. mint an app access token (client-credentials). v4.06: the credentials go in the form body, never the URL. On
+  //    Supabase a network failure's message carries the full request URL, and that message is stored and posted to the
+  //    office as the run's lastError, which would have put the client secret in Discord.
+  const tokRes = await fetch("https://id.twitch.tv/oauth2/token", {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ client_id: TW_ID, client_secret: TW_SECRET, grant_type: "client_credentials" }),
+  });
   if (!tokRes.ok) throw new Error(`twitch token -> ${tokRes.status} ${await tokRes.text()}`);
   const token = (await tokRes.json()).access_token;
 
@@ -93,7 +98,9 @@ export default async () => {
     try {
       await fetch(`${SB_URL}/rest/v1/app_config`, { method: "POST", headers: { ...sbHeaders(), Prefer: "resolution=merge-duplicates" },
         body: JSON.stringify({ key: "rl_twitch-live-sync_result", value: JSON.stringify({
-          at: new Date().toISOString(), ok: false, errCount: 1, lastError: String(e && (e.message || e))
+          /* capped, with any query string cut off: an error message can quote the URL it failed on */
+          at: new Date().toISOString(), ok: false, errCount: 1,
+          lastError: String(e && (e.message || e)).replace(/\?[^\s)]*/g, "?...").slice(0, 300)
         }), updated_at: new Date().toISOString() }) });
     } catch {}
     return new Response("skipped: error", { status: 200 });
