@@ -12,7 +12,7 @@
 const fs = require("fs"), path = require("path"), vm = require("vm");
 const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
 const live = R("src/live/part_live.js"), hub = R("src/live/part6_hub.js"), pub = R("src/live/part5b_public2.js");
-const sched = R("netlify/functions/discord-scheduler.js"), poll = R("bot/ea-poll.mjs"), ingest = R("netlify/functions/ingest-stats.js");
+const sched = R("jobs/discord-scheduler.js"), poll = R("bot/ea-poll.mjs"), ingest = R("netlify/functions/ingest-stats.js");
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
 

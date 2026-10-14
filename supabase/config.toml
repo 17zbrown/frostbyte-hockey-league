@@ -1,0 +1,29 @@
+# v4.06: Supabase CLI settings for the scheduled jobs that run as Edge Functions. Only `supabase functions deploy` reads
+# this file. By hand, from the repo root:
+#   node tools/edge/build.mjs && npx --yes supabase@2.118.0 functions deploy discord-sync twitch-live-sync lfg-timers \
+#     discord-scheduler discord-welcome --project-ref bzbuyclwdhmhdzujxeqd --use-api
+# or automatically once tools/edge/edge-deploy.yml is installed as a GitHub workflow. The database itself is changed
+# through sql/ records, never through this folder.
+project_id = "bzbuyclwdhmhdzujxeqd"
+
+# Each entrypoint is the single bundle tools/edge/build.mjs writes (gitignored). verify_jwt is off because the functions
+# check their own key (edge/serve-job.mjs): Supabase's JWT gate would let any holder of the public site key through.
+[functions.discord-sync]
+verify_jwt = false
+entrypoint = "./functions/discord-sync/index.js"
+
+[functions.twitch-live-sync]
+verify_jwt = false
+entrypoint = "./functions/twitch-live-sync/index.js"
+
+[functions.lfg-timers]
+verify_jwt = false
+entrypoint = "./functions/lfg-timers/index.js"
+
+[functions.discord-scheduler]
+verify_jwt = false
+entrypoint = "./functions/discord-scheduler/index.js"
+
+[functions.discord-welcome]
+verify_jwt = false
+entrypoint = "./functions/discord-welcome/index.js"

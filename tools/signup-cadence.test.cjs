@@ -11,7 +11,7 @@
    The day index comes off the ET calendar date rather than Date.now()/86400000, which drifts by
    an hour twice a year and could open a window early or late around a DST change. */
 const fs = require("fs"), path = require("path");
-const src = fs.readFileSync(path.join(__dirname, "..", "netlify/functions/discord-scheduler.js"), "utf8");
+const src = fs.readFileSync(path.join(__dirname, "..", "jobs/discord-scheduler.js"), "utf8");
 
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };

@@ -142,7 +142,7 @@ console.log("— the player's dashboard");
   A("the register page treats a signed deal for this season as a contract", /c\.status==="signed" && !c\.is_manager && c\.team_id &&\s*\(c\.start_season\|\|1\)<=snumR/.test(live));
   A("the free-agent board disables Approach and Offer on a rights-held player", /Exclusive to '\+esc\(rhCode\)\+' until free agency opens — approaching him is tampering/.test(live) && /\(canSign&&!full&&!held\)/.test(live));
   A("the rollover confirm and toast mention extensions", /extensions signed during the exclusive window come into force/.test(live) && /extension"\+\(\(d\.extended\|\|0\)===1\?"":"s"\)\+" in force/.test(live));
-  A("the Discord sweep and the bot treat a signed deal as holding the player", /status=in\.\(active,signed\)/.test(R("netlify/functions/discord-sync.js")) && /status=in\.\(active,signed\)/.test(R("bot/role-sync.mjs")));
+  A("the Discord sweep and the bot treat a signed deal as holding the player", /status=in\.\(active,signed\)/.test(R("jobs/discord-sync.js")) && /status=in\.\(active,signed\)/.test(R("bot/role-sync.mjs")));
   A("the profile card shows a signed extension", /Signed thru S'\+esc\(String\(CG\.signedExtensionOf\(p\.id\)\.end_season\)\)/.test(R("src/live/part5a_public.js")));
 }
 

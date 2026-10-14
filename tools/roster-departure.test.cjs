@@ -17,7 +17,7 @@ function A(name, cond, got) {
   if (cond) console.log("ok   " + name);
   else { fail++; console.log("FAIL " + name + (got === undefined ? "" : "  — got: " + String(got).slice(0, 220))); }
 }
-const sync = R("netlify/functions/discord-sync.js");
+const sync = R("jobs/discord-sync.js");
 const notices = R("bot/club-notices.mjs");
 const rec = R("sql/2026-09-24-roster-departure-notice.sql");
 const flat = rec.replace(/\n--\s?/g, " ").replace(/\s+/g, " ");

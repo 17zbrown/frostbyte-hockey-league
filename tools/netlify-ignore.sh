@@ -8,8 +8,11 @@
 #
 # Never served and never bundled into a function:
 #   sql/ (database change records), tools/ (tests and scripts), docs/, .github/, .claude/, the README and CLAUDE notes,
-#   src/live/preview_layer.js (the local design preview, no longer built on Netlify), and bot/ (the Oracle VM pulls it
-#   from GitHub on its own), EXCEPT bot/club-notices.mjs and bot/handlers.mjs, which discord-sync.js bundles.
+#   src/live/preview_layer.js (the local design preview, no longer built on Netlify), supabase/ (the Edge deploy settings,
+#   read only by the GitHub workflow), and bot/ (the Oracle VM pulls it from GitHub on its own), EXCEPT
+#   bot/club-notices.mjs and bot/handlers.mjs, which jobs/discord-sync.js bundles.
+# jobs/ and edge/ always build (v4.06): discord-ops bundles jobs/, and version.json carries every Edge job's expected build
+# id, so a change there must reach version.json or the database would page that a correct deploy is out of date.
 # A skipped commit still reaches GitHub and the VM, and ships with the next build, which always builds HEAD.
 # A build started by the build hook ignores this command (Netlify docs), so the hook stays a manual tool.
 
@@ -36,7 +39,7 @@ for f in $files; do
   case "$f" in
     bot/club-notices.mjs|bot/handlers.mjs)
       IFS=$old_ifs; echo "netlify-ignore: $f is bundled into discord-sync, building"; exit 1 ;;
-    sql/*|tools/*|docs/*|.github/*|.claude/*|bot/*|src/live/preview_layer.js|README*|CLAUDE*)
+    sql/*|tools/*|docs/*|.github/*|.claude/*|bot/*|supabase/*|src/live/preview_layer.js|README*|CLAUDE*)
       ;;
     *)
       IFS=$old_ifs; echo "netlify-ignore: $f changes the site or a function, building"; exit 1 ;;

@@ -27,7 +27,7 @@ globalThis.fetch = async (url, opts = {}) => {
   return J({});
 };
 
-const { _internals: I } = await import(new URL("../netlify/functions/discord-sync.js", import.meta.url).pathname);
+const { _internals: I } = await import(new URL("../jobs/discord-sync.js", import.meta.url).pathname);
 
 const EMBED = 1n << 14n, ATTACH = 1n << 15n, INVITE = 1n << 0n;
 const POST = I.POST_BITS;
@@ -136,7 +136,7 @@ console.log("\n— the join gate is re-asserted but never loosened");
 console.log("\n— wired into the sweep after its bindings exist");
 {
   const fs = await import("node:fs");
-  const src = fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8");
+  const src = fs.readFileSync(new URL("../jobs/discord-sync.js", import.meta.url), "utf8");
   const lines = src.split("\n");
   const sumLine = lines.findIndex((l) => /^\s*const sum = \{/.test(l));
   const teamsLine = lines.findIndex((l) => /^\s*const teams = await sbGet\("teams\?/.test(l));

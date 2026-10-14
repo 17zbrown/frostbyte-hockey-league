@@ -4,7 +4,7 @@ const fs = require("fs"), path = require("path");
 const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
 let fail = 0, n = 0;
 const A = (name, cond, got) => { n++; if (cond) console.log("ok   " + name); else { fail++; console.log("FAIL " + name + (got === undefined ? "" : "  got: " + String(got).slice(0, 220))); } };
-const sql = R("sql/2026-09-28-small-fixes-v357.sql"), live = R("src/live/part_live.js"), pub2 = R("src/live/part5b_public2.js"), sched = R("netlify/functions/discord-scheduler.js");
+const sql = R("sql/2026-09-28-small-fixes-v357.sql"), live = R("src/live/part_live.js"), pub2 = R("src/live/part5b_public2.js"), sched = R("jobs/discord-scheduler.js");
 console.log("\n— the database");
 A("status moves only through the Trade Hub's own doors", /create trigger guard_trade_status_trg before update of status on public\.trades/.test(sql)
   && /old\.status = 'proposed' and new\.status = 'declined'\s+and \(public\.is_gm_of\(old\.to_team_id\)/.test(sql)

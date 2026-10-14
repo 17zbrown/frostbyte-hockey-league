@@ -91,7 +91,26 @@ if (!LAYER) {
   head = head.replace('<meta charset="utf-8">', `<meta charset="utf-8">\n<meta name="cg-build" content="${id}">`);
   const m = body.match(/"changelog":\[\{"version":"([0-9.]+)"/);
   fs.writeFileSync(path.join(path.dirname(path.resolve(OUT)), "version.json"),
-    JSON.stringify({ build: id, version: m ? m[1] : null, commit: process.env.COMMIT_REF || null }) + "\n");
+    JSON.stringify({ build: id, version: m ? m[1] : null, commit: process.env.COMMIT_REF || null,
+      rulesCard: rulesCard(), edge: require("../../edge/recipe.cjs").buildIds() }) + "\n");
+}
+
+/* v4.06: the #rules card's source, published beside the build id. discord-scheduler runs on Supabase, where it cannot open
+   this repo's files, so the database copies this from version.json into app_config.rules_card (live_site_build_check)
+   and the scheduler reads it there. The card shows the current version and the chapter titles, so that is all this
+   carries. The build fails rather than publish a card with no rulebook behind it. */
+function rulesCard() {
+  const CG = {};
+  new Function("CG", fs.readFileSync(path.join(DIR, "part3_content.js"), "utf8"))(CG);
+  const rb = CG.CONTENT && CG.CONTENT.rulebook;
+  if (!rb || !Array.isArray(rb.changelog) || !rb.changelog.length || !Array.isArray(rb.chapters) || !rb.chapters.length) {
+    throw new Error("rules card: CG.CONTENT.rulebook has no changelog or chapters");
+  }
+  const cur = rb.changelog[0];
+  return {
+    changelog: [{ version: cur.version, date: cur.date || null, dateIso: cur.dateIso || null }],
+    chapters: rb.chapters.map((c) => ({ num: c.num, title: c.title })),
+  };
 }
 
 fs.writeFileSync(OUT, head + "\n" + body);

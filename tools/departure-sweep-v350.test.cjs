@@ -5,7 +5,7 @@ let fail = 0, n = 0;
 const A = (name, cond, got) => { n++; if (cond) console.log("ok   " + name); else { fail++; console.log("FAIL " + name + (got === undefined ? "" : "  got: " + String(got).slice(0, 200))); } };
 const rec = R("sql/2026-09-28-departure-sweep-and-notice-grants.sql");
 const flat = rec.replace(/\n--\s?/g, " ").replace(/\s+/g, " ");
-const sync = R("netlify/functions/discord-sync.js");
+const sync = R("jobs/discord-sync.js");
 const ga = R("tools/sql/grant-audit.sql");
 
 console.log("\n— the record explains the failure");

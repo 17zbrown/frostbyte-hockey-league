@@ -31,7 +31,7 @@ globalThis.fetch = async (url, opts = {}) => {
   return J({});
 };
 
-const { _internals: I } = await import(new URL("../netlify/functions/discord-sync.js", import.meta.url).pathname);
+const { _internals: I } = await import(new URL("../jobs/discord-sync.js", import.meta.url).pathname);
 
 const GUILD = "guild1";
 const ROLE = { owner: "r-own", "general manager": "r-gm", "assistant general manager": "r-agm",
@@ -166,7 +166,7 @@ console.log("\n— the post-only feeds: #transactions and #game-scores (2026-09-
 console.log("\n— wired into the sweep, after its bindings exist");
 {
   const fs = await import("node:fs");
-  const src = fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8");
+  const src = fs.readFileSync(new URL("../jobs/discord-sync.js", import.meta.url), "utf8");
   const lines = src.split("\n");
   const at = (re) => lines.findIndex((l) => re.test(l));
   const sumLine = at(/^\s*const sum = \{/), chanLine = at(/^\s*const guildChannels = await dApi/);

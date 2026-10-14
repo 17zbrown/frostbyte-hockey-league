@@ -113,7 +113,7 @@ globalThis.fetch = async (url, init = {}) => {
   return J([]);
 };
 
-const mod = await import(new URL("../netlify/functions/discord-scheduler.js", import.meta.url).pathname);
+const mod = await import(new URL("../jobs/discord-scheduler.js", import.meta.url).pathname);
 const tick = () => mod.default(new Request("https://x/.netlify/functions/discord-scheduler"));
 /* only the club game-night post: the tick also fires the lineup and server-pick asks */
 const clubPosts = () => posts.filter((p) => /Game night\./.test(p.content || ""));

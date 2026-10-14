@@ -10,7 +10,7 @@ const live = fs.readFileSync(path.join(__dirname, "..", "src", "live", "part_liv
 const pub = fs.readFileSync(path.join(__dirname, "..", "src", "live", "part5a_public.js"), "utf8");
 const hub = fs.readFileSync(path.join(__dirname, "..", "src", "live", "part6_hub.js"), "utf8");
 const ui = fs.readFileSync(path.join(__dirname, "..", "src", "live", "part4_ui.js"), "utf8");
-const sync = fs.readFileSync(path.join(__dirname, "..", "netlify", "functions", "discord-sync.js"), "utf8");
+const sync = fs.readFileSync(path.join(__dirname, "..", "jobs", "discord-sync.js"), "utf8");
 
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };

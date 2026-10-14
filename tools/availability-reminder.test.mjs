@@ -96,7 +96,7 @@ globalThis.fetch = async (url, init = {}) => {
   return J([]);
 };
 
-const mod = await import(new URL("../netlify/functions/discord-scheduler.js", import.meta.url).pathname);
+const mod = await import(new URL("../jobs/discord-scheduler.js", import.meta.url).pathname);
 const tick = () => mod.default(new Request("https://x/.netlify/functions/discord-scheduler"));
 const now = (dry = false) => mod.runAvailabilityReminder({ dry });
 const club = (ch) => posts.find((p) => p.channel === ch);

@@ -45,7 +45,7 @@ globalThis.fetch = async (url, opts = {}) => {
   return J([]);
 };
 
-const { _internals: I } = await import(new URL("../netlify/functions/discord-sync.js", import.meta.url).pathname);
+const { _internals: I } = await import(new URL("../jobs/discord-sync.js", import.meta.url).pathname);
 
 const member = (id, name, joinedDaysAgo = 30) => [id, {
   user: { id, username: name, global_name: name, bot: false }, nick: null,
@@ -265,7 +265,7 @@ console.log("\n— @everyone belongs to the league office only");
    before writing its result — heartbeat fresh, result frozen. Assert the ordering itself. */
 console.log("\n— the guard is wired in where `sum` actually exists");
 {
-  const src = await import("node:fs").then((fs) => fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8"));
+  const src = await import("node:fs").then((fs) => fs.readFileSync(new URL("../jobs/discord-sync.js", import.meta.url), "utf8"));
   const lines = src.split("\n");
   const declared = lines.findIndex((l) => /^\s*const sum = \{/.test(l));
   const called = lines.findIndex((l) => /await enforceMentionPolicy\(/.test(l));

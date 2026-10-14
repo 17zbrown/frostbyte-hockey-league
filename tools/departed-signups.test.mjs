@@ -33,7 +33,7 @@ globalThis.fetch = async (url, opts = {}) => {
   return J([]);
 };
 
-const { _internals: I } = await import(new URL("../netlify/functions/discord-sync.js", import.meta.url).pathname);
+const { _internals: I } = await import(new URL("../jobs/discord-sync.js", import.meta.url).pathname);
 
 const run = async (chan) => {
   rpcCalls = []; posts.length = 0;
@@ -109,7 +109,7 @@ console.log("\n— an RPC refusal degrades to a recorded error");
 
 console.log("\n— the sweep wiring and the places the rule is told to humans");
 {
-  const sync = readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8");
+  const sync = readFileSync(new URL("../jobs/discord-sync.js", import.meta.url), "utf8");
   const call = sync.indexOf("await removeDepartedSignups(sum)");
   A("the step runs in the sweep", call > 0);
   A("...right after the census settles, before the minutes-long role passes (a member who rejoins mid-sweep must not be caught by a stale read)",

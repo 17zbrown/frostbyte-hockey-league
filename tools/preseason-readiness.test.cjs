@@ -15,7 +15,7 @@ const hub = R("src/live/part6_hub.js");
 const ui = R("src/live/part4_ui.js");
 const pub = R("src/live/part5a_public.js");
 const ingest = R("netlify/functions/ingest-stats.js");
-const sched = R("netlify/functions/discord-scheduler.js");
+const sched = R("jobs/discord-scheduler.js");
 
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };

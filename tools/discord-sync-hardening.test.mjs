@@ -58,9 +58,9 @@ globalThis.fetch = async (url, opts = {}) => {
   return J([]);
 };
 
-const mod = await import(new URL("../netlify/functions/discord-sync.js", import.meta.url).pathname);
+const mod = await import(new URL("../jobs/discord-sync.js", import.meta.url).pathname);
 const I = mod._internals;
-const src = fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8");
+const src = fs.readFileSync(new URL("../jobs/discord-sync.js", import.meta.url), "utf8");
 
 const ROLE = { commissioner: "r-comm", staff: "r-staff", owner: "r-own", "general manager": "r-gm", "assistant general manager": "r-agm" };
 const owOf = (list, id) => (list || []).find((o) => o.id === id);

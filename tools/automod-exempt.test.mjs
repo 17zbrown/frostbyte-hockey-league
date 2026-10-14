@@ -27,7 +27,7 @@ globalThis.fetch = async (url, opts = {}) => {
   return J({});
 };
 
-const { _internals: I } = await import(new URL("../netlify/functions/discord-sync.js", import.meta.url).pathname);
+const { _internals: I } = await import(new URL("../jobs/discord-sync.js", import.meta.url).pathname);
 
 /* every role the sweep can provision, so a narrowed exempt set is visible */
 const ROLE = {};
@@ -171,7 +171,7 @@ console.log("\n— a club's management may @ whatever it wants in its own room (
 console.log("\n— reconciled by NAME every sweep, not left as hand-entered ids");
 {
   const fs = await import("node:fs");
-  const src = fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8");
+  const src = fs.readFileSync(new URL("../jobs/discord-sync.js", import.meta.url), "utf8");
   A("the sweep calls it, passing the club rooms", /await enforceAutomodExemptions\(roleId, guildChannels, sum, teams\)/.test(src));
   A("...resolving ids from role NAMES", /AUTOMOD_EXEMPT\.map\(\(n\) => roleId\[n\]\)/.test(src));
   const lines = src.split("\n");

@@ -80,7 +80,8 @@ const MARK = /\/messages|\/webhooks\/|\/threads|\/callback|_webhook|discord\.com
 const NO_MESSAGES = {
   "bot/role-sync.mjs": "member role PATCHes only",
 };
-const lanes = [...ls("netlify/functions", /\.js$/), ...ls("bot", /\.mjs$/), ...ls("tools/discord", /\.mjs$/)];
+/* v4.06: the scheduled jobs live in jobs/ (they run on Supabase); the Netlify stand-ins only import them */
+const lanes = [...ls("netlify/functions", /\.js$/), ...ls("jobs", /\.js$/), ...ls("bot", /\.mjs$/), ...ls("tools/discord", /\.mjs$/)];
 const writers = lanes.filter((f) => MARK.test(R(f)) && !NO_MESSAGES[f]);
 const unguarded = writers.filter((f) => !/from "\.\.\/(\.\.\/)?shared\/discord-links\.cjs"/.test(R(f)) || !/noLinkPreviews(Edit)?\(/.test(R(f)));
 A("every file that writes a Discord message imports and calls the helper", unguarded.length === 0, unguarded.join(", "));
@@ -90,10 +91,10 @@ const adhoc = writers.filter((f) => /flags\s*:\s*4\s*[,}]/.test(R(f)));
 A("no competing hand-set flags: 4 left beside the helper", adhoc.length === 0, adhoc.join(", "));
 
 const gated = (f) => /method === "POST" && [A-Za-z_]*\.test\(p(ath)?\) \? noLinkPreviews\(body\)|if \(method === "POST" && [A-Z_]+\.test\(path\)\) return noLinkPreviews\(body\);|if \(method === "POST" && \/\^\\\/channels/.test(R(f));
-A("generic REST helpers apply it to message paths only, by method", ["bot/dms.mjs", "bot/handlers.mjs", "netlify/functions/discord-interactions.js", "netlify/functions/lfg-timers.js", "netlify/functions/discord-sync.js", "netlify/functions/discord-scheduler.js", "netlify/functions/discord-welcome.js"].every(gated), ["bot/dms.mjs", "bot/handlers.mjs", "netlify/functions/discord-interactions.js", "netlify/functions/lfg-timers.js", "netlify/functions/discord-sync.js", "netlify/functions/discord-scheduler.js", "netlify/functions/discord-welcome.js"].filter((f) => !gated(f)).join(", "));
-A("...edits by PATCH get the edit rule", ["bot/dms.mjs", "bot/handlers.mjs", "netlify/functions/discord-interactions.js", "netlify/functions/lfg-timers.js", "netlify/functions/discord-sync.js", "netlify/functions/discord-scheduler.js", "netlify/functions/discord-welcome.js"].every((f) => /method === "PATCH" && .{0,80}noLinkPreviewsEdit\(body\)/.test(R(f))));
+A("generic REST helpers apply it to message paths only, by method", ["bot/dms.mjs", "bot/handlers.mjs", "netlify/functions/discord-interactions.js", "jobs/lfg-timers.js", "jobs/discord-sync.js", "jobs/discord-scheduler.js", "jobs/discord-welcome.js"].every(gated), ["bot/dms.mjs", "bot/handlers.mjs", "netlify/functions/discord-interactions.js", "jobs/lfg-timers.js", "jobs/discord-sync.js", "jobs/discord-scheduler.js", "jobs/discord-welcome.js"].filter((f) => !gated(f)).join(", "));
+A("...edits by PATCH get the edit rule", ["bot/dms.mjs", "bot/handlers.mjs", "netlify/functions/discord-interactions.js", "jobs/lfg-timers.js", "jobs/discord-sync.js", "jobs/discord-scheduler.js", "jobs/discord-welcome.js"].every((f) => /method === "PATCH" && .{0,80}noLinkPreviewsEdit\(body\)/.test(R(f))));
 A("every interaction callback goes out through respond(), which applies it", /const respond = \(obj\) => \(\{[^\n]*JSON\.stringify\(noLinkPreviews\(obj\)\)/.test(R("netlify/functions/discord-interactions.js")));
-A("the scheduler's webhook poster applies it to every post", /payload = noLinkPreviews\(payload\);/.test(R("netlify/functions/discord-scheduler.js")));
+A("the scheduler's webhook poster applies it to every post", /payload = noLinkPreviews\(payload\);/.test(R("jobs/discord-scheduler.js")));
 A("the FAQ guide poster flags the forum post's message", /JSON\.stringify\(noLinkPreviews\(\{ name: g\.title/.test(R("tools/discord/post-faq-guides.mjs")));
 
 const sql = R("sql/2026-10-01-no-link-previews-v377.sql"), audit = R("tools/sql/grant-audit.sql");

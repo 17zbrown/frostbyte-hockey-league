@@ -17,7 +17,7 @@ const pub = R("src/live/part5a_public.js");
 const pub2 = R("src/live/part5b_public2.js");
 const engine = R("src/live/part2_engine.js");
 const ui = R("src/live/part4_ui.js");
-const sched = R("netlify/functions/discord-scheduler.js");
+const sched = R("jobs/discord-scheduler.js");
 const ingest = R("netlify/functions/ingest-stats.js");
 
 let ok = true;

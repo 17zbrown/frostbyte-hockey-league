@@ -58,7 +58,7 @@ globalThis.fetch = async (url, init = {}) => {
   return J([]);
 };
 
-const mod = await import(new URL("../netlify/functions/discord-welcome.js", import.meta.url).pathname);
+const mod = await import(new URL("../jobs/discord-welcome.js", import.meta.url).pathname);
 const run = mod.default;
 
 console.log("— the happy path still works");

@@ -14,7 +14,7 @@
    OTHER functions that take it as a parameter, so a naive "does sum. appear earlier" scan reports
    a false failure. Only uses inside the declaring function count. */
 const fs = require("fs"), path = require("path");
-const lines = fs.readFileSync(path.join(__dirname, "..", "netlify/functions/discord-sync.js"), "utf8").split("\n");
+const lines = fs.readFileSync(path.join(__dirname, "..", "jobs/discord-sync.js"), "utf8").split("\n");
 
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };

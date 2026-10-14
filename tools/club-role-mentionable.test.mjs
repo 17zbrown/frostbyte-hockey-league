@@ -13,7 +13,7 @@ import fs from "node:fs";
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
 
-const src = fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8");
+const src = fs.readFileSync(new URL("../jobs/discord-sync.js", import.meta.url), "utf8");
 
 /* both places that CREATE a club role must ask for a mentionable role — and, since 2026-09-17, hand
    Discord an explicit permission set (rolePermissionsAtBirth) instead of inheriting @everyone's */

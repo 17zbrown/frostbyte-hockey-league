@@ -77,7 +77,7 @@ globalThis.fetch = async (url, init = {}) => {
   return J([]);
 };
 
-const mod = await import(new URL("../netlify/functions/discord-scheduler.js", import.meta.url).pathname);
+const mod = await import(new URL("../jobs/discord-scheduler.js", import.meta.url).pathname);
 const tick = () => mod.default(new Request("https://x/.netlify/functions/discord-scheduler"));
 const now = (dry = false) => mod.runLineupReminder({ dry });
 /* the ordinary tick ALSO fires the club game-night reminders through postChannel, and since v2.96

@@ -26,6 +26,10 @@ npm-debug.log*
 index.html
 # v4.05: written beside index.html by the build (the build id the league pulse reads)
 version.json
+# v4.06: the Supabase Edge bundles (node tools/edge/build.mjs) and the Supabase CLI's scratch folder
+supabase/functions/
+supabase/.temp/
+supabase/.branches/
 preview.html
 chelgaming-live.html
 chelgaming-preview.html

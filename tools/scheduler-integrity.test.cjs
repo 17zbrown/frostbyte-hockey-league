@@ -12,7 +12,7 @@
        while the reader (and every older entry) used `dateIso`.
    computeStandings is extracted and DRIVEN — the stage/void/forfeit logic is arithmetic. */
 const fs = require("fs"), vm = require("vm"), path = require("path");
-const src = fs.readFileSync(path.join(__dirname, "..", "netlify/functions/discord-scheduler.js"), "utf8");
+const src = fs.readFileSync(path.join(__dirname, "..", "jobs/discord-scheduler.js"), "utf8");
 const content = fs.readFileSync(path.join(__dirname, "..", "src/live/part3_content.js"), "utf8");
 
 let ok = true;

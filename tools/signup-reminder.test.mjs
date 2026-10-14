@@ -63,7 +63,7 @@ globalThis.fetch = async (url, init = {}) => {
   return J([]);
 };
 
-const mod = await import(new URL("../netlify/functions/discord-scheduler.js", import.meta.url).pathname);
+const mod = await import(new URL("../jobs/discord-scheduler.js", import.meta.url).pathname);
 const run = mod.default;
 const call = () => run(new Request("https://x/.netlify/functions/discord-scheduler?run=signups"));
 

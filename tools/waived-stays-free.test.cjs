@@ -9,7 +9,7 @@ function A(name, cond, got) {
 }
 const rec = R("sql/2026-09-26-waived-player-stays-free.sql");
 const flat = rec.replace(/\n--\s?/g, " ").replace(/\s+/g, " ");
-const ops = R("netlify/functions/discord-ops.js"), sync = R("netlify/functions/discord-sync.js");
+const ops = R("netlify/functions/discord-ops.js"), sync = R("jobs/discord-sync.js");
 
 console.log("\n— the event is on the record to the second");
 {

@@ -1,0 +1,70 @@
+{
+  "about": "v4.06: the five scheduled jobs that run as Supabase Edge Functions. tools/edge/build.mjs bundles each one with the flags below; edge/recipe.cjs turns the flags and the exact input files into the job's build id, which the site build also publishes in version.json so the database can tell when a deployed job is behind the repo. Every file a bundle reads must be listed under inputs: the build refuses a bundle whose inputs differ from this list.",
+  "project": "bzbuyclwdhmhdzujxeqd",
+  "esbuild": "0.28.2",
+  "flags": [
+    "--bundle",
+    "--format=esm",
+    "--platform=neutral",
+    "--target=es2022",
+    "--external:node:*",
+    "--loader:.png=base64",
+    "--legal-comments=none",
+    "--charset=utf8"
+  ],
+  "defines": {
+    "process.env.DISCORD_GUILD_ID": "1524161314816000051"
+  },
+  "banner": "import process from \"node:process\"; import { Buffer } from \"node:buffer\";",
+  "jobs": {
+    "discord-sync": {
+      "every": 2,
+      "inputs": [
+        "assets/role-icons/STAFF.png",
+        "bot/club-notices.mjs",
+        "bot/handlers.mjs",
+        "edge/discord-sync.entry.mjs",
+        "edge/serve-job.mjs",
+        "jobs/discord-sync.js",
+        "shared/departure-card.mjs",
+        "shared/discord-links.cjs",
+        "shared/roles.mjs"
+      ]
+    },
+    "twitch-live-sync": {
+      "every": 2,
+      "inputs": [
+        "edge/serve-job.mjs",
+        "edge/twitch-live-sync.entry.mjs",
+        "jobs/twitch-live-sync.js"
+      ]
+    },
+    "lfg-timers": {
+      "every": 2,
+      "inputs": [
+        "edge/lfg-timers.entry.mjs",
+        "edge/serve-job.mjs",
+        "jobs/lfg-timers.js",
+        "shared/discord-links.cjs"
+      ]
+    },
+    "discord-scheduler": {
+      "every": 5,
+      "inputs": [
+        "edge/discord-scheduler.entry.mjs",
+        "edge/serve-job.mjs",
+        "jobs/discord-scheduler.js",
+        "shared/discord-links.cjs"
+      ]
+    },
+    "discord-welcome": {
+      "every": 5,
+      "inputs": [
+        "edge/discord-welcome.entry.mjs",
+        "edge/serve-job.mjs",
+        "jobs/discord-welcome.js",
+        "shared/discord-links.cjs"
+      ]
+    }
+  }
+}

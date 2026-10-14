@@ -64,12 +64,9 @@
   status = 404
   force = true
 
-# The rulebook lives in the site bundle (CG.CONTENT.rulebook in part3_content.js). discord-scheduler
-# mirrors it into #rules, so it needs to read that same file at runtime — bundling it keeps ONE
-# source of truth instead of a second copy that could drift from the published rules.
 [functions]
-  # part3_content.js: the rulebook lives in the site bundle and discord-scheduler mirrors it into
-  # #rules, so it reads that same file at runtime — ONE source of truth instead of a second copy.
+  # v4.06: src/live/part3_content.js is no longer shipped. discord-scheduler reads the #rules card from the database
+  # (app_config.rules_card, copied from version.json), because on Supabase it cannot open repo files at all.
   # assets/role-icons/: fixed role artwork that has no source on the site — just STAFF.png, the
   # referee jersey. Club crests used to be pre-rendered here too, because Discord rejects the WebP
   # the site stores; they now render live through Supabase's image transformer, which returns PNG
@@ -77,7 +74,7 @@
   # stays broad so another fixed mark can be dropped in without editing this file. These live
   # OUTSIDE netlify/functions/, because Netlify scans every subdirectory of that folder as a
   # function candidate — assets placed there are not shipped.
-  included_files = ["src/live/part3_content.js", "assets/role-icons/*", "assets/role-icons/**"]
+  included_files = ["assets/role-icons/*", "assets/role-icons/**"]
 
 # The EA stats fetcher POSTs raw match data here (auth: x-ingest-key header).
 [[redirects]]
@@ -86,7 +83,7 @@
   status = 200
 
 # The request-reachable door to the Discord sweep (diag / register / setup / reconcile / run-now).
-# discord-sync itself is scheduled, and Netlify refuses external HTTP to scheduled functions.
+# The sweep itself is a scheduled job (jobs/discord-sync.js, on Supabase from v4.06); this door imports the same code.
 [[redirects]]
   from = "/api/discord-ops"
   to = "/.netlify/functions/discord-ops"
@@ -130,6 +127,22 @@
   force = true
 [[redirects]]
   from = "/bot/*"
+  to = "/"
+  status = 404
+  force = true
+# v4.06: the scheduled jobs' source (jobs/), their Supabase wrapper (edge/) and the Supabase deploy settings (supabase/)
+[[redirects]]
+  from = "/jobs/*"
+  to = "/"
+  status = 404
+  force = true
+[[redirects]]
+  from = "/edge/*"
+  to = "/"
+  status = 404
+  force = true
+[[redirects]]
+  from = "/supabase/*"
   to = "/"
   status = 404
   force = true

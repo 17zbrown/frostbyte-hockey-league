@@ -9,7 +9,7 @@
 const fs = require("fs"), path = require("path"), vm = require("vm");
 const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
 const sql = R("sql/2026-10-13-deadline-holds-v398.sql"), live = R("src/live/part_live.js"),
-      pub = R("src/live/part5a_public.js"), hub = R("src/live/part6_hub.js"), sched = R("netlify/functions/discord-scheduler.js");
+      pub = R("src/live/part5a_public.js"), hub = R("src/live/part6_hub.js"), sched = R("jobs/discord-scheduler.js");
 let fail = 0, n = 0;
 const A = (name, cond, got) => { n++; if (cond) console.log("ok   " + name); else { fail++; console.log("FAIL " + name + (got === undefined ? "" : "  got: " + JSON.stringify(got).slice(0, 240))); } };
 

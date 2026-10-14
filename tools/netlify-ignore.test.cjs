@@ -30,6 +30,14 @@ const cSpace = commit(["docs/a b.md"]);
 A("a path with a space under docs/ -> skip", run(cShared, cSpace).status === 0);
 const cOther = commit(["LG/x y.pdf"]);
 A("an unknown path, even with a space -> build", run(cSpace, cOther).status === 1);
+/* v4.06: the scheduled jobs and their Supabase wrapper always build (discord-ops bundles jobs/, and version.json carries
+   each Edge job's expected build id); the Supabase CLI settings are read only by the GitHub deploy workflow */
+const cJobs = commit(["jobs/lfg-timers.js"]);
+A("jobs/ -> build", run(cOther, cJobs).status === 1);
+const cEdge = commit(["edge/serve-job.mjs"]);
+A("edge/ -> build (version.json carries the expected Edge build ids)", run(cJobs, cEdge).status === 1);
+const cSupa = commit(["supabase/config.toml", "tools/edge/build.mjs"]);
+A("only the Supabase CLI settings and tools -> skip", run(cEdge, cSupa).status === 0);
 A("no earlier deploy -> build", run("", cOther).status === 1);
 A("the same commit -> build", run(cOther, cOther).status === 1);
 A("an unknown base commit -> build", run("0123456789abcdef0123456789abcdef01234567", cOther).status === 1);

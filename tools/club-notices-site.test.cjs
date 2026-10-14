@@ -2,7 +2,7 @@
    Run: node tools/club-notices-site.test.cjs */
 const fs = require("fs"), path = require("path");
 const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
-const hub = R("src/live/part6_hub.js"), head = R("src/live/part1_head.html"), content = R("src/live/part3_content.js"), bot = R("bot/chel-bot.mjs"), sync = R("netlify/functions/discord-sync.js");
+const hub = R("src/live/part6_hub.js"), head = R("src/live/part1_head.html"), content = R("src/live/part3_content.js"), bot = R("bot/chel-bot.mjs"), sync = R("jobs/discord-sync.js");
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
 A("a loan is a random assignment OR a late sign-up placed the same way", /var isLoan = function\(p\)\{ return !p\.mgmt && \(p\.origin === "preseason_random" \|\| p\.origin === "latecomer_random"\); \};/.test(hub));

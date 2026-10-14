@@ -30,7 +30,7 @@ A("no `playing` set at all behaves exactly as before", set(want({ profile_id: "p
 
 console.log("— both lanes feed the same set");
 const R = (f) => fs.readFileSync(new URL("../" + f, import.meta.url), "utf8");
-const sweep = R("netlify/functions/discord-sync.js"), bot = R("bot/role-sync.mjs");
+const sweep = R("jobs/discord-sync.js"), bot = R("bot/role-sync.mjs");
 A("the sweep loads the active season's registrations when it is not the season taking sign-ups",
   /const act = \(await sbGet\("seasons\?select=id&status=eq\.active&order=number\.asc&limit=1"\)\)\[0\];\n\s+if \(act && act\.id !== regSeasonId\)/.test(sweep));
 A("...a failed load leaves roles untouched instead of stripping them", /inputsOk = false; inputsErr\.push\("in-play registrations"\)/.test(sweep));

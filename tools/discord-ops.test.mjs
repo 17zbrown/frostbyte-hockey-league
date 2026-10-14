@@ -18,9 +18,19 @@ const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"}
 const J = (b, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { "content-type": "application/json" } });
 
 let cfg = { diag_key: "the-key" }, discordCalls = [], authChecks = [], validJwt = "good-jwt";
-function reset() { cfg = { diag_key: "the-key" }; discordCalls = []; authChecks = []; validJwt = "good-jwt"; }
+/* v4.06: the database's answer about where discord-sync runs (public.job_lease), and the RPCs the door made */
+let host = "netlify", leaseBusy = false, rpcs = [];
+function reset() { cfg = { diag_key: "the-key" }; discordCalls = []; authChecks = []; validJwt = "good-jwt"; host = "netlify"; leaseBusy = false; rpcs = []; }
 globalThis.fetch = async (url, opts = {}) => {
   const u = String(url), m = (opts.method || "GET").toUpperCase();
+  const rpc = u.match(/\/rest\/v1\/rpc\/([a-z_]+)/);
+  if (rpc) {
+    const args = JSON.parse(opts.body || "{}");
+    rpcs.push({ name: rpc[1], args, bearer: String((opts.headers || {}).Authorization || "") });
+    if (rpc[1] === "job_lease") return J(host !== args.p_host ? "standby" : leaseBusy ? "busy" : "11111111-2222-4333-8444-555555555555");
+    if (rpc[1] === "job_release") return J(true);
+    if (rpc[1] === "request_discord_sync") return J(true);
+  }
   if (u.includes("/auth/v1/user")) {
     const bearer = String((opts.headers || {}).Authorization || "").replace(/^Bearer /, "");
     authChecks.push({ bearer, apikey: (opts.headers || {}).apikey });
@@ -104,7 +114,7 @@ console.log("\n— the ops door: with the key, every old entry point answers");
   A("?reconcile=teams -> 200 with the reconcile report", r.status === 200 && Array.isArray(body.deletedRooms) && Array.isArray(body.errors), JSON.stringify(body).slice(0, 120));
   A("...which names the missing category rather than inventing one", body.errors.some((e) => e.teamRooms === "category not found"));
   /* the routing table is the contract the site is re-pointed to */
-  const { OPS_ROUTES } = await import(new URL("../netlify/functions/discord-sync.js", import.meta.url).pathname);
+  const { OPS_ROUTES } = await import(new URL("../jobs/discord-sync.js", import.meta.url).pathname);
   A("the routing table lists exactly the old entry points",
     JSON.stringify(OPS_ROUTES) === JSON.stringify({ diag: { guild: "diagGuild", staff: "diagStaff", teamrooms: "diagTeamrooms", rolecheck: "diagRolecheck" },
       register: { commands: "registerCommands" }, setup: { community: "setupCommunity", staffmod: "setupStaffmod" }, reconcile: { teams: "reconcileTeams" } }),
@@ -136,6 +146,32 @@ console.log("\n— run=now: the key or a member session; the service key is neve
   A("a run moments after the last is debounced, not re-run", r.status === 200 && (await r.json()).skipped === "ran moments ago");
 }
 
+console.log("\n— run=now: one host at a time (v4.06)");
+{
+  reset();
+  let r = await ops(req("?run=now&key=the-key"));
+  A("on Netlify the sweep runs here under a lease asked for as Netlify",
+    !!cfg["rl_discord-sync_started"] && rpcs[0] && rpcs[0].name === "job_lease" && rpcs[0].args.p_fn === "discord-sync" && rpcs[0].args.p_host === "netlify");
+  A("...a lease longer than Netlify's 60 s limit for an HTTP function (review, v4.06)", rpcs[0] && rpcs[0].args.p_ttl_s > 60);
+  A("...with the service key", rpcs[0] && rpcs[0].bearer === "Bearer service-key");
+  A("...and the run is handed back with how it went", rpcs.some((x) => x.name === "job_release" && x.args.p_holder === "11111111-2222-4333-8444-555555555555" && x.args.p_ok === true));
+  reset();
+  leaseBusy = true;
+  r = await ops(req("?run=now&key=the-key"));
+  A("a run already going (any host) -> skipped, nothing swept", r.status === 200 && (await r.json()).skipped === "busy" && !cfg["rl_discord-sync_started"]);
+  reset();
+  host = "edge";
+  r = await ops(req("?run=now", { method: "POST", headers: { authorization: "Bearer good-jwt" } }));
+  const body = await r.json();
+  A("once the sweep runs on Supabase, run=now asks the database to start it there instead",
+    r.status === 200 && body.host === "supabase" && body.started === true && rpcs.some((x) => x.name === "request_discord_sync"), JSON.stringify(body));
+  A("...and runs nothing on Netlify", !cfg["rl_discord-sync_started"] && discordCalls.length === 0);
+  reset();
+  host = "edge";
+  r = await ops(req("?run=now", { method: "POST" }));
+  A("...still only for the key or a member session", r.status === 404 && rpcs.length === 0);
+}
+
 console.log("\n— the redirect and the wiring");
 {
   const toml = fs.readFileSync(new URL("../netlify.toml", import.meta.url), "utf8");
@@ -143,8 +179,8 @@ console.log("\n— the redirect and the wiring");
     /from = "\/api\/discord-ops"\s*\n\s*to = "\/\.netlify\/functions\/discord-ops"\s*\n\s*status = 200/.test(toml));
   const opsSrc = fs.readFileSync(new URL("../netlify/functions/discord-ops.js", import.meta.url), "utf8");
   A("discord-ops carries no schedule (it must stay HTTP-invocable)", !/schedule:/.test(opsSrc));
-  A("...and imports the sweep rather than copying it", /from "\.\/discord-sync\.js"/.test(opsSrc) && !/async function ensure|dApi\(/.test(opsSrc));
-  const syncSrc = fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8");
+  A("...and imports the sweep rather than copying it", /from "\.\.\/\.\.\/jobs\/discord-sync\.js"/.test(opsSrc) && /from "\.\.\/\.\.\/jobs\/host-gate\.mjs"/.test(opsSrc) && !/async function ensure|dApi\(/.test(opsSrc));
+  const syncSrc = fs.readFileSync(new URL("../jobs/discord-sync.js", import.meta.url), "utf8");
   A("discord-sync no longer parses a request of its own", !/req\.url/.test(syncSrc.slice(syncSrc.indexOf("export async function runSweep"))));
 }
 

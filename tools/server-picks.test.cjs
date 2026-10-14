@@ -17,7 +17,7 @@ function A(name, cond, got) {
 const hub = R("src/live/part6_hub.js");
 const live = R("src/live/part_live.js");
 const head = R("src/live/part1_head.html");
-const sched = R("netlify/functions/discord-scheduler.js");
+const sched = R("jobs/discord-scheduler.js");
 const ops = R("netlify/functions/discord-ops.js");
 const lfg = R("netlify/functions/discord-interactions.js");
 const admin = R("src/live/part7_admin.js");

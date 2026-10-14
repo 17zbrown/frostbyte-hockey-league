@@ -15,7 +15,7 @@ globalThis.fetch = async (url, opts = {}) => {
   if (m === "PATCH" && /\/channels\/[^/]+$/.test(u)) { patched.push({ id: u.split("/channels/")[1], body: JSON.parse(opts.body) }); return J({}); }
   return J({});
 };
-const { _internals: I } = await import(new URL("../netlify/functions/discord-sync.js", import.meta.url).pathname);
+const { _internals: I } = await import(new URL("../jobs/discord-sync.js", import.meta.url).pathname);
 const GUILD = "guild1";
 const ROLE = { commissioner: "r-comm", staff: "r-staff", player: "r-play", "not signed up": "r-nsu" };
 const VIEW = 1024n, SEND = 2048n, HIST = 65536n, PUB_THREADS = 1n << 35n, PRIV_THREADS = 1n << 36n, THREAD_MSGS = 1n << 38n;
@@ -75,7 +75,7 @@ console.log("\n— a role or member allow that would reopen the room is stripped
 }
 console.log("\n— the announcements creator writes the same lock");
 {
-  const src = (await import("fs")).readFileSync(decodeURIComponent(new URL("../netlify/functions/discord-sync.js", import.meta.url).pathname), "utf8");
+  const src = (await import("fs")).readFileSync(decodeURIComponent(new URL("../jobs/discord-sync.js", import.meta.url).pathname), "utf8");
   A("only the Commissioner role is granted posting on creation", /const office = \["commissioner"\]\.map/.test(src));
   A("...with the read-only category's own bitmasks", /allow: String\(INFO_EVERYONE_ALLOW\), deny: String\(INFO_EVERYONE_DENY\)/.test(src) && /allow: String\(INFO_POSTER_ALLOW\), deny: "0"/.test(src));
 }
@@ -109,6 +109,6 @@ console.log("\n— nothing to do without the pieces");
   await I.enforceReadOnlyCategories(world(), { player: "r-play" }, { errors: [] });
   A("no commissioner role yet → no patches (the lock would have no poster)", patched.length === 0);
 }
-A("the sweep result reports it", /infoLocked: sum\.infoLocked \|\| 0/.test((await import("fs")).readFileSync(decodeURIComponent(new URL("../netlify/functions/discord-sync.js", import.meta.url).pathname), "utf8")));
+A("the sweep result reports it", /infoLocked: sum\.infoLocked \|\| 0/.test((await import("fs")).readFileSync(decodeURIComponent(new URL("../jobs/discord-sync.js", import.meta.url).pathname), "utf8")));
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);

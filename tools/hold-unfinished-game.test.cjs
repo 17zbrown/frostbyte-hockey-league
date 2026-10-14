@@ -15,7 +15,7 @@ function A(name, cond, got) {
   else { fail++; console.log("FAIL " + name + (got === undefined ? "" : "  — got: " + String(got).slice(0, 220))); }
 }
 const ing = R("netlify/functions/ingest-stats.js");
-const sync = R("netlify/functions/discord-sync.js");
+const sync = R("jobs/discord-sync.js");
 const rec = R("sql/2026-09-25-hold-unfinished-games.sql");
 const flat = rec.replace(/\n--\s?/g, " ").replace(/\s+/g, " ");
 const iflat = ing.replace(/\s+/g, " ");

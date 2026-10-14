@@ -90,8 +90,8 @@ console.log("\n— the reconcile touches only managed roles");
 
 console.log("\n— one definition, not two");
 {
-  const sweep = fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8");
-  A("the sweep imports the shared rules", /from "\.\.\/\.\.\/shared\/roles\.mjs"/.test(sweep));
+  const sweep = fs.readFileSync(new URL("../jobs/discord-sync.js", import.meta.url), "utf8");
+  A("the sweep imports the shared rules", /from "\.\.\/shared\/roles\.mjs"/.test(sweep));
   A("...and no longer carries its own copy of the grant logic",
     !/desired\.add\(roleId\["player"\]\)/.test(sweep));
   A("...or of STAFF_DEPARTMENTS", !/const STAFF_DEPARTMENTS = \[/.test(sweep));
@@ -336,13 +336,13 @@ console.log("\n— one hung member never stalls the queue (audit 2026-09-17, P2-
   A("a rostered player on the active roster does not", !rolesFor("T1", false).has("R_TC"));
   A("a camp flag without a roster spot grants nothing", !rolesFor(null, true).has("R_TC"));
   A("...and it is reconciled like every managed role, so a call-up drops it", MANAGED_STATIC.includes("Training Camp"));
-  const syncSrc = fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8");
+  const syncSrc = fs.readFileSync(new URL("../jobs/discord-sync.js", import.meta.url), "utf8");
   const bot = fs.readFileSync(new URL("../bot/role-sync.mjs", import.meta.url), "utf8");
   A("the sweep reads squad off the season's roster spots and passes camp into the rules", /select=profile_id,position,squad,status/.test(syncSrc) && /rookies, camp, managedIds[,\s\w]*\}/.test(syncSrc) && /\["Training Camp", true\]/.test(syncSrc));
   A("the bot's instant lane does the same, so the two paths cannot fight", /select=position,squad,status/.test(bot) && /camp: inCamp \? new Set\(\[profileId\]\) : new Set\(\)/.test(bot));
 }
 {
-  const sync = fs.readFileSync(new URL("../netlify/functions/discord-sync.js", import.meta.url), "utf8");
+  const sync = fs.readFileSync(new URL("../jobs/discord-sync.js", import.meta.url), "utf8");
   A("the sweep creates the role if it is missing", /\["CGHL Management", true\]/.test(sync));
   A("...and keeps it mentionable, so the ping actually works",
     /\["CGHL Management", true, false\]/.test(sync));

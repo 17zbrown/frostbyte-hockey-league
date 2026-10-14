@@ -8,8 +8,8 @@
      2. no `ping` option on the post, which sends allowed_mentions {parse:[]} so a stray mention is inert. */
 const fs = require("fs"), path = require("path");
 const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
-const sched = R("netlify/functions/discord-scheduler.js");
-const sync = R("netlify/functions/discord-sync.js");
+const sched = R("jobs/discord-scheduler.js");
+const sync = R("jobs/discord-sync.js");
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
 

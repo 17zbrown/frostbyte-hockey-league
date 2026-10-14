@@ -13,7 +13,7 @@ const fs = require("fs"), vm = require("vm"), path = require("path");
 const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
 const live = R("src/live/part_live.js");
 const roles = R("shared/roles.mjs");
-const sync = R("netlify/functions/discord-sync.js");
+const sync = R("jobs/discord-sync.js");
 const content = R("src/live/part3_content.js");
 
 let ok = true;

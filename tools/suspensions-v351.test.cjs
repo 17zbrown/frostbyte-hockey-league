@@ -11,7 +11,7 @@ const iss = R("sql/2026-09-28-suspensions-v351-issue.sql"), issF = flat(iss);
 const lk = R("sql/2026-09-28-suspensions-v351-locks.sql");
 const enf = flat(R("sql/2026-09-28-suspensions-v351-enforce.sql"));
 const live = R("src/live/part_live.js"), hub = R("src/live/part6_hub.js"), pub = R("src/live/part5a_public.js");
-const desks = R("src/live/part9_staffdesks.js"), sync = R("netlify/functions/discord-sync.js");
+const desks = R("src/live/part9_staffdesks.js"), sync = R("jobs/discord-sync.js");
 
 console.log("\n— the rulings are quoted");
 A("the lock", /Lock a player in the team HQ by graying them out/.test(eng));

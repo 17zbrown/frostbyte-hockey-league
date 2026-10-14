@@ -26,11 +26,15 @@
 // run=now ALSO accepts a signed-in member's Supabase session (Authorization: Bearer <jwt>), because
 // the site fires it after a role-affecting write on the member's own behalf and the page cannot
 // hold a secret; the sweep debounces itself to one run per six seconds regardless of caller.
+// v4.06: the sweep runs on whichever host the database names (jobs/host-gate.mjs). While that is Netlify it runs here,
+// under the same one-run-at-a-time lease as the schedule; once it is Supabase this door asks the database to start the
+// Edge run (public.request_discord_sync) and returns at once.
 //
 // Env: DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (SUPABASE_ANON_KEY
 // as the apikey for session checks when set). Node 18+.
-import { OPS_ROUTES, runOp, opsKeyOk, runSweep, readChannel } from "./discord-sync.js";
-import { runAvailabilityReminder, runLineupReminder, runServerPickReminder, runGameNight } from "./discord-scheduler.js";
+import { OPS_ROUTES, runOp, opsKeyOk, runSweep, readChannel } from "../../jobs/discord-sync.js";
+import { runAvailabilityReminder, runLineupReminder, runServerPickReminder, runGameNight } from "../../jobs/discord-scheduler.js";
+import { onActiveHost, hostRpc, NETLIFY_HTTP_LEASE_S } from "../../jobs/host-gate.mjs";
 
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -65,8 +69,13 @@ export default async (req) => {
   /* run=now: the ops key or a member session; nothing else reaches the sweep */
   if (params.get("run") === "now") {
     if (!(await opsKeyOk(req)) && !(await sessionOk(req))) return notFound();
-    const r = await runSweep();
-    return json(r.body, r.status);
+    return onActiveHost("discord-sync", async () => { const r = await runSweep(); return json(r.body, r.status); }, {
+      ttlS: NETLIFY_HTTP_LEASE_S,
+      onStandby: async () => {
+        try { return json({ host: "supabase", started: !!(await hostRpc("request_discord_sync", {})) }); }
+        catch (e) { return json({ host: "supabase", error: String(e.message || e).slice(0, 160) }, 502); }
+      },
+    });
   }
 
   /* The weekly availability + lineup reminder. discord-scheduler is a SCHEDULED function, so its

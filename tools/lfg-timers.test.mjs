@@ -9,7 +9,7 @@ process.env.SUPABASE_SERVICE_ROLE_KEY ||= "k";
 process.env.DISCORD_BOT_TOKEN ||= "t";
 
 const HERE = new URL(".", import.meta.url).pathname;
-const TIMERS = HERE + "../netlify/functions/lfg-timers.js";
+const TIMERS = HERE + "../jobs/lfg-timers.js";
 const INTERACTIONS = HERE + "../netlify/functions/discord-interactions.js";
 
 const MIN = 60000;
