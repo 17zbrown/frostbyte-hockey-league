@@ -727,6 +727,23 @@ CG._bootLoaders = function(_hintUsed){
     function(){ return CG._codesToday(); }
   ];
 };
+/* One game_stats skater row as a box line: the prototype's base keys (so CG.aggregate builds season totals) plus every
+   EA advanced metric. v4.10: fow is faceoffs WON and fot faceoffs TAKEN (won + lost), the meaning the engine and every
+   reader give them (FO% = fow / fot). fot used to carry faceoffs lost alone, so FO% read won over lost: Saqoy's 254 won
+   and 165 lost showed 153.9 instead of 60.6, and a player who never lost a draw showed no rate at all. */
+CG.eaSkaterLine = function(r){
+  var fow = +r.faceoffs_won||0, fol = +r.faceoffs_lost||0;
+  return { goalie:false,
+    g:+r.goals||0, a:+r.assists||0, pm:+r.plus_minus||0, shots:+r.shots||0, hits:+r.hits||0,
+    blk:+r.blocked_shots||0, gv:+r.giveaways||0, tk:+r.takeaways||0, pim:+r.pim||0,
+    fow:fow, fot:fow+fol, gwg:+r.gwg||0,
+    ppg:+r.pp_goals||0, shg:+r.sh_goals||0, toi:+r.time_on_ice_seconds||0,
+    pass:+r.passes_completed||0, passAtt:+r.passes_attempted||0, sat:+r.shot_attempts||0,
+    poss:+r.possession_seconds||0, intc:+r.interceptions||0, pdrawn:+r.penalties_drawn||0,
+    defl:+r.deflections||0, saucer:+r.saucer_passes||0,
+    ratOff:+r.offense_rating||0, ratDef:+r.defense_rating||0, ratTeam:+r.team_play_rating||0,
+    name:r.skater_name||null, pos:r.position||null, eaId:r.ea_player_id||null, pid:r.profile_id||null };
+};
 CG.buildLiveLeague = async function(opts){
   opts = opts || {};
   var sb = CG.sb;
@@ -943,18 +960,7 @@ CG.buildLiveLeague = async function(opts){
      keep a synthetic key so they still render but don't corrupt a profile's totals). */
   var statsByGame = {};
   gameStatsRows.forEach(function(r){ (statsByGame[r.game_id]=statsByGame[r.game_id]||[]).push(r); });
-  function eaSkaterLine(r){
-    return { goalie:false,
-      g:+r.goals||0, a:+r.assists||0, pm:+r.plus_minus||0, shots:+r.shots||0, hits:+r.hits||0,
-      blk:+r.blocked_shots||0, gv:+r.giveaways||0, tk:+r.takeaways||0, pim:+r.pim||0,
-      fow:+r.faceoffs_won||0, fot:+r.faceoffs_lost||0, gwg:+r.gwg||0,
-      ppg:+r.pp_goals||0, shg:+r.sh_goals||0, toi:+r.time_on_ice_seconds||0,
-      pass:+r.passes_completed||0, passAtt:+r.passes_attempted||0, sat:+r.shot_attempts||0,
-      poss:+r.possession_seconds||0, intc:+r.interceptions||0, pdrawn:+r.penalties_drawn||0,
-      defl:+r.deflections||0, saucer:+r.saucer_passes||0,
-      ratOff:+r.offense_rating||0, ratDef:+r.defense_rating||0, ratTeam:+r.team_play_rating||0,
-      name:r.skater_name||null, pos:r.position||null, eaId:r.ea_player_id||null, pid:r.profile_id||null };
-  }
+  var eaSkaterLine = CG.eaSkaterLine;
   function eaGoalieLine(r, won, ot){
     var sa=+r.shots_against||0, sv=+r.saves||0;
     return { goalie:true, sa:sa, sv:sv, ga:+r.goals_against||0,
