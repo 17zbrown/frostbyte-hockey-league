@@ -46,9 +46,17 @@ The GitHub repo is public: nothing secret belongs in it.
   changing it. Commissioner rulings recorded there are league law.
 - Project skills in `.claude/skills/`: `ship-version` (the release checklist) and `discord-ops` (the Discord server).
   Hookify rules in `.claude/hookify.*.local.md` enforce several rules below mechanically; a hook warning or block is a
-  rule, not noise. Design plugins (frontend-design, taste-skill, web-design-guidelines) and the DESIGN.md collection in
-  `~/.claude/design-refs/awesome-design-md` are references for direction and review only: `BRAND.md`, the tokens in
-  `part1_head.html` and `CLAUDEwebdesign copy.md` decide how this site looks.
+  rule, not noise.
+- **Website design workflow (commissioner, 2026-10-15: Emil Kowalski's skills are the primary go-to).** For any visual,
+  UI, interaction or motion work on the site, invoke `emil-design-eng` FIRST (UI polish, component design, the animation
+  decision framework), then the specific one: `animate` (build motion), `review-animations` (critique a change),
+  `animation-performance` (jank), `mobile-native` (the phone layer), `break-ui` (worst-case data), `apple-design`
+  (gestures, springs, depth), `find-animation-opportunities` and `improve-animations` (audits, read-only). frontend-design,
+  taste-skill, web-design-guidelines and `~/.claude/design-refs/awesome-design-md` are second opinions only. Two limits
+  bind all of them: `BRAND.md`, the tokens in `part1_head.html` and `CLAUDEwebdesign copy.md` decide how this site looks;
+  and the site is plain ES5 scripts with no npm packages, so translate React, Framer Motion and Tailwind examples into
+  CSS (transitions, `@starting-style`, `clip-path`) and vanilla JS (WAAPI, pointer events), and honor
+  `prefers-reduced-motion`. `pick-ui-library` and `prototype` run only when the commissioner asks for them.
 
 ## Commands
 - Local preview: `node src/live/build.cjs index.html`, served by `site-local` in `.claude/launch.json` (port 8766).
