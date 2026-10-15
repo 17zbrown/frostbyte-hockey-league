@@ -146,6 +146,25 @@
   to = "/"
   status = 404
   force = true
+# 2026-10-15: a plugin audit found /sql/*.sql (every database change record, with the full SECURITY DEFINER
+# source) and /netlify/functions/*.js (the function source) answering 200. Netlify serves functions at
+# /.netlify/functions/<name> and through the /api/* rewrites above, never from the /netlify/ source path, so
+# blocking the source path changes nothing at runtime. jsconfig.json is editor tooling only.
+[[redirects]]
+  from = "/sql/*"
+  to = "/"
+  status = 404
+  force = true
+[[redirects]]
+  from = "/netlify/*"
+  to = "/"
+  status = 404
+  force = true
+[[redirects]]
+  from = "/jsconfig.json"
+  to = "/"
+  status = 404
+  force = true
 [[redirects]]
   from = "/server.js"
   to = "/"

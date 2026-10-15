@@ -46,6 +46,15 @@ A("netlify.toml runs it as the ignore command", /^\s*ignore = "sh tools\/netlify
 A("the preview copy is no longer built on Netlify", /^\s*command = "node src\/live\/build\.cjs index\.html"$/m.test(toml) && !/^\s*command = .*preview/m.test(toml));
 A("the dead functions and their routes are gone", ["discord-join", "nhl-stats", "parse-screenshots"].every((f) => !fs.existsSync(path.join(__dirname, "..", "netlify/functions", f + ".js"))) &&
   !/api\/parse-screenshots|api\/discord-join/.test(toml));
+/* 2026-10-15 (plugin setup): CLAUDE.md and jsconfig.json are agent and editor files, never served or bundled, so a push that
+   only touches them skips the build; and the audit that found /sql/*.sql and /netlify/functions/*.js answering 200 on the
+   live site added forced 404s for the source paths (functions are served from /.netlify/functions and /api/*, never /netlify/) */
+const cAgent = commit(["jsconfig.json", "CLAUDE.md"]);
+A("jsconfig.json and CLAUDE.md -> skip", run(cSupa, cAgent).status === 0, run(cSupa, cAgent).stdout);
+for (const p of ["/sql/*", "/netlify/*", "/jsconfig.json", "/CLAUDE*", "/src/*", "/tools/*", "/shared/*"]) {
+  const rx = new RegExp('from = "' + p.replace(/[*.]/g, (c) => "\\" + c) + '"\\s+to = "/"\\s+status = 404\\s+force = true');
+  A("netlify.toml blocks " + p + " with a forced 404", rx.test(toml));
+}
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(fail ? "\n" + fail + " of " + n + " FAILED" : "\nall " + n + " passed");
 process.exit(fail ? 1 : 0);

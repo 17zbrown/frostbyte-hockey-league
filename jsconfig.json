@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "lib": ["esnext", "dom"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "allowJs": true,
+    "alwaysStrict": true,
+    "strict": false,
+    "types": [],
+    "maxNodeModuleJsDepth": 0,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": [
+    "src/live/*.js",
+    "src/live/*.cjs",
+    "netlify/functions/*.js",
+    "shared/**/*",
+    "jobs/**/*",
+    "edge/**/*",
+    "bot/**/*",
+    "tools/**/*",
+    "server.js"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/.claude-flow",
+    "src/live/part8_blueprint_init.js",
+    "tools/demo/_guide_bundle.js",
+    "tools/demo/seeds",
+    "tools/demo/guide_layer.js",
+    "tools/demo/mgmt_layer.js",
+    "tools/guides/guide.js"
+  ]
+}

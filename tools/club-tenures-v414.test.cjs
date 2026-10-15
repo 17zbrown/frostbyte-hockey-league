@@ -139,11 +139,12 @@ console.log("\n— Rule 6.3 and the changelog");
   A("Rule 6.3: the position group is the one held with that club at the time (roster or lineup place), camp excepted",
     /The line must also be in the position group the member held with that club at the time, on the roster or in the place the lineup gave the member, unless the member was in training camp\./.test(p));
   A("...and the paragraph guesses no pronoun", !/\b(he|his|him)\b/.test(p));
-  A("the changelog's newest entry is 4.14", rb.changelog[0].version === "4.14" && rb.changelog[1].version === "4.13");
+  const e414 = rb.changelog.find((c) => c.version === "4.14") || {};   /* by version: a later release takes changelog[0] */
+  A("the changelog has its 4.14 entry, right after 4.13", e414.version === "4.14" && (rb.changelog[rb.changelog.indexOf(e414) + 1] || {}).version === "4.13");
   A("...and it tells what part 3 did: opening-week stints rebuilt, a merged account carried, every credited game inside a stint",
-    /Stints from opening week, before the league kept its archive of removals, were rebuilt from the draft, placement and waiver records that name them/.test(JSON.stringify(rb.changelog[0])) &&
-    /a merged account carries the earlier account's stints/.test(JSON.stringify(rb.changelog[0])) && /Every credited game this season now lies inside a stint at its club/.test(JSON.stringify(rb.changelog[0])));
-  A("...with no em dashes and no guessed pronouns", !/—/.test(JSON.stringify(rb.changelog[0])) && !/\b(he|his|him)\b/i.test(JSON.stringify(rb.changelog[0])));
+    /Stints from opening week, before the league kept its archive of removals, were rebuilt from the draft, placement and waiver records that name them/.test(JSON.stringify(e414)) &&
+    /a merged account carries the earlier account's stints/.test(JSON.stringify(e414)) && /Every credited game this season now lies inside a stint at its club/.test(JSON.stringify(e414)));
+  A("...with no em dashes and no guessed pronouns", !/—/.test(JSON.stringify(e414)) && !/\b(he|his|him)\b/i.test(JSON.stringify(e414)));
 }
 
 console.log(fail ? `\n${fail} of ${n} FAILED` : `\nall ${n} passed`);

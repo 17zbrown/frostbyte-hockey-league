@@ -39,7 +39,7 @@ for f in $files; do
   case "$f" in
     bot/club-notices.mjs|bot/handlers.mjs)
       IFS=$old_ifs; echo "netlify-ignore: $f is bundled into discord-sync, building"; exit 1 ;;
-    sql/*|tools/*|docs/*|.github/*|.claude/*|bot/*|supabase/*|src/live/preview_layer.js|README*|CLAUDE*)
+    sql/*|tools/*|docs/*|.github/*|.claude/*|bot/*|supabase/*|src/live/preview_layer.js|README*|CLAUDE*|jsconfig.json)
       ;;
     *)
       IFS=$old_ifs; echo "netlify-ignore: $f changes the site or a function, building"; exit 1 ;;
