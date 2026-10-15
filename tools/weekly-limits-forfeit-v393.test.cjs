@@ -54,7 +54,8 @@ A("Islanders at Stars is exempt, its Week 3 ruling cleared by the same door", /o
 A("every limit reader reads the limit week", ["player_week_games", "set_game_lineup", "clear_game_lineup", "grant_cap_exception", "review_game_records", "lineup_camp_warnings", "tc_week_overages"].every((f) => one.includes("public." + f + "(")));
 
 console.log("— the site");
-A("games load both columns", /forfeit_team_id,voided,limit_week,limits_exempt";/.test(live) && /limitsExempt: !!g\.limits_exempt,/.test(live));
+/* v4.07 appended rescheduled_from to the same list */
+A("games load both columns", /forfeit_team_id,voided,limit_week,limits_exempt,/.test(live) && /limitsExempt: !!g\.limits_exempt,/.test(live));
 A("a filed sheet does not count; an exempt game counts for no one", /filed:   \{ counts:false/.test(live) && /exempt:  \{ counts:false/.test(live) && /else if \(g\.limitsExempt\) v = "exempt";/.test(live));
 A("the week ledger, the line builder and the officials' desk compare limit weeks", /CG\.limitWeekOf\(g\) !== CG\.limitWeekOf\(game\)/.test(live) && /CG\.limitWeekOf\(g\) !== CG\.limitWeekOf\(ref\)/.test(hub) && /CG\.limitWeekOf\(x\) === CG\.limitWeekOf\(g\)/.test(desks));
 A("a night opening with a made-up or exempt game is represented by a game of the week it is played", /else if \(!isRef\(seen\[k\]\.game\) && isRef\(g\)\) seen\[k\]\.game = g;/.test(hub));

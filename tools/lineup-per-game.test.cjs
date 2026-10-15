@@ -17,7 +17,7 @@ ctx.window = ctx; ctx.globalThis = ctx;
 const NOW = Date.parse("2026-09-16T18:00:00-04:00");   // 6pm ET on the first pre-season night
 ctx.CG = { now: () => NOW, gameNight: (g) => g.night, hqClub: () => "TOR", me: () => ({ team: "TOR" }) };
 vm.createContext(ctx);
-for (const fn of ["lineupGameFor", "clubUpcomingGames", "etDay", "nightGames"]) {
+for (const fn of ["lineupGameFor", "clubUpcomingGames", "clubWeekGames", "isMakeUp", "etDay", "nightGames"]) {
   const m = src.match(new RegExp("CG\\." + fn + " = function[\\s\\S]*?\\n\\};"));
   if (!m) { A("located CG." + fn, false); process.exit(1); }
   vm.runInContext(m[0], ctx);
@@ -55,7 +55,57 @@ console.log("\n— the night is all its games, not one");
   A("Thursday has one", ctx.CG.nightGames("TOR", "thu").length === 1);
   const up = ctx.CG.clubUpcomingGames("TOR");
   A("all six upcoming games are seen", up.length === 6);
-  A("...capped when asked", ctx.CG.clubUpcomingGames("TOR", 2).length === 2);
+  /* v4.07: there is no cap any more; a week is a week, however many games it holds */
+  A("...and no count cap exists to ask for", ctx.CG.clubUpcomingGames("TOR", 2).length === 6 && !/clubUpcomingGames = function\(club, limit\)/.test(src));
+}
+
+/* v4.07, commissioner 2026-10-14: "They should still have all their normal games, just the rescheduled game tacked on
+   after the fact." The game lineup page took a club's next NINE games for its buttons, so DAL and NYI, each with ten in
+   Week 4 (the Fri Oct 9 game made up Wed Oct 14 at 8:25 PM), had no button for their Fri Oct 16 10:10 PM game. Real
+   ids and times from the database. */
+console.log("\n— a week with a make-up game: every game has its button (v4.07)");
+{
+  const ET = (s) => Date.parse(s + "-04:00");
+  const nowWas = ctx.CG.now, schedWas = ctx.CG.lg;
+  ctx.CG.now = () => ET("2026-10-14T19:44:00");
+  const W4 = [
+    ["d6359d09-9414-4bea-9f67-9a153b01ee49", "DAL", "NYI", "2026-10-14T20:25:00", Date.parse("2026-10-09T21:00:00-04:00")],
+    ["79e725e9-5cbd-44bb-a92e-b7032b1bd7c8", "DAL", "DET", "2026-10-14T21:00:00"], ["a48f8421-7414-44a0-aaeb-e789f62a2b17", "PIT", "DAL", "2026-10-14T21:35:00"],
+    ["ce3fbf7e-ddb7-429a-b0e2-fc9361e12ec5", "SEA", "DAL", "2026-10-14T22:10:00"], ["4f4d5a2c-304c-4da9-b1f3-8a020af4320d", "DAL", "VAN", "2026-10-15T21:00:00"],
+    ["fbe9a7e7-cb21-4de0-aed3-71c17e05972a", "NYI", "DAL", "2026-10-15T21:35:00"], ["77035c24-65e2-4f6d-89f7-57de544b2a09", "BOS", "DAL", "2026-10-15T22:10:00"],
+    ["1bf9e6a2-ff9b-4d88-8886-aeae390cf078", "DAL", "UTA", "2026-10-16T21:00:00"], ["b516833a-2cb3-4416-a71d-04365e5805b5", "DET", "DAL", "2026-10-16T21:35:00"],
+    ["b6651e64-af5a-4795-94bb-4c86a2833432", "DAL", "PIT", "2026-10-16T22:10:00"],
+    /* PIT's own nine-game week, for the club that has no make-up */
+    ["8cac9db2-3a91-467a-bb78-a56716a72c12", "PIT", "NYI", "2026-10-14T21:00:00"], ["p3", "PIT", "UTA", "2026-10-14T22:10:00"],
+    ["p4", "DET", "PIT", "2026-10-15T21:00:00"], ["p5", "BOS", "PIT", "2026-10-15T21:35:00"], ["p6", "PIT", "SEA", "2026-10-15T22:10:00"],
+    ["p7", "VAN", "PIT", "2026-10-16T21:00:00"], ["0ed8e782-5e2d-45dc-bbb8-84c3b1e1a2fb", "NYI", "PIT", "2026-10-16T21:35:00"],
+  ].map(([id, home, away, at, from]) => ({ id, home, away, week: 4, stage: "regular", status: "scheduled", at: ET(at), rescheduledFrom: from || null, night: "x" }));
+  const W5 = [["f4ea37f9-928f-4184-aca0-209b7e2ea117", "DAL", "SEA", "2026-10-21T21:00:00"], ["f764542f-da82-4c82-9958-831b94341c89", "PIT", "DAL", "2026-10-23T21:00:00"]]
+    .map(([id, home, away, at]) => ({ id, home, away, week: 5, stage: "regular", status: "scheduled", at: ET(at), night: "x" }));
+  ctx.CG.lg = { schedule: W4.concat(W5), tonight: [] };
+  const dal = ctx.CG.clubWeekGames("DAL", W4[0]);
+  A("DAL's week shows all ten games, the make-up on top of the normal nine", dal.length === 10, dal.length + " games");
+  A("...including Fri Oct 16 10:10 PM, the game the nine-cap dropped", dal.some((g) => g.id === "b6651e64-af5a-4795-94bb-4c86a2833432"));
+  A("...and nothing from the next week", !dal.some((g) => g.week === 5));
+  A("...in time order, the make-up first", dal[0].id === "d6359d09-9414-4bea-9f67-9a153b01ee49" && dal[9].id === "b6651e64-af5a-4795-94bb-4c86a2833432");
+  A("PIT (no make-up) still shows its own week, nothing more", ctx.CG.clubWeekGames("PIT", null).every((g) => g.week === 4 && (g.home === "PIT" || g.away === "PIT")));
+  const nextWk = ctx.CG.clubWeekGames("DAL", W5[0]);
+  A("opened on a next-week game, that week comes too", nextWk.length === 12 && nextWk.some((g) => g.id === W5[0].id));
+  ctx.CG.now = () => ET("2026-10-14T23:30:00");
+  const late = ctx.CG.clubWeekGames("DAL", W4[0]);
+  A("the open game keeps its button even after it leaves the upcoming window", late.some((g) => g.id === W4[0].id));
+  ctx.CG.now = nowWas; ctx.CG.lg = schedWas;
+  A("the lineup page's buttons come from the week, not a count",
+    /var upcoming = CG\.clubWeekGames\(club, game\);/.test(src) && !/clubUpcomingGames\(club, \d+\)/.test(src));
+  A("...and a moved game's button says where it came from", /\(mu \? ", make-up of " : ", moved from "\)\+CG\.fmtDay\(g\.rescheduledFrom\)/.test(src));
+  A("...with a make-up marked on the button itself, not only in a tooltip phones never show", /\(mu\?' · make-up':''\)/.test(src));
+  /* review, v4.07: only a game moved LATER into another game-week is a make-up */
+  const mv = (from, at) => ({ rescheduledFrom: ET(from), at: ET(at) });
+  A("the Oct 9 game played Oct 14 is a make-up", ctx.CG.isMakeUp(W4[0]) === true);
+  A("a game pulled EARLIER into this week is moved, not a make-up", ctx.CG.isMakeUp(mv("2026-10-21T21:00:00", "2026-10-15T20:25:00")) === false);
+  A("a game nudged within its night is moved, not a make-up", ctx.CG.isMakeUp(mv("2026-10-21T21:00:00", "2026-10-21T21:15:00")) === false);
+  A("a game moved later but inside its own week is moved, not a make-up", ctx.CG.isMakeUp(mv("2026-10-14T21:00:00", "2026-10-16T22:45:00")) === false);
+  A("a game nobody moved is neither", ctx.CG.isMakeUp(W4[1]) === false && ctx.CG.isMakeUp(null) === false);
 }
 
 console.log("\n— the old single-game-per-night resolution is gone from the write paths");

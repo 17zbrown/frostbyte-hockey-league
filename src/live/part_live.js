@@ -480,7 +480,9 @@ CG.PROFILE_PUBLIC_COLS = "id,gamertag,display_name,avatar_url,role,created_at,tw
    clubs (or in the league office) and the night's first game is within 30 minutes. A "*" select on
    games now fails outright, which is the point — the code cannot leak by accident again. */
 CG.GAME_PUBLIC_COLS = "id,season_id,week,home_team_id,away_team_id,scheduled_at,home_score,away_score,went_ot,status,"+
-  "twitch_url,created_at,ea_match_id,home_ppg,home_ppo,away_ppg,away_ppo,stage,forfeit_team_id,voided,limit_week,limits_exempt";
+  "twitch_url,created_at,ea_match_id,home_ppg,home_ppo,away_ppg,away_ppo,stage,forfeit_team_id,voided,limit_week,limits_exempt,"+
+  /* v4.07: the original puck drop of a game the office moved (sql/2026-10-14-rescheduled-games-v407.sql) */
+  "rescheduled_from";
 
 /* Last known current-season id, remembered across visits so the first query of a cold boot can
    already be scoped. Wrong-but-stale is safe: the season row is re-read in the same batch and the
@@ -911,6 +913,7 @@ CG.buildLiveLeague = async function(opts){
     return { id:g.id, week:g.week||1, stage:g.stage||"regular",
       limitWeek: g.limit_week != null ? g.limit_week : null,   /* v3.93: the week it counts toward for player limits, when the office ruled it differs */
       limitsExempt: !!g.limits_exempt,                          /* v3.93: the office ruled it counts toward no week's limits (Rule 3.3) */
+      rescheduledFrom: g.rescheduled_from ? Date.parse(g.rescheduled_from) : null,   /* v4.07: a make-up: where it was first scheduled */
       home:id2code[g.home_team_id], away:id2code[g.away_team_id],
       at:Date.parse(g.scheduled_at), feature:false,
       code:cc.game_code||null, server:cc.server||null, status:g.status,
@@ -12083,13 +12086,17 @@ CG.shapeMismatch = function(){
   var reg = lg.schedule.filter(function(g){ return g.stage !== "preseason" && g.stage !== "playoff"; });
   if (!reg.length) return null;
   var shape = CG.seasonShape(s);
+  /* v4.07: a game the office moved (a make-up, Rule 3.3) keeps counting toward each club's total, but its new night and
+     puck-drop time are not the season's shape. The Oct 9 game made up Wed Oct 14 at 8:25 PM read as "puck-drop times
+     differ" and sent the office toward clearing a season already 107 finals in. */
+  var onShape = reg.filter(function(g){ return !g.rescheduledFrom; });
 
   var nightSet = {}, perClub = {};
   reg.forEach(function(g){
-    nightSet[CG.etYMD(g.at)] = 1;
     perClub[g.home] = (perClub[g.home] || 0) + 1;
     perClub[g.away] = (perClub[g.away] || 0) + 1;
   });
+  onShape.forEach(function(g){ nightSet[CG.etYMD(g.at)] = 1; });
   var nights = Object.keys(nightSet).sort();
   var weekdays = {};
   nights.forEach(function(d){
@@ -12109,7 +12116,7 @@ CG.shapeMismatch = function(){
     out.push("The season is set to play " + wantDays.join("/") + " but the schedule has no " +
              missing.join(" or ") + " games — it runs " + haveDays.join("/") + ".");
   var slotSet = {};
-  reg.forEach(function(g){ slotSet[new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(g.at))] = 1; });
+  onShape.forEach(function(g){ slotSet[new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(g.at))] = 1; });
   var wantSlots = shape.slots.slice().sort(), haveSlots = Object.keys(slotSet).sort();
   if (wantSlots.join(",") !== haveSlots.join(","))
     out.push("Puck-drop times differ: the season says " + wantSlots.join(" / ") + ", the schedule uses " + haveSlots.join(" / ") + ".");
@@ -12204,7 +12211,13 @@ CG.admScheduleLive = function(){
       '<span class="chip chip-warn">'+mism.length+' difference'+(mism.length===1?'':'s')+'</span></div><div class="card-b">'+
       '<ul style="margin:0 0 10px;padding-left:20px;display:grid;gap:6px">'+
         mism.map(function(t){ return '<li>'+esc(t)+'</li>'; }).join("")+'</ul>'+
-      '<p class="caption">The rulebook and the home page describe the season shape above, so while these differ the site contradicts itself. Set the shape you want in <b>Season shape</b>, then clear and regenerate the season to rebuild the fixtures from it. Nothing has been played yet, so regenerating costs no results.</p></div></div>';
+      /* v4.07: "nothing has been played yet" was printed whatever the truth; say what clearing would cost */
+      (function(){
+        var finals = (CG.lg.schedule||[]).filter(function(g){ return g.status === "final"; }).length;
+        return finals
+          ? '<p class="caption">The rulebook and the home page describe the season shape above, so while these differ the site contradicts itself. <b>'+finals+' game'+(finals===1?' is':'s are')+' already final: do not clear the season to fix this</b>, because regenerating deletes those results. Change the shape for the next season. A game moved with Reschedule is not checked for its night or puck-drop time here, but it still counts toward each club\u2019s total.</p></div></div>'
+          : '<p class="caption">The rulebook and the home page describe the season shape above, so while these differ the site contradicts itself. Set the shape you want in <b>Season shape</b>, then clear and regenerate the season to rebuild the fixtures from it. Nothing has been played yet, so regenerating costs no results.</p></div></div>';
+      })();
   if (issues.length)
     h += '<div class="card" style="margin-bottom:16px;border-color:var(--red)"><div class="card-h"><h3>The schedule disagrees with the season dates</h3>'+
       '<span class="chip chip-warn">'+issues.length+' to resolve</span></div><div class="card-b">'+
@@ -12415,15 +12428,19 @@ CG.AFTER._admScheduleLive = function(){
     var val = part("year")+"-"+part("month")+"-"+part("day")+"T"+part("hour")+":"+part("minute");
     CG.modal("Reschedule — "+esc(g.away)+" @ "+esc(g.home),
       '<label class="fld"><span>New date &amp; time (Eastern)</span><input type="datetime-local" id="rsWhen" value="'+val+'"></label>'+
-      '<p class="caption">Both clubs see the new time immediately; codes and server picks carry over.</p>',
+      '<p class="caption">Both clubs see the new time immediately; codes and server picks carry over. A game moved into another week counts toward the week it is played in, on top of that week’s games (Rule 3.3).</p>',
       '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="rsGo">Reschedule</button>');
     document.getElementById("rsGo").addEventListener("click", function(){
       var v=document.getElementById("rsWhen").value;
       if(!v){ CG.toast("Pick the new date and time","err"); return; }
       var iso=CG.etISO(v.slice(0,10), v.slice(11,16));
-      CG.sb.from("games").update({ scheduled_at: iso }).eq("id",id).select("id").then(function(r){
+      /* v4.07: the same database door as the Operations desk. A bare update of scheduled_at kept a game moved across
+         weeks in its OLD week (every weekly count read it wrong), left no audit or transaction, and never marked it as
+         a make-up. ops_reschedule_game does all of that, and refuses a final game. */
+      var go=this; go.disabled=true;
+      CG.sb.rpc("ops_reschedule_game", { p_game: id, p_at: iso }).then(function(r){
+        go.disabled=false;
         if(r.error){ CG.toast("Couldn’t reschedule: "+r.error.message,"err"); return; }
-        if(!(r.data||[]).length){ CG.toast("Couldn’t reschedule — nothing was written. Sign out and back in, then retry.","err"); return; }
         if (CG.closeOverlay) CG.closeOverlay();
         CG.toast("Game moved to "+CG.fmtFull(Date.parse(iso)),"ok"); CG.reloadLeague();
       });

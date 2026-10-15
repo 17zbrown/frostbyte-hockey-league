@@ -358,7 +358,7 @@ CG.hubDashboard = function(){
           return '<div class="titem"><span class="t-dot '+(mySlot?"grn":row?"":row===null?"red":"")+'"></span><span style="flex:1"><b>'+esc(CG.fmtDay(g.at))+' · '+CG.fmtTime(g.at)+'</b> '+esc(opp)+'</span>'+
             '<span class="chip'+(mySlot?" chip-win":row?"":row===null?" chip-loss":"")+'" style="font-size:9px;padding:1px 7px">'+(mySlot?"you at "+mySlot:row?"dressed without you":row===null?"not set yet":"…")+'</span></div>';
         }).join("");
-        cards.push('<div class="card" style="grid-column:1/-1"><div class="card-h"><h3>This week’s lineups</h3><a class="sec-link" href="#/hub/lineups">All six</a></div>'+
+        cards.push('<div class="card" style="grid-column:1/-1"><div class="card-h"><h3>This week’s lineups</h3><a class="sec-link" href="#/hub/lineups">All lineups</a></div>'+
           '<div class="tasklist">'+rowsW+'</div>'+
           '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+setN+' of '+wk.length+' game'+(wk.length===1?"":"s")+' set so far'+(inN?' · you’re dressed for '+inN:'')+'. Your management can change a lineup until 30 minutes before puck drop (Rule 5.3).</span></div></div>');
       }
@@ -759,12 +759,38 @@ CG.lineupGameFor = function(me){
         .sort(function(a,b){ return a.at-b.at; })[0];
 };
 /* Every upcoming (non-final) game for a club, soonest first — the unit the lineup surfaces now
-   iterate. A night has up to three; each locks on its own puck drop. */
-CG.clubUpcomingGames = function(club, limit){
-  var out = (CG.lg.schedule||[]).filter(function(g){
+   iterate. A night has up to three; each locks on its own puck drop.
+   v4.07: no count cap. It took a `limit`, and the game lineup page asked for 9 ("a week is 3 nights x 3 games"), so a
+   week holding a make-up game (Rule 3.3: played on top of the club's normal week) pushed the club's last game off the
+   page: the Stars and Islanders lost their Fri Oct 16 10:10 PM buttons to the Oct 9 game made up on Oct 14. A club's
+   week is a WEEK (CG.clubWeekGames), never "the next N". */
+CG.clubUpcomingGames = function(club){
+  return (CG.lg.schedule||[]).filter(function(g){
     return (g.home===club||g.away===club) && g.status!=="final" && g.at>CG.now()-3*3600000;
   }).sort(function(a,b){ return a.at-b.at; });
-  return limit ? out.slice(0, limit) : out;
+};
+/* v4.07: a make-up is a game the office moved LATER into a different game-week (Mon-Sun, Eastern). A game pulled earlier,
+   or moved within its own week, was moved but is not a make-up. */
+CG.isMakeUp = function(g){
+  if (!g || !g.rescheduledFrom || !(g.rescheduledFrom < g.at)) return false;
+  var monday = function(ts){
+    var ymd = CG.etDay(ts), d = new Date(ymd + "T12:00:00Z");
+    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  };
+  return monday(g.rescheduledFrom) !== monday(g.at);
+};
+/* v4.07: a club's upcoming games in the game-week of its next game, however many that week holds (a make-up adds one),
+   plus the week of `game` when the page is open on a game in another week. Keyed by stage and week, like CG.WEEK8. */
+CG.clubWeekGames = function(club, game){
+  var up = CG.clubUpcomingGames(club);
+  var key = function(g){ return (g.stage||"regular")+":"+g.week; };
+  var want = {};
+  if (up.length) want[key(up[0])] = 1;
+  if (game) want[key(game)] = 1;
+  var out = up.filter(function(g){ return want[key(g)]; });
+  /* the open game always has its own button, even once it has left the upcoming window */
+  if (game && !out.some(function(g){ return g.id===game.id; })) out.push(game);
+  return out.sort(function(a,b){ return a.at-b.at; });
 };
 /* True while every game still ahead of this club is a pre-season game — the window in which
    Rule 5.2's weekly appearance caps do not apply (v2.28). */
@@ -897,7 +923,8 @@ CG.hubLineup = function(qs){
      their own puck drop, so a manager must be able to jump straight to game 2 or 3 — the old
      per-night switcher only ever reached the first game of a night. Each chip shows its slot time
      and whether a lineup is in, submitted, or locked. */
-  var upcoming = CG.clubUpcomingGames(club, 9);
+  /* v4.07: the whole week, by week, never "the next 9": a make-up game is played on top of the normal week (Rule 3.3) */
+  var upcoming = CG.clubWeekGames(club, game);
   var gameSwitch = upcoming.length > 1
     ? '<span style="display:inline-flex;gap:6px;margin-left:12px;vertical-align:middle;flex-wrap:wrap">'+
       upcoming.map(function(g){
@@ -905,9 +932,13 @@ CG.hubLineup = function(qs){
         var gLock = CG.now() >= g.at - 30*60000;
         var gIn = !!((lg._lineups||{})[club+":"+g.id]);
         var mark = gIn ? " ✓" : gLock ? " ·" : "";
+        /* v4.07: a moved game says where it came from. Only a game moved LATER into another game-week is a make-up (the
+           reason a week holds an extra game, Rule 3.3), and that one is marked on the button itself, so phones see it too. */
+        var mu = CG.isMakeUp(g);
+        var made = g.rescheduledFrom ? (mu ? ", make-up of " : ", moved from ")+CG.fmtDay(g.rescheduledFrom)+" "+CG.fmtTime(g.rescheduledFrom) : "";
         return '<a class="chip '+(on?"chip-chrome":"")+(gLock&&!gIn?" chip-warn":"")+'" href="#/hub/lineup?game='+g.id+'" aria-current="'+on+'" '+
-          'title="'+esc(CG.fmtFull(g.at))+(gIn?" — submitted":gLock?" — locked":"")+'" style="cursor:pointer">'+
-          (CG.NIGHT_LABEL[CG.gameNight(g)]||CG.gameNight(g))+' '+CG.fmtTime(g.at)+mark+'</a>';
+          'title="'+esc(CG.fmtFull(g.at)+made)+(gIn?" — submitted":gLock?" — locked":"")+'" style="cursor:pointer">'+
+          (CG.NIGHT_LABEL[CG.gameNight(g)]||CG.gameNight(g))+' '+CG.fmtTime(g.at)+(mu?' · make-up':'')+mark+'</a>';
       }).join("")+'</span>'
     : "";
   var nightSwitch = gameSwitch;
