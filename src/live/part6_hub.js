@@ -371,12 +371,12 @@ CG.hubDashboard = function(){
         '<p class="caption" style="margin-top:10px">'+(myMin < CG.playoffMinGp() ? 'You joined after opening night, so your number is prorated from '+CG.playoffMinGp()+' to the games your club had left (Rule 8.3). ' : '')+(myGp>=myMin?'You have the '+myMin+' regular-season games the playoffs need (Rule 8.3).':'You need '+myMin+' regular-season games to dress in the playoffs (Rule 8.3) — '+(myMin-myGp)+' more, with '+myLeft+' club game'+(myLeft===1?'':'s')+' left. Mark yourself available and talk to your GM.')+'</p></div></div>');
     }
     if (lg.pstats[me.id].gp){
-      var last3 = lg.glog[me.id].slice(-3).reverse();
+      /* v4.11: by GAME; a game played in both roles shows both lines on its one row */
+      var last3 = CG.glogGames(lg.glog[me.id]).slice(-3).reverse();
       cards.push('<div class="card"><div class="card-h"><h3>My last three games</h3><a class="sec-link" href="'+CG.playerRoute(me)+'">Full log</a></div>'+
         last3.map(function(en){
-          var b = en.line;
           return '<div class="notif" style="cursor:pointer" data-go="#/matchup/'+en.game+'"><span class="nf-ic">'+CG.crest(en.opp,20)+'</span>'+
-            '<span><b>vs '+esc(CG.TEAM[en.opp].name)+'</b><p>'+(b.goalie? b.sv+" saves, "+b.ga+" GA" : b.g+"G "+b.a+"A · "+b.shots+" shots")+'</p></span>'+
+            '<span><b>vs '+esc(CG.TEAM[en.opp].name)+'</b><p>'+en.lines.map(function(b){ return b.goalie? b.sv+" saves, "+b.ga+" GA" : b.g+"G "+b.a+"A · "+b.shots+" shots"; }).join(" · ")+'</p></span>'+
             '<span class="nf-t">Wk '+en.week+'</span></div>';
         }).join("")+'</div>');
     }

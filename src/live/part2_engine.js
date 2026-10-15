@@ -506,14 +506,49 @@ CG.DEFAULT_WEIGHTS = {
    ONE season-line shape for everyone. It used to be chosen by the REGISTERED position, so a registered goalie's skating
    games added into keys he did not have (NaN, shown blank: Bowman's 1G 12A in 6 games) and a registered skater's games in
    goal did the same to his goalie keys (Easy pickins' 8 starts). A line is counted by what the player PLAYED that game.
-     gp  = every appearance at any position (Rules 2.4, 8.3, 9.3 count those: eligibility, floors, minimum service)
-     sgp = games skated, gs = games in goal; gp === sgp + gs (one line per player per game, Rule 6.3)
+     gp  = every GAME played at any position, counted once (Rules 2.4, 8.3, 9.3 count those: eligibility, floors,
+           minimum service; the database's regular_gp counts the same distinct games)
+     sgp = games with a skating line, gs = games with a goalie line.
+   v4.11: a player who skated in one sitting of a restarted game and played goal in another (Rule 4.3) has BOTH lines
+   for that one game, so it is one game played, one game skated and one game in goal: gp <= sgp + gs.
    Skater totals come only from skating lines and goalie totals only from goalie lines. */
 CG.blankStatLine = function(){
   return { gp:0, sgp:0, gs:0,
     g:0,a:0,p:0,pm:0,shots:0,hits:0,blk:0,gv:0,tk:0,pim:0,fow:0,fot:0,gwg:0,
     w:0,l:0,otl:0,sa:0,sv:0,ga:0,so:0,qs:0,
     weekly:{}, weeklyG:{} };
+};
+/* v4.11: a result's box holds ONE entry per player per game (box[club][pid]), so anything that counts games counts
+   entries. A player with lines in both roles in one game has one entry: the goalie line, carrying the skating line as
+   .skate. CG.boxLines lists every line of an entry, so statistics are summed per line and games counted per entry.
+   CG.boxPut files a line into a box side that way, and never lets one line overwrite another. */
+CG.boxLines = function(b){
+  return !b ? [] : (b.skate ? [b, b.skate] : [b]);
+};
+CG.boxPut = function(side, key, line, spareKey){
+  var have = side[key];
+  if (!have) side[key] = line;
+  else if (!!have.goalie !== !!line.goalie && !(have.goalie ? have.skate : line.skate)){
+    var gl = have.goalie ? have : line;
+    gl.skate = have.goalie ? line : have;
+    side[key] = gl;
+  }
+  else side[spareKey || (key + "~" + Object.keys(side).length)] = line;   /* never overwrite a line */
+  return side[key];
+};
+/* A box entry's star caption: "24 saves", "2G 1A", or both lines of a two-role game ("12 saves and 1G 2A"). */
+CG.boxStarText = function(b){
+  return CG.boxLines(b).map(function(x){ return x.goalie ? (x.sv||0)+" saves"+(x.so?", shutout":"") : (x.g||0)+"G "+(x.a||0)+"A"; }).join(" and ");
+};
+/* A player's game log (lg.glog[pid], one entry per LINE) as one entry per GAME, in order: {game, week, opp, lines}. */
+CG.glogGames = function(log){
+  var out = [], at = {};
+  (log || []).forEach(function(en){
+    if (at[en.game]) { at[en.game].lines.push(en.line); return; }
+    at[en.game] = { game:en.game, week:en.week, opp:en.opp, lines:[en.line] };
+    out.push(at[en.game]);
+  });
+  return out;
 };
 /* Everyone whose season stats count: the rostered players, and the players who played this season but are no longer
    rostered (waived, left the league, removed). Their games are part of the official record (Rule 6.1). */
@@ -549,31 +584,35 @@ CG.aggregate = function(lg, overrides){
       else if (!ff && r.ot){ t.otl++; t.res.push("OT"); }
       else { t.l++; (code===r.home?t.hl++:t.al++); t.res.push("L"); }
       Object.keys(r.box[code]).forEach(function(pid){
-        var b = r.box[code][pid], s = pstats[pid];
-        /* v4.08: the club's totals count EVERY line, including a player no longer rostered or one EA could not link
-           (shots for used to skip them while shots against counted them) */
-        if (b.goalie){ t.gsv += (b.sv||0); t.gsa += (b.sa||0); }
-        else t.sf += (b.shots||0);
-        if (!s) return;
-        if (b.goalie){
-          s.gp++; s.gs++; s.sa+=b.sa; s.sv+=b.sv; s.ga+=b.ga; s.w+=b.w; s.l+=b.l; s.otl+=b.otl; s.so+=b.so; s.qs+=b.qs;
-          s.weeklyG[r.week] = (s.weeklyG[r.week]||0) + b.sv*.09 + b.w*1.2 + b.so*2;
-          glog[pid].push({ game:r.id, week:r.week, opp:opp, line:b });
-        } else {
-          s.gp++; s.sgp++; s.g+=b.g; s.a+=b.a; s.p+=b.g+b.a; s.pm+=b.pm; s.shots+=b.shots; s.hits+=b.hits;
-          s.blk+=b.blk; s.gv+=b.gv; s.tk+=b.tk; s.pim+=b.pim; s.fow+=b.fow; s.fot+=b.fot; s.gwg+=b.gwg;
-          s.weekly[r.week] = (s.weekly[r.week]||0) + b.g*2 + b.a;
-          glog[pid].push({ game:r.id, week:r.week, opp:opp, line:b });
-        }
+        var s = pstats[pid];
+        /* v4.11: the entry is the GAME (gp once), each of its lines adds to its own role (sgp, gs) */
+        if (s) s.gp++;
+        CG.boxLines(r.box[code][pid]).forEach(function(b){
+          /* v4.08: the club's totals count EVERY line, including a player no longer rostered or one EA could not link
+             (shots for used to skip them while shots against counted them) */
+          if (b.goalie){ t.gsv += (b.sv||0); t.gsa += (b.sa||0); }
+          else t.sf += (b.shots||0);
+          if (!s) return;
+          if (b.goalie){
+            s.gs++; s.sa+=b.sa; s.sv+=b.sv; s.ga+=b.ga; s.w+=b.w; s.l+=b.l; s.otl+=b.otl; s.so+=b.so; s.qs+=b.qs;
+            s.weeklyG[r.week] = (s.weeklyG[r.week]||0) + b.sv*.09 + b.w*1.2 + b.so*2;
+            glog[pid].push({ game:r.id, week:r.week, opp:opp, line:b });
+          } else {
+            s.sgp++; s.g+=b.g; s.a+=b.a; s.p+=b.g+b.a; s.pm+=b.pm; s.shots+=b.shots; s.hits+=b.hits;
+            s.blk+=b.blk; s.gv+=b.gv; s.tk+=b.tk; s.pim+=b.pim; s.fow+=b.fow; s.fot+=b.fot; s.gwg+=b.gwg;
+            s.weekly[r.week] = (s.weekly[r.week]||0) + b.g*2 + b.a;
+            glog[pid].push({ game:r.id, week:r.week, opp:opp, line:b });
+          }
+        });
       });
     });
   });
-  /* shots against */
+  /* shots against: every skating line of the opponent, a goalie's skating line included */
   lg.results.forEach(function(r){
     [ [r.home,r.away], [r.away,r.home] ].forEach(function(pair){
       var code=pair[0], opp=pair[1];
       teams[code].sa += Object.keys(r.box[opp]).reduce(function(s,pid){
-        return s + (r.box[opp][pid].shots||0); },0);
+        return s + CG.boxLines(r.box[opp][pid]).reduce(function(x, b){ return x + (b.goalie ? 0 : (b.shots||0)); }, 0); },0);
     });
   });
   /* streaks + last5 */
@@ -720,7 +759,7 @@ CG.splitStages = function(results){
      lg.ratings  every stage (the overall sees every game played, Rule 6.1)
      lg.pstats, lg.glog, lg.teams and the honors: the REGULAR season alone. Regular-season totals, the statistical
      titles (Rule 9.2) and the playoff floor (Rule 8.3) never see a playoff or pre-season game.
-   Each line has the one shape of CG.blankStatLine (gp = sgp + gs, every role played, players no longer rostered
+   Each line has the one shape of CG.blankStatLine (gp counts each game once, every role played, players no longer rostered
    included). weeks = { pre, all, reg }: the completed weeks each pass sees; weekly honors are minted from regular weeks
    only, so the playoff pass sees none. */
 CG.aggregateStages = function(lg, st, weeks){

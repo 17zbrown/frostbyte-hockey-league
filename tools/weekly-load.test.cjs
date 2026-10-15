@@ -16,9 +16,12 @@ const cut = (name) => {
   return live.slice(i, j + 3);
 };
 const line = (name) => { const i = live.indexOf("CG." + name + " = function"); return live.slice(i, live.indexOf("\n", i)) + "\n"; };
+/* v4.11: forfeitNoIce reads every line of a box entry through the engine's CG.boxLines */
+const eng = fs.readFileSync(path.join(__dirname, "..", "src/live/part2_engine.js"), "utf8");
+const engCut = (name) => { const i = eng.indexOf("CG." + name + " = function"); return eng.slice(i, eng.indexOf("\n};", i) + 3) + "\n"; };
 /* the real key names, as public.format_rules publishes them */
 const CG = { FORMAT_RULES: { basic: { cap_skater: 6, cap_goalie: 6, cap_camp: 3, series_cap: 4 } }, seasonFormat: () => "basic" };
-new Function("CG", "esc", "CG_ic", line("limitWeekOf") + cut("weeklyCap") + cut("seriesCap") + cut("boxSides") + cut("forfeitNoIce") + cut("WEEK_VERDICT") + cut("weekLedger") + cut("weekGamesFor") + cut("gameCapFor") + cut("weekUsedFor") + cut("weekLoad") + cut("weekLoadChip"))(CG,
+new Function("CG", "esc", "CG_ic", engCut("boxLines") + line("limitWeekOf") + cut("weeklyCap") + cut("seriesCap") + cut("boxSides") + cut("forfeitNoIce") + cut("WEEK_VERDICT") + cut("weekLedger") + cut("weekGamesFor") + cut("gameCapFor") + cut("weekUsedFor") + cut("weekLoad") + cut("weekLoadChip"))(CG,
   (s) => String(s), () => "");
 const played = (id, home, away, pids) => {
   const box = {}; box[home] = {}; box[away] = {};

@@ -28,7 +28,7 @@ CG.ROUTES.awards = function(param, qs){
           return '<div class="starcard" data-go="'+CG.playerRoute(p)+'" role="link" tabindex="0"><span class="st-k">'+["1st star","2nd star","3rd star"][i]+'</span>'+
             '<div style="display:flex;gap:10px;align-items:center;margin-top:6px">'+CG.crest(p.team,30)+
             '<div><b style="font-family:var(--f-disp)">'+esc(p.tag)+'</b>'+
-            '<span class="caption" style="display:block">'+(b.goalie? (b.sv||0)+" saves"+(b.so?", shutout":"") : (b.g||0)+"G "+(b.a||0)+"A")+'</span></div></div></div>';
+            '<span class="caption" style="display:block">'+CG.boxStarText(b)+'</span></div></div></div>';
         }).join("")+'</div><p class="caption" style="margin-top:14px">Picked automatically from the night’s box scores.</p></div></div>';
     }).join("") : '<div class="card"><div class="empty" style="padding:60px 20px"><div class="e-art">'+CG.ic("trophy",22)+'</div><b>No Three Stars yet</b><p>Stars are named automatically after every completed game night.</p></div></div>';
   }
@@ -625,9 +625,13 @@ CG.ROUTES.matchup = function(id){
       : 'The box score has not been imported yet. It lands automatically within a few minutes of the final, from the club private lobby it was played in (Rule 6.2); if it never arrives, the statistics staff can attach it by hand.';
     [g.away, g.home].forEach(function(code){
       var box = res.box[code];
-      var sk = Object.keys(box).filter(function(pid){ return !box[pid].goalie; }).map(function(pid){ return { p: boxPlayer(pid, code, box[pid]), b: box[pid], pid: pid }; })
-        .sort(function(a,b){ return (b.b.g+b.b.a)-(a.b.g+a.b.a); });
-      var gl = Object.keys(box).filter(function(pid){ return box[pid].goalie; }).map(function(pid){ return { p: boxPlayer(pid, code, box[pid]), b: box[pid], pid: pid }; })[0];
+      /* v4.11: every line of every entry. A player who skated in one sitting of a restarted game and played goal in another
+         is in both lists, and a game with more than one goaltender (a drop, a restart) lists each of them. */
+      var sk = [], gls = [];
+      Object.keys(box).forEach(function(pid){
+        CG.boxLines(box[pid]).forEach(function(b){ (b.goalie ? gls : sk).push({ p: boxPlayer(pid, code, b), b: b, pid: pid }); });
+      });
+      sk.sort(function(a,b){ return (b.b.g+b.b.a)-(a.b.g+a.b.a); });
       body += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3><span style="display:inline-flex;align-items:center;gap:9px">'+CG.crest(code,22)+esc(CG.TEAM[code].name)+' — '+res.score[code]+'</span></h3></div>'+
         '<div class="tblwrap"><table class="tbl keepcols"><thead><tr><th class="tleft">Skater</th><th>G</th><th>A</th><th>P</th><th>S</th><th>HIT</th><th>BLK</th><th>TK</th><th>GV</th><th>PIM</th><th>+/-</th><th>TOI</th></tr></thead><tbody>'+
         sk.map(function(row){ var b=row.b;
@@ -636,9 +640,9 @@ CG.ROUTES.matchup = function(id){
           '<td class="'+(b.hits?"":"z")+'">'+b.hits+'</td><td class="'+(b.blk?"":"z")+'">'+b.blk+'</td><td class="'+(b.tk?"":"z")+'">'+(b.tk||0)+'</td><td class="'+(b.gv?"":"z")+'">'+(b.gv||0)+'</td>'+
           '<td class="'+(b.pim?"":"z")+'">'+b.pim+'</td><td>'+(b.pm>0?"+":"")+b.pm+'</td><td class="mono" style="font-size:11px">'+(b.toi?CG.fmtToi(b.toi):"—")+'</td></tr>';
         }).join("")+
-        (gl?'<tr><td class="tleft" style="font-family:var(--f-mono);font-size:11px;color:var(--steel)">G: '+esc(gl.p.tag)+capFlag(gl.pid, true)+'</td><td colspan="11" class="tleft" style="font-family:var(--f-mono);font-size:11px;color:var(--steel)">'+gl.b.sv+'/'+gl.b.sa+' saves'+(gl.b.sa?" ("+(gl.b.sv/gl.b.sa).toFixed(3).replace(/^0/,"")+")":"")+' · '+gl.b.ga+' GA'+(gl.b.so?" · SHUTOUT":"")+((gl.b.brkShots||gl.b.pokes)?' · '+(gl.b.brkSv||0)+'/'+(gl.b.brkShots||0)+' brk · '+(gl.b.pokes||0)+' poke':"")+(gl.b.toi?' · '+CG.fmtToi(gl.b.toi):"")+'</td></tr>':"")+
+        gls.map(function(gl){ return '<tr><td class="tleft" style="font-family:var(--f-mono);font-size:11px;color:var(--steel)">G: '+esc(gl.p.tag)+capFlag(gl.pid, true)+'</td><td colspan="11" class="tleft" style="font-family:var(--f-mono);font-size:11px;color:var(--steel)">'+gl.b.sv+'/'+gl.b.sa+' saves'+(gl.b.sa?" ("+(gl.b.sv/gl.b.sa).toFixed(3).replace(/^0/,"")+")":"")+' · '+gl.b.ga+' GA'+(gl.b.so?" · SHUTOUT":"")+((gl.b.brkShots||gl.b.pokes)?' · '+(gl.b.brkSv||0)+'/'+(gl.b.brkShots||0)+' brk · '+(gl.b.pokes||0)+' poke':"")+(gl.b.toi?' · '+CG.fmtToi(gl.b.toi):"")+'</td></tr>'; }).join("")+
         '</tbody></table></div>'+
-        (!sk.length && !gl ? '<div class="card-b" style="border-top:1px solid var(--line-soft)"><span class="caption">'+emptyNote+'</span></div>' : "")+
+        (!sk.length && !gls.length ? '<div class="card-b" style="border-top:1px solid var(--line-soft)"><span class="caption">'+emptyNote+'</span></div>' : "")+
         '</div>';
     });
     body += '</div><div class="stack">'+
@@ -649,7 +653,7 @@ CG.ROUTES.matchup = function(id){
         var p = boxPlayer(st.pid, st.team, b);
         return '<div class="starcard"'+(p.id?' data-go="'+CG.playerRoute(p)+'" role="link" tabindex="0"':'')+'><span class="st-k">'+["1st star","2nd star","3rd star"][i]+'</span>'+
           '<div style="display:flex;gap:10px;align-items:center;margin-top:4px">'+CG.crest(p.team,28)+'<div><b style="font-family:var(--f-disp)">'+esc(p.tag)+'</b>'+
-          '<span class="caption" style="display:block">'+(b.goalie? b.sv+" saves" : b.g+"G "+b.a+"A")+'</span></div></div></div>';
+          '<span class="caption" style="display:block">'+CG.boxStarText(b)+'</span></div></div></div>';
       }).join("")+'</div>'+(starsBlurb?'<p class="caption" style="margin-top:12px">'+esc(starsBlurb)+'</p>':"")+'</div></div>'
       : '<div class="card"><div class="card-h"><h3>Three Stars</h3></div><div class="card-b"><span class="caption">'+emptyNote+'</span></div></div>')+
     '</div></div>';

@@ -255,7 +255,8 @@ CG.forfeitNoIce = function(g, res){
   if (!sides.length) return true;              /* ruled 1-0, no player statistics at all (Rule 3.2) */
   for (var i = 0; i < sides.length; i++){
     var ids = Object.keys(sides[i]);
-    for (var j = 0; j < ids.length; j++) if ((+sides[i][ids[j]].toi || 0) > 0) return false;
+    for (var j = 0; j < ids.length; j++)   /* v4.11: every line of the entry, a goalie's skating line included */
+      if (CG.boxLines(sides[i][ids[j]]).some(function(b){ return (+b.toi || 0) > 0; })) return false;
   }
   return true;
 };
@@ -985,17 +986,22 @@ CG.buildLiveLeague = async function(opts){
         /* a forfeit decides the goalie's W/L too — in a kept-score FFL the forfeiting club's
            goalie must not be credited a win his club's ruling took away (Rule 4.3) */
         var gWon = forfeit ? (forfeit !== code) : (score[code]>score[opp]);
-        box[code][key] = r.is_goalie ? eaGoalieLine(r, gWon, forfeit ? false : g.ot) : eaSkaterLine(r);
+        /* v4.11: one entry per player per game; a player with a line in each role (skated in one sitting of a
+           restarted game, played goal in another) keeps both, the skating line riding on the goalie line */
+        CG.boxPut(box[code], key, r.is_goalie ? eaGoalieLine(r, gWon, forfeit ? false : g.ot) : eaSkaterLine(r), "ea:"+r.id);
       });
-      /* three stars — top performers across both clubs (linked players only) */
+      /* three stars — top performers across both clubs (linked players only); a two-role game counts both lines */
       var cand = [];
       [g.home, g.away].forEach(function(code){
         Object.keys(box[code]).forEach(function(pid){
           if (String(pid).indexOf("ea:")===0) return; /* unlinked EA player — can't link a star */
-          var b = box[code][pid];
-          var val = b.goalie ? (b.sv*0.1 + (b.so?3:0) + (b.w?2:0) + (b.sa?(b.sv/b.sa):0)*2)
-                             : (b.g*3 + b.a*2 + b.shots*0.15 + Math.max(0,b.pm)*0.3);
-          cand.push({ pid:pid, team:code, val:val, g:b.g||0 });
+          var val = 0, goals = 0;
+          CG.boxLines(box[code][pid]).forEach(function(b){
+            val += b.goalie ? (b.sv*0.1 + (b.so?3:0) + (b.w?2:0) + (b.sa?(b.sv/b.sa):0)*2)
+                            : (b.g*3 + b.a*2 + b.shots*0.15 + Math.max(0,b.pm)*0.3);
+            goals += b.goalie ? 0 : (b.g||0);
+          });
+          cand.push({ pid:pid, team:code, val:val, g:goals });
         });
       });
       var stars = cand.sort(function(a,b){ return b.val-a.val || b.g-a.g; }).slice(0,3).map(function(x){ return { pid:x.pid, team:x.team }; });
@@ -1085,12 +1091,16 @@ CG.buildLiveLeague = async function(opts){
      returning player rather than inventing a number. */
   var careerRows = (q[CG.BOOT_CAREER] && !q[CG.BOOT_CAREER].error && q[CG.BOOT_CAREER].data) || null;
   if (careerRows) careerRows.forEach(function(r){ if (r.profile_id) careerGp[r.profile_id] = +r.gp || 0; });
+  /* v4.11: games, not lines: a game a player played in both roles has two lines and counts once */
+  var gpSeen = {};
   gameStatsRows.forEach(function(r){
     if (!r.profile_id) return;
-    if (!careerRows) careerGp[r.profile_id]=(careerGp[r.profile_id]||0)+1;
+    var first = !gpSeen[r.profile_id+":"+r.game_id]; gpSeen[r.profile_id+":"+r.game_id] = 1;
+    if (!careerRows && first) careerGp[r.profile_id]=(careerGp[r.profile_id]||0)+1;
     if (preFinalIds[r.game_id]){
       var pgo=preGp[r.profile_id]=preGp[r.profile_id]||{gp:0,g:0,a:0};
-      pgo.gp++; pgo.g+=(+r.goals||0); pgo.a+=(+r.assists||0);
+      if (first) pgo.gp++;
+      pgo.g+=(+r.goals||0); pgo.a+=(+r.assists||0);
     }
   });
   var draftedEver={};
@@ -14442,10 +14452,11 @@ CG.tradeValue = function(pid){
   var st = CG.tradeStats(pid);
   var ovr = Math.max(0, (p.overall||70) - 60) * 10, prod = 0;
   if (st.gp >= 1){
-    /* v4.08: production from each role he played, weighted by its games */
+    /* v4.08: production from each role he played, weighted by its games. v4.11: over the role games (sgp + gs), which
+       count a game played in both roles twice where gp counts it once, so the weights still sum to one. */
     var gProd = st.gs ? Math.max(0, ((st.svp||0) - 0.880) * 2000) + (st.w||0) * 3 : 0;
     var sProd = st.sgp ? st.ppg * 40 : 0;
-    prod = (sProd * (st.sgp||0) + gProd * (st.gs||0)) / st.gp;
+    prod = (sProd * (st.sgp||0) + gProd * (st.gs||0)) / Math.max(1, (st.sgp||0) + (st.gs||0));
     prod = Math.round(prod * Math.min(1, st.gp / 5));
   }
   var cap = -Math.round(((p.salary||0)/1e6) * 8);

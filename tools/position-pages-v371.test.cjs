@@ -12,7 +12,9 @@ A("the ratings note no longer offers an override", !/A commissioner CAN override
 const grab = (re, what) => { const m = pub.match(re); if (!m) { console.log("FAIL located " + what); process.exit(1); } return m[0]; };
 const src = [/CG\.POS_VIEW_GROUPS = [^\n]+/, /CG\.posViewGroup = function\(b\)\{[\s\S]*?\n\};/, /CG\.posGroupLines = function\(pid\)\{[\s\S]*?\n\};/,
   /CG\.profileStatCells = function\(s, goalie\)\{[\s\S]*?\n\};/, /CG\.statCellsHtml = function\(cells\)\{[\s\S]*?\n\};/, /CG\.centerWingLine = function\(lines\)\{[\s\S]*?\n\};/]
-  .map((re, i) => grab(re, "piece " + i)).join("\n");
+  .map((re, i) => grab(re, "piece " + i)).join("\n")
+  /* v4.11: posGroupLines reads every line of a box entry through the engine's CG.boxLines */
+  + "\n" + R("src/live/part2_engine.js").match(/CG\.boxLines = function[\s\S]*?\n\};/)[0];
 const sk = (pos, g, a, shots) => ({ goalie:false, pos, g, a, pm:0, shots, hits:1, blk:0, tk:0, pim:0, gwg:0 });
 const ctx = { CG: { lg: { results: [
   { home:"DAL", away:"BOS", box:{ DAL:{ p1: sk("C", 2, 1, 4) }, BOS:{} } },

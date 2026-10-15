@@ -26,7 +26,7 @@ ctx.CG = {
 ctx.esc = (s) => String(s);
 vm.createContext(ctx);
 ctx.CG.playerById = (lg, id) => lg.players.find((p) => p.id === id);
-for (const f of ["blankStatLine", "statPlayers", "aggregate", "skaterLeaders", "goalieLeaders", "roleLine", "lineRoles", "offRoleTag"]) vm.runInContext(grab(eng, f), ctx);
+for (const f of ["boxLines", "boxPut", "glogGames", "blankStatLine", "statPlayers", "aggregate", "skaterLeaders", "goalieLeaders", "roleLine", "lineRoles", "offRoleTag"]) vm.runInContext(grab(eng, f), ctx);
 for (const f of ["seasonLineText", "profileSeasonHtml", "gameLogTables", "profileStatCells", "statCellsHtml", "scoutLine", "leagueDNA", "formerLeagueHtml", "playoffLine", "playoffCardHtml", "playoffLogHtml"]) vm.runInContext(grab(pub, f), ctx);
 vm.runInContext(pub2.slice(pub2.indexOf("CG.TITLE_CARDS = "), pub2.indexOf("CG.loadTitleBoard = function")), ctx);
 const CG = ctx.CG;
@@ -72,12 +72,13 @@ CG.aggregate(lg, {});
 CG.lg = lg;
 const ps = lg.pstats;
 
-console.log("— one shape, every field a number, gp = skating games + games in goal");
+console.log("— one shape, every field a number, gp counts each game once (v4.11: gp <= skating games + games in goal)");
 {
   const keys = Object.keys(CG.blankStatLine()).filter((k) => !/weekly/.test(k));
   const bad = [];
-  CG.statPlayers(lg).forEach((p) => { const s = ps[p.id]; keys.forEach((k) => { if (typeof s[k] !== "number" || Number.isNaN(s[k])) bad.push(p.id + "." + k); }); if (s.gp !== s.sgp + s.gs) bad.push(p.id + ".gp"); });
-  A("no missing or NaN field for anyone, and gp === sgp + gs", bad.length === 0, bad.join(", "));
+  CG.statPlayers(lg).forEach((p) => { const s = ps[p.id]; keys.forEach((k) => { if (typeof s[k] !== "number" || Number.isNaN(s[k])) bad.push(p.id + "." + k); }); if (s.gp > s.sgp + s.gs || s.gp < Math.max(s.sgp, s.gs)) bad.push(p.id + ".gp"); });
+  /* v4.11: a game played in both roles (a restarted game) is one game, one skating game and one game in goal */
+  A("no missing or NaN field for anyone, and max(sgp, gs) <= gp <= sgp + gs", bad.length === 0, bad.join(", "));
   A("a player no longer rostered has a season line too", ps.gone && ps.gone.gs === 3);
 }
 

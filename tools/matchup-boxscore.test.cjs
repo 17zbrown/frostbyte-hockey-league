@@ -23,7 +23,7 @@ console.log("\n— an empty box explains itself");
     /the statistics staff can attach it by hand/.test(pub));
   A("the note is chosen by whether the game was forfeited", /var emptyNote = res\.forfeit\s*\n?\s*\? /.test(pub));
   A("...and shown only when the club has no skaters AND no goalie",
-    /\(!sk\.length && !gl \? '<div class="card-b"[^']*'\+emptyNote/.test(pub));
+    /\(!sk\.length && !gls\.length \? '<div class="card-b"[^']*'\+emptyNote/.test(pub));   /* v4.11: every goalie line (gls) */
   A("Three Stars is replaced by the same explanation rather than rendering empty",
     pub.includes("(res.stars.length") &&
     pub.includes('<h3>Three Stars<\/h3><\/div><div class="card-b"><span class="caption">\'+emptyNote'.replace(/\\\//g, "/")));

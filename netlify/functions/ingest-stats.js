@@ -58,7 +58,7 @@ async function sbSend(method, path, body, prefer) {
   return t ? JSON.parse(t) : null;
 }
 /* PostgREST answers a unique-index collision with 409 and Postgres's own code in the body.
-   game_stats is unique per (game, club, player), so a collision on a box-score POST has exactly
+   game_stats is unique per (game, club, player, role), so a collision on a box-score POST has exactly
    one meaning: another writer filed this game between our DELETE and our POST. */
 const isUniqueViolation = (e) => /"code":\s*"23505"/.test(String((e && e.message) || e));
 
@@ -171,7 +171,7 @@ function normalizeMatch(raw) {
 // fresh lobby in which the clubs replay the game under Rule 4.3 — the whole game, or a single
 // period when the drop came early in the third. League rule (4.3 P2): however many sittings a
 // game takes, they are ONE game record, and everything earned in the abandoned sitting counts in
-// full. So the sittings are summed per player and per club; the win/OT outcome comes from the
+// full. So the sittings are summed per player (per role, v4.11) and per club; the win/OT outcome comes from the
 // FINAL sitting; a shutout is re-derived from the combined line (a goalie clean in the replay but
 // scored on in the first sitting has no shutout); the per-game ratings are time-on-ice-weighted
 // rather than summed. The game-winning goal cannot be attributed without goal timings, so it is
@@ -454,11 +454,16 @@ function mergeSegments(segments) {
   const outClubs = segs[0].clubs.map((c0) => {
     const cid = c0.ea_club_id;
     const parts = segs.map((sg) => sg.clubs.find((c) => c.ea_club_id === cid));
+    /* v4.11 (Rule 6.1): the sittings add up per player AND ROLE. A player who skated in one sitting and played goal in
+       another keeps a skating line and an in-goal line for the game, each summed from the sittings played that way.
+       They used to be summed into ONE line flagged as a goalie's (either sitting in goal made it one), so the skating
+       goals and assists sat on a goalie line that every reader counts as goaltending only, and were never shown. */
     const players = new Map();
     for (const part of parts) {
       for (const p of part.players) {
-        const prev = players.get(p.ea_player_id);
-        if (!prev) { players.set(p.ea_player_id, { ...p, _toiW: [(p.time_on_ice_seconds || 0)], _rat: [[p.offense_rating, p.defense_rating, p.team_play_rating]] }); continue; }
+        const key = `${p.ea_player_id}|${p.is_goalie ? "G" : "S"}`;
+        const prev = players.get(key);
+        if (!prev) { players.set(key, { ...p, _toiW: [(p.time_on_ice_seconds || 0)], _rat: [[p.offense_rating, p.defense_rating, p.team_play_rating]] }); continue; }
         for (const k of ["goals","assists","shots","hits","pim","plus_minus","takeaways","giveaways",
                          "faceoffs_won","faceoffs_lost","time_on_ice_seconds","pp_goals","sh_goals",
                          "blocked_shots","interceptions","passes_completed","passes_attempted",
@@ -466,8 +471,7 @@ function mergeSegments(segments) {
                          "saucer_passes","saves","shots_against","goals_against",
                          "breakaway_shots","breakaway_saves","poke_checks",
                          "diving_saves","shutout_periods","pen_shot_saves","pen_shots_against"]) prev[k] = (prev[k] || 0) + (p[k] || 0);
-        prev.is_goalie = prev.is_goalie || p.is_goalie;
-        // the segment the player skated longest in names the position and the latest gamertag wins
+        // the segment the player skated longest in (in this role) names the position and the latest gamertag wins
         if ((p.time_on_ice_seconds || 0) > Math.max(...prev._toiW)) prev.position = p.position;
         if (p.gamertag) prev.gamertag = p.gamertag;
         prev._toiW.push(p.time_on_ice_seconds || 0);
@@ -1072,22 +1076,28 @@ async function postGameRecaps(game, rows, homeScore, awayScore, summary) {
   await sbSend("DELETE", `notifications?type=eq.stat&link_view=eq.game&link_param=eq.${game.id}`);
   const teams = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,name,code`);
   const nameOf = (id) => (teams.find((t) => t.id === id) || {}).name || "your club";
-  const notes = linked.map((r) => {
+  const lineOf = (r) => {
+    if (!!r.is_goalie || r.position === "G") {
+      const sa = r.shots_against || 0, sv = r.saves || 0;
+      return `${sv} save${sv === 1 ? "" : "s"} on ${sa}` + (r.shutout ? ", a shutout." : ".");
+    }
+    const g = r.goals || 0, a = r.assists || 0, pts = g + a;
+    return pts
+      ? `${g}G ${a}A, ${pts} point${pts === 1 ? "" : "s"}.`
+      : `${r.shots || 0} shot${(r.shots || 0) === 1 ? "" : "s"}, ${r.hits || 0} hit${(r.hits || 0) === 1 ? "" : "s"}.`;
+  };
+  /* v4.11: one notification per player per game. A player who played goal in one sitting and skated in another has two
+     lines; the note carries both, the goaltending first. */
+  const byPlayer = new Map();
+  for (const r of linked) { if (!byPlayer.has(r.profile_id)) byPlayer.set(r.profile_id, []); byPlayer.get(r.profile_id).push(r); }
+  const notes = [...byPlayer.values()].map((rs) => {
+    rs.sort((x, y) => (y.is_goalie ? 1 : 0) - (x.is_goalie ? 1 : 0));
+    const r = rs[0];
     const mine   = r.team_id === game.home_team_id ? homeScore : awayScore;
     const theirs = r.team_id === game.home_team_id ? awayScore : homeScore;
     const oppId  = r.team_id === game.home_team_id ? game.away_team_id : game.home_team_id;
     const won    = mine > theirs;
-    const isG    = !!r.is_goalie || r.position === "G";
-    let line;
-    if (isG) {
-      const sa = r.shots_against || 0, sv = r.saves || 0;
-      line = `${sv} save${sv === 1 ? "" : "s"} on ${sa}` + (r.shutout ? " — shutout." : ".");
-    } else {
-      const g = r.goals || 0, a = r.assists || 0, pts = g + a;
-      line = pts
-        ? `${g}G ${a}A — ${pts} point${pts === 1 ? "" : "s"}.`
-        : `${r.shots || 0} shot${(r.shots || 0) === 1 ? "" : "s"}, ${r.hits || 0} hit${(r.hits || 0) === 1 ? "" : "s"}.`;
-    }
+    const line   = rs.length > 1 ? `In goal: ${lineOf(rs[0])} Skating: ${rs.slice(1).map(lineOf).join(" ")}` : lineOf(r);
     return {
       profile_id: r.profile_id,
       type: "stat",
@@ -1512,11 +1522,16 @@ async function leagueBoxRows(game, clubByTeam, cache = new Map()) {
    match, because his profile carried 'vDarkiee___' as its platform gamertag. When two lines resolve to one member,
    the line on the persona recorded on his profile keeps the credit and the rest are left unlinked (the reviewer
    then raises them as unidentified, so a person decides). With no persona to decide between them, none is credited:
-   a wrong link is worse than none. If the profiles cannot be read, the same rule applies, credited to none. */
+   a wrong link is worse than none. If the profiles cannot be read, the same rule applies, credited to none.
+   v4.11: one line per game IN EACH ROLE. A player who skated in one sitting of a restarted game and played goal in
+   another has two lines on ONE EA persona (mergeSegments), and both are that member's; anything else that resolves two lines to
+   one member is still the case above. */
 async function oneCreditPerGame(rows) {
   const by = new Map();
   for (const r of rows || []) if (r.profile_id) { if (!by.has(r.profile_id)) by.set(r.profile_id, []); by.get(r.profile_id).push(r); }
-  const dup = [...by.entries()].filter(([, rs]) => rs.length > 1);
+  const twoRoles = (rs) => rs.length === 2 && rs[0].ea_player_id != null && String(rs[0].ea_player_id) === String(rs[1].ea_player_id)
+    && !!rs[0].is_goalie !== !!rs[1].is_goalie;
+  const dup = [...by.entries()].filter(([, rs]) => rs.length > 1 && !twoRoles(rs));
   if (!dup.length) return;
   let persona = new Map();
   try {
@@ -1526,9 +1541,10 @@ async function oneCreditPerGame(rows) {
   for (const [pid, rs] of dup) {
     const own = persona.get(pid);
     const keep = own ? rs.filter((r) => String(r.ea_player_id) === own) : [];
-    for (const r of rs) if (!(keep.length === 1 && r === keep[0])) r.profile_id = null;
+    const ok = keep.length === 1 || twoRoles(keep);
+    for (const r of rs) if (!(ok && keep.includes(r))) r.profile_id = null;
     console.log(`ingest: ${rs.length} lines of one game resolved to member ${pid}; ` +
-      (keep.length === 1 ? `kept the line on his own EA persona ${own}` : "credited none of them, no recorded persona decides"));
+      (ok ? `kept the line${keep.length > 1 ? "s" : ""} on his own EA persona ${own}` : "credited none of them, no recorded persona decides"));
   }
 }
 

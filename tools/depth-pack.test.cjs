@@ -213,7 +213,7 @@ console.log("\n— the night comes back to you");
   A("...and a recap failure can never fail the import",
     /postGameRecaps\([\s\S]{0,120}\.catch\(/.test(ingest));
   A("goalies get saves, skaters get points", /save\$\{sv === 1 \? "" : "s"\}/.test(ingest) && /point\$\{pts === 1 \? "" : "s"\}/.test(ingest));
-  A("...told apart by the explicit is_goalie flag, not by sniffing fields", /const isG    = !!r\.is_goalie/.test(ingest));
+  A("...told apart by the explicit is_goalie flag, not by sniffing fields", /if \(!!r\.is_goalie \|\| r\.position === "G"\)/.test(ingest));   /* v4.11: lineOf, one note per player */
   A("a re-import replaces the recap instead of stacking another",
     /notifications\?type=eq\.stat&link_view=eq\.game&link_param=eq\./.test(ingest));
   A("...and the lag-out merge REISSUES it, so nobody is left holding the partial score",

@@ -27,7 +27,7 @@ ctx.CG = {
 ctx.esc = (s) => String(s);
 vm.createContext(ctx);
 vm.runInContext(grab(live, "eaSkaterLine"), ctx);
-for (const f of ["blankStatLine", "statPlayers", "statPlayerById", "aggregate", "splitStages", "aggregateStages", "addEaMetrics",
+for (const f of ["boxLines", "boxPut", "glogGames", "blankStatLine", "statPlayers", "statPlayerById", "aggregate", "splitStages",   /* v4.11: boxLines */ "aggregateStages", "addEaMetrics",
   "playerById", "standings", "h2hPoints", "skaterLeaders", "goalieLeaders", "roleLine", "lineRoles", "offRoleTag"]) vm.runInContext(grab(eng, f), ctx);
 ctx.CG.ROUTES = {};
 for (const f of ["emptyRow", "playoffView", "ROUTES\\.stats"]) vm.runInContext(grab(pub, f), ctx);
@@ -55,7 +55,7 @@ console.log("— the mapper: fow is faceoffs won, fot faceoffs taken");
 console.log("\n— the live build uses that one mapper");
 {
   A("buildLiveLeague maps every skater row through CG.eaSkaterLine", /var eaSkaterLine = CG\.eaSkaterLine;/.test(live) &&
-    /box\[code\]\[key\] = r\.is_goalie \? eaGoalieLine\(r, gWon, forfeit \? false : g\.ot\) : eaSkaterLine\(r\);/.test(live));
+    /CG\.boxPut\(box\[code\], key, r\.is_goalie \? eaGoalieLine\(r, gWon, forfeit \? false : g\.ot\) : eaSkaterLine\(r\), "ea:"\+r\.id\);/.test(live));   /* v4.11: filed through boxPut */
   A("...and no mapper anywhere on the site fills fot from faceoffs lost alone",
     !/fot\s*:\s*\+?\s*r\.faceoffs_lost/.test(live + pub + eng + R("src/live/part5b_public2.js") + R("src/live/part6_hub.js") + R("src/live/part7_admin.js")));
   A("the prototype engine already meant faceoffs taken (fow is a share of fot)", /b\.fot = 8\+Math\.floor\(rng\(\)\*14\); b\.fow = Math\.round\(b\.fot\*/.test(eng));
@@ -130,8 +130,8 @@ console.log("\n— the changelog");
 {
   const C = {}; new Function("CG", R("src/live/part3_content.js"))(C);
   const rb = C.CONTENT.rulebook;
-  const e = rb.changelog[0];
-  A("the newest changelog entry is 4.10, about FO%", e.version === "4.10" && /FO%/.test(e.summary) && /faceoffs won/.test(JSON.stringify(e)), e.version);
+  const e = rb.changelog.find((c) => c.version === "4.10") || {};   /* by version, never by position: a later release takes changelog[0] */
+  A("the changelog's 4.10 entry is about FO%", e.version === "4.10" && /FO%/.test(e.summary) && /faceoffs won/.test(JSON.stringify(e)), e.version);
   A("no em dashes or spaced hyphens in the new copy", !/—| - /.test(JSON.stringify(e) + grab(live, "eaSkaterLine")));
   A("American spelling", !/practis|colour|centre|organis|defence|cancelled/i.test(JSON.stringify(e)));
 }

@@ -2379,7 +2379,7 @@ CG.formerLeagueHtml = function(pid){
     logs+CG.playoffLogHtml(pid, isG)+'</div></section>';
 };
 /* v4.09: a player's playoff line, kept apart from his regular-season line (Rule 6.1): the same one shape (a line per role
-   played, gp = sgp + gs), from lg.playoff, which buildLiveLeague builds from the playoff finals alone. null outside the
+   played, gp counting each game once, v4.11), from lg.playoff, which buildLiveLeague builds from the playoff finals alone. null outside the
    live league; a line of zeros before his first playoff game. */
 CG.playoffLine = function(pid){
   var po = CG.lg && CG.lg.playoff;
@@ -2921,13 +2921,16 @@ CG.posGroupLines = function(pid){
   var out = {};
   ((CG.lg && CG.lg.results) || []).forEach(function(r){
     [r.home, r.away].forEach(function(code){
-      var b = r.box && r.box[code] && r.box[code][pid]; if (!b) return;
-      var k = CG.posViewGroup(b);
-      var s = out[k] = out[k] || (k === "G" ? { gp:0, w:0, l:0, otl:0, sa:0, sv:0, ga:0, so:0, qs:0 }
-                                            : { gp:0, g:0, a:0, p:0, pm:0, shots:0, hits:0, blk:0, tk:0, pim:0, gwg:0 });
-      s.gp++;
-      if (k === "G"){ s.w+=b.w||0; s.l+=b.l||0; s.otl+=b.otl||0; s.sa+=b.sa||0; s.sv+=b.sv||0; s.ga+=b.ga||0; s.so+=b.so||0; s.qs+=b.qs||0; }
-      else { s.g+=b.g||0; s.a+=b.a||0; s.p+=(b.g||0)+(b.a||0); s.pm+=b.pm||0; s.shots+=b.shots||0; s.hits+=b.hits||0; s.blk+=b.blk||0; s.tk+=b.tk||0; s.pim+=b.pim||0; s.gwg+=b.gwg||0; }
+      var e = r.box && r.box[code] && r.box[code][pid]; if (!e) return;
+      /* v4.11: each line of the game to its own group (a goalie's skating line is a skating game) */
+      CG.boxLines(e).forEach(function(b){
+        var k = CG.posViewGroup(b);
+        var s = out[k] = out[k] || (k === "G" ? { gp:0, w:0, l:0, otl:0, sa:0, sv:0, ga:0, so:0, qs:0 }
+                                              : { gp:0, g:0, a:0, p:0, pm:0, shots:0, hits:0, blk:0, tk:0, pim:0, gwg:0 });
+        s.gp++;
+        if (k === "G"){ s.w+=b.w||0; s.l+=b.l||0; s.otl+=b.otl||0; s.sa+=b.sa||0; s.sv+=b.sv||0; s.ga+=b.ga||0; s.so+=b.so||0; s.qs+=b.qs||0; }
+        else { s.g+=b.g||0; s.a+=b.a||0; s.p+=(b.g||0)+(b.a||0); s.pm+=b.pm||0; s.shots+=b.shots||0; s.hits+=b.hits||0; s.blk+=b.blk||0; s.tk+=b.tk||0; s.pim+=b.pim||0; s.gwg+=b.gwg||0; }
+      });
     });
   });
   return out;
