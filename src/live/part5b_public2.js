@@ -18,15 +18,17 @@ CG.ROUTES.awards = function(param, qs){
       return '<button role="tab" aria-selected="'+(tab===x[0])+'" class="'+(tab===x[0]?"on":"")+'" data-tab="'+x[0]+'">'+x[1]+'</button>'; }).join("")+'</div></div>';
   var body = '<div class="shell" style="padding-top:22px;padding-bottom:40px">';
   if (tab==="stars"){
-    var nights = lg.lastNight.filter(function(r){ return (r.stars||[]).every(function(st){ return CG.playerById(lg, st.pid); }); });
+    /* v4.13: a star wears the crest of the club he played that game for (st.team), and a star who has since left the
+       league still shows (CG.statPlayerById) */
+    var nights = lg.lastNight.filter(function(r){ return (r.stars||[]).every(function(st){ return CG.statPlayerById(lg, st.pid); }); });
     body += nights.length ? nights.map(function(r){
       return '<div class="card" style="margin-bottom:18px"><div class="card-h">'+
         '<h3>'+esc(CG.TEAM[r.home].name)+' '+r.score[r.home]+'–'+r.score[r.away]+' '+esc(CG.TEAM[r.away].name)+(r.ot?" (OT)":"")+'</h3>'+
         '<a class="sec-link" href="#/matchup/'+r.id+'">Box score</a></div>'+
         '<div class="card-b"><div class="starsrow">'+r.stars.map(function(st,i){
-          var p = CG.playerById(lg, st.pid); var b = r.box[st.team][st.pid]||{};
+          var p = CG.statPlayerById(lg, st.pid); var b = r.box[st.team][st.pid]||{};
           return '<div class="starcard" data-go="'+CG.playerRoute(p)+'" role="link" tabindex="0"><span class="st-k">'+["1st star","2nd star","3rd star"][i]+'</span>'+
-            '<div style="display:flex;gap:10px;align-items:center;margin-top:6px">'+CG.crest(p.team,30)+
+            '<div style="display:flex;gap:10px;align-items:center;margin-top:6px">'+CG.crest(st.team,30)+
             '<div><b style="font-family:var(--f-disp)">'+esc(p.tag)+'</b>'+
             '<span class="caption" style="display:block">'+CG.boxStarText(b)+'</span></div></div></div>';
         }).join("")+'</div><p class="caption" style="margin-top:14px">Picked automatically from the night’s box scores.</p></div></div>';
@@ -39,8 +41,10 @@ CG.ROUTES.awards = function(param, qs){
     var tally = {};
     (lg.results||[]).forEach(function(r){
       (r.stars||[]).forEach(function(st, i){
-        var pl = CG.playerById(lg, st.pid); if (!pl) return;
-        var t = tally[st.pid] || (tally[st.pid] = { p:pl, first:0, second:0, third:0, pts:0 });
+        /* v4.13: every star counts, a player who has since left included, and the board names each club he earned them for */
+        var pl = CG.statPlayerById(lg, st.pid); if (!pl) return;
+        var t = tally[st.pid] || (tally[st.pid] = { p:pl, first:0, second:0, third:0, pts:0, clubs:[] });
+        if (t.clubs.indexOf(st.team) < 0) t.clubs.push(st.team);
         if (i===0){ t.first++; t.pts += 3; } else if (i===1){ t.second++; t.pts += 2; } else { t.third++; t.pts += 1; }
       });
     });
@@ -54,7 +58,7 @@ CG.ROUTES.awards = function(param, qs){
           return '<tr class="rowlink" data-go="'+CG.playerRoute(t.p)+'">'+
             '<td class="tnum">'+(i+1)+'</td>'+
             '<td class="tleft"><span class="playercell"><span class="nm">'+esc(t.p.tag)+'</span></span></td>'+
-            '<td class="tleft"><span class="teamcell">'+CG.crest(t.p.team,18)+'<span class="mono" style="font-size:11px">'+esc(t.p.team)+'</span></span></td>'+
+            '<td class="tleft" data-sort="'+esc(t.clubs.join(","))+'"><span class="teamcell">'+t.clubs.map(function(c){ return CG.crest(c,18); }).join("")+'<span class="mono" style="font-size:11px">'+esc(t.clubs.join(", "))+'</span></span></td>'+
             '<td class="tnum">'+t.first+'</td><td class="tnum">'+t.second+'</td><td class="tnum">'+t.third+'</td>'+
             '<td class="tnum"><b>'+t.pts+'</b></td></tr>';
         }).join("")+'</tbody></table></div>'+
@@ -70,10 +74,10 @@ CG.ROUTES.awards = function(param, qs){
       return '<div class="card"><div class="card-h"><h3>Week '+w.week+'</h3><span class="chip">'+(w.week===latestWeek?"Latest":"")+'</span></div>'+
         '<div class="grid '+(picks.length>2?"g3":"g2")+'" style="gap:0">'+
         picks.map(function(pk){
-          return '<div class="card-b" style="display:flex;gap:14px;align-items:flex-start;border-top:1px solid var(--line-soft)">'+CG.crest(pk.p.team,38)+
+          return '<div class="card-b" style="display:flex;gap:14px;align-items:flex-start;border-top:1px solid var(--line-soft)">'+CG.crest(pk.team,38)+
             '<div style="min-width:0"><span class="chip chip-chrome">'+pk.role+' of the Week</span>'+
             '<b style="display:block;font-family:var(--f-disp);font-size:17px;margin-top:7px;cursor:pointer" data-go="'+CG.playerRoute(pk.p)+'">'+esc(pk.p.tag)+'</b>'+
-            '<span class="caption">'+esc(CG.TEAM[pk.p.team].name)+'</span>'+
+            '<span class="caption">'+esc(CG.TEAM[pk.team].name)+'</span>'+
             '<p class="small" style="color:var(--steel);margin-top:8px">'+esc(pk.blurb)+'</p></div></div>';
         }).join("")+'</div></div>';
     }).join("")+'</div>'+
@@ -98,9 +102,11 @@ CG.ROUTES.awards = function(param, qs){
                 '<span class="caption">'+esc(lg.champion.stat_line||"")+'</span></div></div></div>'; })()
           : "")+
         decided.map(function(a){ var p = CG.statPlayerById(lg, a.profile_id);   /* v4.08: a title can go to a player no longer rostered */
-          return '<div class="card raise" data-go="'+CG.playerRoute(p)+'" role="link" tabindex="0"><div class="card-b" style="display:flex;gap:14px;align-items:center">'+CG.crest(p.team,44)+
+          /* v4.13: the club the award is filed to (a statistical title: the club of the winner's last game), else his club */
+          var ac = (a.team_id && (lg._idToCode||{})[a.team_id] && CG.TEAM[(lg._idToCode||{})[a.team_id]]) ? lg._idToCode[a.team_id] : p.team;
+          return '<div class="card raise" data-go="'+CG.playerRoute(p)+'" role="link" tabindex="0"><div class="card-b" style="display:flex;gap:14px;align-items:center">'+CG.crest(ac,44)+
             '<div><span class="chip chip-chrome">'+esc(AWARD_LABELS[a.category]||a.category)+'</span><b style="display:block;font-family:var(--f-disp);font-size:17px;margin-top:7px">'+esc(p.tag)+'</b>'+
-            '<span class="caption">'+esc(CG.TEAM[p.team].name)+' · '+(a.decided_by==="record" ? esc(a.stat_line||"from the record") : "by vote")+'</span></div></div></div>';
+            '<span class="caption">'+esc(CG.TEAM[ac].name)+' · '+(a.decided_by==="record" ? esc(a.stat_line||"from the record") : "by vote")+'</span></div></div></div>';
         }).join("")+'</div>';
     }
     /* v3.60 (commissioner, 2026-09-28, Q37): "allow all players to put 1 vote in per award. Statistical
@@ -266,7 +272,9 @@ CG.ROUTES.rankings = function(){
     /* commentary is computed from real results — the club's record and current form */
     var line = t.name+" sit "+(pr.rank===1?"top of the league":pr.rank<=3?"inside the top three":"at #"+pr.rank)+
       " at "+s.w+"-"+s.l+"-"+s.otl+(s.gf!=null&&s.ga!=null?", "+(s.gf>s.ga?"outscoring opponents "+s.gf+"–"+s.ga:s.gf<s.ga?"outscored "+s.ga+"–"+s.gf:"even on goals at "+s.gf)+" so far":"")+".";
-    var top = (lg.byTeam[pr.team]||[]).slice().sort(function(a,b){ return (lg.pstats[b.id]?lg.pstats[b.id].p:0)-(lg.pstats[a.id]?lg.pstats[a.id].p:0); })[0];
+    /* v4.13: the club's key player is its top scorer FOR THIS CLUB (points scored for another club stay with that club) */
+    var clubP = function(p){ var c = CG.clubLine(lg.pstats[p.id], pr.team); return c ? c.p : 0; };
+    var top = (lg.byTeam[pr.team]||[]).slice().sort(function(a,b){ return clubP(b)-clubP(a); })[0];
     return '<div class="card raise" style="--tc:'+t.color+'" data-go="#/team/'+pr.team+'" role="link" tabindex="0"><div class="card-b pr-card" style="display:grid;grid-template-columns:64px auto 1fr;gap:18px;align-items:start">'+
       '<div style="text-align:center"><b style="font-family:var(--f-disp);font-weight:900;font-size:34px;letter-spacing:-.02em">'+pr.rank+'</b>'+
         '<span style="display:block;margin-top:2px">'+CG.moveArrow(pr.move)+'</span></div>'+
@@ -275,7 +283,7 @@ CG.ROUTES.rankings = function(){
         '<b style="font-family:var(--f-disp);font-size:19px">'+esc(t.name)+'</b>'+
         '<span class="chip">'+s.w+"-"+s.l+"-"+s.otl+'</span><span class="ovrbox '+CG.ovrClass(lg.teamRatings[pr.team].ovr)+'" style="min-width:36px;height:24px;font-size:13px">'+lg.teamRatings[pr.team].ovr+'</span>'+CG.form5(s.last5)+'</div>'+
         '<p class="small" style="color:var(--steel);margin-top:8px;max-width:72ch">'+esc(line)+'</p>'+
-        (top && lg.pstats[top.id] && lg.pstats[top.id].p>0?'<p class="caption" style="margin-top:7px"><b style="color:var(--ink)">Key player:</b> '+esc(top.tag)+' — '+lg.pstats[top.id].p+' pts</p>':"")+
+        (top && clubP(top)>0?'<p class="caption" style="margin-top:7px"><b style="color:var(--ink)">Key player:</b> '+esc(top.tag)+', '+clubP(top)+' pts for the '+esc(t.name)+'</p>':"")+
       '</div></div></div>';
   }).join("");
   return head + '<div class="shell" style="padding-bottom:40px"><div class="stack">'+rows+'</div>'+
@@ -652,7 +660,7 @@ CG.ROUTES.matchup = function(id){
         var b = res.box[st.team][st.pid];
         var p = boxPlayer(st.pid, st.team, b);
         return '<div class="starcard"'+(p.id?' data-go="'+CG.playerRoute(p)+'" role="link" tabindex="0"':'')+'><span class="st-k">'+["1st star","2nd star","3rd star"][i]+'</span>'+
-          '<div style="display:flex;gap:10px;align-items:center;margin-top:4px">'+CG.crest(p.team,28)+'<div><b style="font-family:var(--f-disp)">'+esc(p.tag)+'</b>'+
+          '<div style="display:flex;gap:10px;align-items:center;margin-top:4px">'+CG.crest(st.team,28)+'<div><b style="font-family:var(--f-disp)">'+esc(p.tag)+'</b>'+
           '<span class="caption" style="display:block">'+CG.boxStarText(b)+'</span></div></div></div>';
       }).join("")+'</div>'+(starsBlurb?'<p class="caption" style="margin-top:12px">'+esc(starsBlurb)+'</p>':"")+'</div></div>'
       : '<div class="card"><div class="card-h"><h3>Three Stars</h3></div><div class="card-b"><span class="caption">'+emptyNote+'</span></div></div>')+
@@ -723,20 +731,23 @@ CG.ROUTES.matchup = function(id){
     /* nobody has a point before Week 1 — rank on rating rather than print six zeroes */
     var pre = CG.isPreseason && CG.isPreseason();
     function mxOvr(p){ return (lg.ratings[p.id]||{}).ovr||0; }
-    function mxPts(p){ return (lg.pstats[p.id]||{}).p||0; }
+    /* v4.13: a club's panel counts the games played FOR THAT CLUB; a player who also played for another club says so */
+    function mxLine(p, code){ return CG.clubLine(lg.pstats[p.id], code) || CG.blankStatLine(); }
+    function mxPts(p, code){ return mxLine(p, code).p||0; }
     body += '<div class="card"><div class="card-h"><h3>'+(pre?"Top-rated skaters":"Players to watch")+'</h3>'+
       (pre?'<span class="chip">Ratings only · no games played</span>':"")+'</div><div class="grid g2" style="gap:0">'+
       [g.away,g.home].map(function(code){
         /* v4.08: the club's skaters, plus a goalie who has skated (his skating points count). A club that has not played
            yet still lists its skaters: "pre" only means no game anywhere is final. */
-        var top = (lg.byTeam[code]||[]).filter(function(p){ return p.pos!=="G" || (!pre && ((lg.pstats[p.id]||{}).sgp||0) > 0); })
-          .sort(function(a,b){ return pre ? mxOvr(b)-mxOvr(a) : mxPts(b)-mxPts(a); }).slice(0,3);
+        var top = (lg.byTeam[code]||[]).filter(function(p){ return p.pos!=="G" || (!pre && (mxLine(p, code).sgp||0) > 0); })
+          .sort(function(a,b){ return pre ? mxOvr(b)-mxOvr(a) : mxPts(b, code)-mxPts(a, code); }).slice(0,3);
         if (!top.length) return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><p class="caption">No skaters signed yet.</p></div>';
         return '<div style="border-top:1px solid var(--line-soft)">'+top.map(function(p,i){
-          var s = lg.pstats[p.id]||{ g:0, a:0 };
+          var s = mxLine(p, code), moved = CG.clubsPlayed(lg.pstats[p.id]).some(function(c){ return c !== code; });
           return '<div class="leaderrow'+(i===0?" top":"")+'" data-go="'+CG.playerRoute(p)+'"><span class="rk num">'+(i+1)+'</span>'+CG.crest(code,26)+
-            '<span style="min-width:0"><b style="font-size:13.5px">'+esc(p.tag)+'</b>'+(CG.isCamp(p)?' '+CG.campChip("xs"):'')+'</span>'+
-            '<span class="val"><b class="num">'+(pre?mxOvr(p):mxPts(p))+'</b><span>'+(pre?"OVR":s.g+"G "+s.a+"A")+'</span></span></div>';
+            '<span style="min-width:0"><b style="font-size:13.5px">'+esc(p.tag)+'</b>'+(CG.isCamp(p)?' '+CG.campChip("xs"):'')+
+              (!pre && moved ? '<small class="caption" style="display:block">for '+esc(code)+' this season</small>' : '')+'</span>'+
+            '<span class="val"><b class="num">'+(pre?mxOvr(p):mxPts(p, code))+'</b><span>'+(pre?"OVR":s.g+"G "+s.a+"A")+'</span></span></div>';
         }).join("")+'</div>';
       }).join("")+'</div></div>';
     if (g.feature){

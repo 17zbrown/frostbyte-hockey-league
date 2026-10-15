@@ -28,9 +28,9 @@ ctx.CG = {
 };
 ctx.esc = (s) => String(s);
 vm.createContext(ctx);
-for (const f of ["boxLines", "boxPut", "glogGames", "blankStatLine", "statPlayers", "statPlayerById", "aggregate",   /* v4.11: aggregate reads box entries through boxLines */ "splitStages", "aggregateStages", "addEaMetrics",
+for (const f of ["boxLines", "boxPut", "glogGames", "blankStatLine", "statPlayers", "statPlayerById", "addStatLine", "clubLine", "clubsPlayed", "aggregate",   /* v4.11: aggregate reads box entries through boxLines */ "splitStages", "aggregateStages", "addEaRow", "addEaMetrics",
   "playerById", "standings", "h2hPoints", "skaterLeaders", "goalieLeaders", "roleLine", "lineRoles", "offRoleTag"]) vm.runInContext(grab(eng, f), ctx);
-for (const f of ["emptyRow", "profileSeasonHtml", "gameLogTables", "profileStatCells", "statCellsHtml", "formerLeagueHtml",
+for (const f of ["emptyRow", "profileSeasonHtml", "gameLogTables", "profileStatCells", "statCellsHtml", "formerLeagueHtml", "clubHistoryHtml",
   "playoffLine", "playoffCardHtml", "playoffLogHtml", "playoffView", "ROUTES\\.stats"]) {
   if (f === "ROUTES\\.stats") ctx.CG.ROUTES = {};
   vm.runInContext(grab(pub, f), ctx);

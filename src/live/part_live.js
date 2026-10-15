@@ -1466,6 +1466,7 @@ CG.buildLiveLeague = async function(opts){
     if (!f || a.week==null) return;
     var e = potwByWeek[a.week] = potwByWeek[a.week] || { week:a.week };
     e[f[0]] = a.profile_id; e[f[1]] = a.stat_line||"";
+    e[f[0]+"Team"] = a.team_id ? (id2code[a.team_id]||null) : null;   /* v4.13: the club it was won for */
   });
   lg.potw = Object.values(potwByWeek).sort(function(a,b){ return (a.week||0)-(b.week||0); });
   lg.seasonAwards = seasonAwardsRaw.filter(function(a){ return a.week==null && a.category!=="champion"; });

@@ -103,7 +103,7 @@ const lib = new Function("etFmt", "const etDayUnix = (s) => etFmt.format(new Dat
     DEFAULT_WEIGHTS: { skater: { production: 1, efficiency: 1, defense: 1, discipline: 1, form: 1 }, goalie: { saves: 1, workload: 1, wins: 1, discipline: 1 },
       team: { record: 1, goalDiff: 1, goaltending: 1, depth: 1, form: 1 } } };
   vm.createContext(ctx);
-  for (const f of ["boxLines", "boxPut", "glogGames", "boxStarText", "blankStatLine", "statPlayers", "aggregate", "roleLine", "lineRoles"]) vm.runInContext(grab(eng, f), ctx);
+  for (const f of ["boxLines", "boxPut", "glogGames", "boxStarText", "blankStatLine", "statPlayers", "addStatLine", "clubLine", "clubsPlayed", "aggregate", "roleLine", "lineRoles"]) vm.runInContext(grab(eng, f), ctx);
   const CG = ctx.CG;
   const S = (g, a, shots) => ({ goalie: false, pos: "C", g, a, shots, pm: 1, hits: 0, blk: 0, gv: 0, tk: 0, pim: 0, fow: 0, fot: 0, gwg: 0, toi: 1200 });
   const G = (sv, sa, ga, w) => ({ goalie: true, pos: "G", sv, sa, ga, w, l: w ? 0 : 1, otl: 0, so: 0, qs: 1, toi: 2400 });

@@ -31,14 +31,20 @@ A("the news title has no em dash", /'Players of the Week: Week ' \|\| w\.week/.t
 /* ---- CG.potwPicks ---- */
 const helper = engine.match(/CG\.potwPicks = function\(lg, w\)\{[\s\S]*?\n\};/);
 A("CG.potwPicks is defined in the engine", !!helper);
-const CG = { playerById: (lg, id) => lg.players.find((p) => p.id === id) };
+const CG = { playerById: (lg, id) => lg.players.find((p) => p.id === id), TEAM: { UTA: {}, DAL: {} } };
+CG.statPlayerById = (lg, id) => CG.playerById(lg, id) || (lg.formerPlayers || []).find((p) => p.id === id) || null;
 eval(helper[0]);
-const lg = { players: [{ id: "f1", tag: "Fwd" }, { id: "d1", tag: "Dman" }, { id: "g1", tag: "Goalie" }, { id: "s1", tag: "Skater" }] };
+const lg = { players: [{ id: "f1", tag: "Fwd", team: "DAL" }, { id: "d1", tag: "Dman" }, { id: "g1", tag: "Goalie" }, { id: "s1", tag: "Skater" }],
+             formerPlayers: [{ id: "left", tag: "Left", former: true }] };
 const roles = (w) => CG.potwPicks(lg, w).map((x) => x.role + ":" + x.p.tag).join(",");
 A("a v3.87 week reads forward, defenseman, goaltender in that order",
   roles({ week: 3, goalie: "g1", defense: "d1", forward: "f1", fBlurb: "x" }) === "Forward:Fwd,Defenseman:Dman,Goaltender:Goalie", roles({ week: 3, goalie: "g1", defense: "d1", forward: "f1" }));
 A("a Week 1 or 2 entry still reads skater, goaltender", roles({ week: 1, skater: "s1", goalie: "g1" }) === "Skater:Skater,Goaltender:Goalie");
-A("a pick who has left the league drops out and the rest still show", roles({ week: 4, forward: "gone", defense: "d1", goalie: "g1" }) === "Defenseman:Dman,Goaltender:Goalie");
+A("a pick the league cannot find drops out and the rest still show", roles({ week: 4, forward: "gone", defense: "d1", goalie: "g1" }) === "Defenseman:Dman,Goaltender:Goalie");
+/* v4.10: a winner who has since left the league keeps the honor, and each pick carries the club it was won for */
+A("a winner no longer rostered still shows (v4.10)", roles({ week: 4, forward: "left", defense: "d1" }) === "Forward:Left,Defenseman:Dman");
+A("a pick carries the club it was won for, not the winner's club today (v4.10)",
+  CG.potwPicks(lg, { week: 4, forward: "f1", forwardTeam: "UTA" })[0].team === "UTA" && CG.potwPicks(lg, { week: 4, forward: "f1" })[0].team === "DAL");
 A("the blurb rides along", CG.potwPicks(lg, { forward: "f1", fBlurb: "3G 4A across 6 games" })[0].blurb === "3G 4A across 6 games");
 A("no week, no picks", CG.potwPicks(lg, undefined).length === 0);
 

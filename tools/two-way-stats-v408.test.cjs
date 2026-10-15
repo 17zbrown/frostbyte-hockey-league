@@ -26,8 +26,8 @@ ctx.CG = {
 ctx.esc = (s) => String(s);
 vm.createContext(ctx);
 ctx.CG.playerById = (lg, id) => lg.players.find((p) => p.id === id);
-for (const f of ["boxLines", "boxPut", "glogGames", "blankStatLine", "statPlayers", "aggregate", "skaterLeaders", "goalieLeaders", "roleLine", "lineRoles", "offRoleTag"]) vm.runInContext(grab(eng, f), ctx);
-for (const f of ["seasonLineText", "profileSeasonHtml", "gameLogTables", "profileStatCells", "statCellsHtml", "scoutLine", "leagueDNA", "formerLeagueHtml", "playoffLine", "playoffCardHtml", "playoffLogHtml"]) vm.runInContext(grab(pub, f), ctx);
+for (const f of ["boxLines", "boxPut", "glogGames", "blankStatLine", "statPlayers", "addStatLine", "clubLine", "clubsPlayed", "aggregate", "skaterLeaders", "goalieLeaders", "roleLine", "lineRoles", "offRoleTag"]) vm.runInContext(grab(eng, f), ctx);
+for (const f of ["seasonLineText", "profileSeasonHtml", "gameLogTables", "profileStatCells", "statCellsHtml", "scoutLine", "leagueDNA", "formerLeagueHtml", "clubHistoryHtml", "playoffLine", "playoffCardHtml", "playoffLogHtml"]) vm.runInContext(grab(pub, f), ctx);
 vm.runInContext(pub2.slice(pub2.indexOf("CG.TITLE_CARDS = "), pub2.indexOf("CG.loadTitleBoard = function")), ctx);
 const CG = ctx.CG;
 
@@ -177,16 +177,19 @@ console.log("\n— the statistical titles come from the database's one ranking")
 
 console.log("\n— the readers use role games, never registered position");
 A("Stat central: skaters, advanced and goalies by role games and role lines",
-  /* v4.09: the tables read SL, the league or its playoff view, through the same role-game filters */
-  /CG\.statPlayers\(SL\)\.filter\(function\(p\)\{ var s0 = SL\.pstats\[p\.id\]; return s0 && skatedOrSkater\(p, s0\) && s0\.sgp>=minGp/.test(pub) &&
-  /var s=CG\.roleLine\(SL\.pstats\[p\.id\], "S"\);/.test(pub) && /var s=CG\.roleLine\(SL\.pstats\[p\.id\], "G"\); var svp/.test(pub));
+  /* v4.09: the tables read SL, the league or its playoff view, through the same role-game filters;
+     v4.10: each row's line is lineOf(p) (the season, or the line for the chosen club) */
+  /var rowsOf = function\(keep\)\{\s*return CG\.statPlayers\(SL\)\.map/.test(pub) && /var full = SL\.pstats\[p\.id\]; if \(!full\) return null;/.test(pub) &&
+  /rowsOf\(function\(p, s0\)\{ return skatedOrSkater\(p, s0\) && s0\.sgp>=minGp; \}\)/.test(pub) &&
+  /var p = x\.p, s=CG\.roleLine\(x\.full, "S"\);/.test(pub) && /var p = x\.p, s=CG\.roleLine\(x\.full, "G"\); var svp/.test(pub));
 A("no stats tab filters on registered position any more", !/lg\.players\.filter\(function\(p\)\{ return p\.pos!=="G" && lg\.pstats\[p\.id\]\.gp>=minGp/.test(pub) && !/return p\.pos==="G" && lg\.pstats\[p\.id\]\.gp>=Math\.min\(minGp,3\)/.test(pub));
 A("the ticker's GAA divides by games in goal", /ps\[gaaL\.id\]\.ga\/ps\[gaaL\.id\]\.gs/.test(ui) && !/ps\[a\.id\]\.ga\/ps\[a\.id\]\.gp/.test(ui));
 A("the awards page reads the title leaders from the database and ranks nothing itself", /CG\.sb\.rpc\("statistical_title_board", \{ p_season: sid, p_top: 3 \}\)/.test(pub2) &&
   /if \(document\.getElementById\("titleBoard"\)\) CG\.loadTitleBoard\(\);/.test(pub2) && !/roleGp|eligibleNow|floorOf/.test(pub2));
 A("a decided title can go to a player no longer rostered (statPlayerById)", /decided\.map\(function\(a\)\{ var p = CG\.statPlayerById\(lg, a\.profile_id\);/.test(pub2));
 A("Players to watch keeps the club's skaters before they have played, plus a goalie who skated",
-  /return p\.pos!=="G" \|\| \(!pre && \(\(lg\.pstats\[p\.id\]\|\|\{\}\)\.sgp\|\|0\) > 0\);/.test(pub2));
+  /* v4.10: by the club's own line (mxLine) */
+  /return p\.pos!=="G" \|\| \(!pre && \(mxLine\(p, code\)\.sgp\|\|0\) > 0\);/.test(pub2));
 A("a former player's box-score line wears the crest of the club he played that game for", /fp && Object\.assign\(\{\}, fp, \{ team: code \}\)/.test(pub2));
 A("the directory reads a former player's games instead of printing 0", /var us = lg\.pstats\[u\.id\], ugp = \(us && us\.gp\) \|\| 0;/.test(pub) && !/<td class="tnum">0<\/td><td class="tleft tnum" style="font-size:12px">—<\/td>/.test(pub));
 A("the account page's caption has no dash, and names the record for a former player", /No longer on a league roster\. This season(’|\\u2019)s league games stay in the official record \(Rule 6\.1\)\./.test(pub) && !/isn’t on a league roster —/.test(pub));

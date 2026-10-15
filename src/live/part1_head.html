@@ -331,6 +331,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .tbl th{font-family:var(--f-mono);font-weight:600;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
   color:var(--steel);text-align:right;padding:10px 9px;border-bottom:1.5px solid var(--ink);white-space:nowrap;cursor:default}
 .tbl th.sortable{cursor:pointer}
+/* v4.13: a season-total row (the Team history card) sits in tfoot so the table sorter never moves it */
+.tbl tfoot td{font-weight:700;border-top:1.5px solid var(--ink);padding-top:9px}
 .tbl th.sortable:hover{color:var(--ink)}
 .tbl th.sorted{color:var(--ink)}
 .tbl th.sorted::after{content:" ↓";color:var(--chrome-deep)}

@@ -545,7 +545,7 @@ CG.glogGames = function(log){
   var out = [], at = {};
   (log || []).forEach(function(en){
     if (at[en.game]) { at[en.game].lines.push(en.line); return; }
-    at[en.game] = { game:en.game, week:en.week, opp:en.opp, lines:[en.line] };
+    at[en.game] = { game:en.game, week:en.week, team:en.team, opp:en.opp, lines:[en.line] };   /* v4.13: and the club */
     out.push(at[en.game]);
   });
   return out;
@@ -556,6 +556,33 @@ CG.statPlayers = function(lg){ return (lg.players||[]).concat(lg.formerPlayers||
 CG.statPlayerById = function(lg, id){
   return CG.playerById(lg, id) || (lg.formerPlayers||[]).find(function(p){ return p.id === id; }) || null;
 };
+/* v4.13: one box LINE added to one season line: its role's game (sgp or gs) and its statistics. The caller counts the
+   GAME (gp) once per box entry (v4.11: an entry can hold a goalie line and a skating line). CG.aggregate adds every line
+   twice through this, to the player's season line and to his line for the club the box was recorded for
+   (s.byClub[code]), so the two can never count differently: the club lines of a player always add up to his season line. */
+CG.addStatLine = function(s, b, week){
+  if (b.goalie){
+    s.gs++; s.sa+=b.sa; s.sv+=b.sv; s.ga+=b.ga; s.w+=b.w; s.l+=b.l; s.otl+=b.otl; s.so+=b.so; s.qs+=b.qs;
+    s.weeklyG[week] = (s.weeklyG[week]||0) + b.sv*.09 + b.w*1.2 + b.so*2;
+  } else {
+    s.sgp++; s.g+=b.g; s.a+=b.a; s.p+=b.g+b.a; s.pm+=b.pm; s.shots+=b.shots; s.hits+=b.hits;
+    s.blk+=b.blk; s.gv+=b.gv; s.tk+=b.tk; s.pim+=b.pim; s.fow+=b.fow; s.fot+=b.fot; s.gwg+=b.gwg;
+    s.weekly[week] = (s.weekly[week]||0) + b.g*2 + b.a;
+  }
+};
+/* v4.13: a player's line for one club (null when he has none); the clubs he played for, in the order he first played for
+   each. A line from before v4.13 (or a provisional draft row) has no byClub. */
+CG.clubLine = function(s, code){ return (s && s.byClub && s.byClub[code]) || null; };
+CG.clubsPlayed = function(s){
+  var bc = (s && s.byClub) || {};
+  return Object.keys(bc).sort(function(a, b){ return (bc[a].first||0) - (bc[b].first||0) || (a < b ? -1 : 1); });
+};
+/* v4.13: everyone with a line for one club this season (rostered there now, rostered elsewhere now, or no longer
+   rostered), each with his line for THAT club only. [{p, s}] */
+CG.clubStatPlayers = function(lg, code){
+  return CG.statPlayers(lg).map(function(p){ return { p: p, s: CG.clubLine(lg.pstats[p.id], code) }; })
+    .filter(function(x){ return !!x.s; });
+};
 CG.aggregate = function(lg, overrides){
   var W = (overrides && overrides.weights) || CG.DEFAULT_WEIGHTS;
   var teams = {}, pstats = {}, glog = {};
@@ -564,6 +591,7 @@ CG.aggregate = function(lg, overrides){
     hw:0,hl:0,aw:0,al:0, res:[], sf:0, sa:0, gsv:0, gsa:0 }; });
   CG.statPlayers(lg).forEach(function(p){
     pstats[p.id] = CG.blankStatLine();
+    pstats[p.id].byClub = {};   /* v4.13: his line for each club he played for, the same shape */
     glog[p.id] = [];
   });
 
@@ -584,25 +612,29 @@ CG.aggregate = function(lg, overrides){
       else if (!ff && r.ot){ t.otl++; t.res.push("OT"); }
       else { t.l++; (code===r.home?t.hl++:t.al++); t.res.push("L"); }
       Object.keys(r.box[code]).forEach(function(pid){
-        var s = pstats[pid];
+        var s = pstats[pid], c = null;
         /* v4.11: the entry is the GAME (gp once), each of its lines adds to its own role (sgp, gs) */
-        if (s) s.gp++;
+        if (s){
+          s.gp++;
+          /* v4.13: and the same game to his line for the club it was recorded for (the box key is that club) */
+          c = s.byClub[code];
+          if (!c){ c = s.byClub[code] = CG.blankStatLine(); c.first = r.at; c.wkFirst = r.week; }
+          c.gp++; c.last = r.at; c.wkLast = r.week;
+        }
         CG.boxLines(r.box[code][pid]).forEach(function(b){
           /* v4.08: the club's totals count EVERY line, including a player no longer rostered or one EA could not link
              (shots for used to skip them while shots against counted them) */
           if (b.goalie){ t.gsv += (b.sv||0); t.gsa += (b.sa||0); }
           else t.sf += (b.shots||0);
           if (!s) return;
-          if (b.goalie){
-            s.gs++; s.sa+=b.sa; s.sv+=b.sv; s.ga+=b.ga; s.w+=b.w; s.l+=b.l; s.otl+=b.otl; s.so+=b.so; s.qs+=b.qs;
-            s.weeklyG[r.week] = (s.weeklyG[r.week]||0) + b.sv*.09 + b.w*1.2 + b.so*2;
-            glog[pid].push({ game:r.id, week:r.week, opp:opp, line:b });
-          } else {
-            s.sgp++; s.g+=b.g; s.a+=b.a; s.p+=b.g+b.a; s.pm+=b.pm; s.shots+=b.shots; s.hits+=b.hits;
-            s.blk+=b.blk; s.gv+=b.gv; s.tk+=b.tk; s.pim+=b.pim; s.fow+=b.fow; s.fot+=b.fot; s.gwg+=b.gwg;
-            s.weekly[r.week] = (s.weekly[r.week]||0) + b.g*2 + b.a;
-            glog[pid].push({ game:r.id, week:r.week, opp:opp, line:b });
-          }
+          /* v4.13: every line to the season line and to the club line, through the one adder */
+          CG.addStatLine(s, b, r.week);
+          CG.addStatLine(c, b, r.week);
+          /* the weeks of each role at this club (a skater who also played in goal there has two spans) */
+          var rk = b.goalie ? "g" : "s";
+          if (c[rk+"WkFirst"] == null) c[rk+"WkFirst"] = r.week;
+          c[rk+"WkLast"] = r.week;
+          glog[pid].push({ game:r.id, week:r.week, team:code, opp:opp, line:b });
         });
       });
     });
@@ -787,35 +819,49 @@ CG.aggregateStages = function(lg, st, weeks){
 /* EA-only advanced metrics onto a line (base G/A/P and the rest come from CG.aggregate), from the game_stats rows of
    that stage's finals: ice time per role, special-teams goals, passing, possession and EA's own ratings. v4.09: run for
    the regular-season line and the playoff line alike, each from its own finals. splitRows, when given, collects each
-   player's raw rows for the profile's By position card. */
+   player's raw rows for the profile's By position card.
+   v4.13: each row is added to the player's line AND to his line for the club it was filed for, found exactly where
+   CG.aggregate found the base line (the result's box), so the club lines carry ice time and the advanced metrics too
+   and still add up to the season line; a row whose base line is not in the box (a club outside the fixture) adds
+   nothing, as its base line added nothing. */
+CG.addEaRow = function(s, r){
+  s.toi = (s.toi||0) + (+r.time_on_ice_seconds||0);
+  /* v4.08: ice time per role, so a per-game figure divides each role's time by that role's games */
+  if (r.is_goalie) s.gToi = (s.gToi||0) + (+r.time_on_ice_seconds||0);
+  else s.skToi = (s.skToi||0) + (+r.time_on_ice_seconds||0);
+  if (r.is_goalie){
+    s.brkShots=(s.brkShots||0)+(+r.breakaway_shots||0);
+    s.brkSv=(s.brkSv||0)+(+r.breakaway_saves||0);
+    s.pokes=(s.pokes||0)+(+r.poke_checks||0);
+    s.dives=(s.dives||0)+(+r.diving_saves||0);   /* v3.87: Big Saves on Goalie DNA */
+  } else {
+    s.ppg=(s.ppg||0)+(+r.pp_goals||0); s.shg=(s.shg||0)+(+r.sh_goals||0);
+    s.pass=(s.pass||0)+(+r.passes_completed||0); s.passAtt=(s.passAtt||0)+(+r.passes_attempted||0);
+    s.sat=(s.sat||0)+(+r.shot_attempts||0); s.poss=(s.poss||0)+(+r.possession_seconds||0);
+    s.intc=(s.intc||0)+(+r.interceptions||0); s.pdrawn=(s.pdrawn||0)+(+r.penalties_drawn||0);
+    s.defl=(s.defl||0)+(+r.deflections||0); s.saucer=(s.saucer||0)+(+r.saucer_passes||0);
+    s._ratOff=(s._ratOff||0)+(+r.offense_rating||0); s._ratDef=(s._ratDef||0)+(+r.defense_rating||0);
+    s._ratTeam=(s._ratTeam||0)+(+r.team_play_rating||0); s._ratN=(s._ratN||0)+1;
+  }
+};
 CG.addEaMetrics = function(lg, pstats, stageResults, rows, splitRows){
-  var finalIds = {}; (stageResults||[]).forEach(function(r){ finalIds[r.id]=true; });
+  var finals = {}; (stageResults||[]).forEach(function(r){ finals[r.id]=r; });
   (rows||[]).forEach(function(r){
-    if (!finalIds[r.game_id] || !r.profile_id) return;
+    var res = finals[r.game_id];
+    if (!res || !r.profile_id) return;
     if (splitRows) (splitRows[r.profile_id] = splitRows[r.profile_id] || []).push(r);
     var s = pstats[r.profile_id]; if (!s) return;
-    s.toi = (s.toi||0) + (+r.time_on_ice_seconds||0);
-    /* v4.08: ice time per role, so a per-game figure divides each role's time by that role's games */
-    if (r.is_goalie) s.gToi = (s.gToi||0) + (+r.time_on_ice_seconds||0);
-    else s.skToi = (s.skToi||0) + (+r.time_on_ice_seconds||0);
-    if (r.is_goalie){
-      s.brkShots=(s.brkShots||0)+(+r.breakaway_shots||0);
-      s.brkSv=(s.brkSv||0)+(+r.breakaway_saves||0);
-      s.pokes=(s.pokes||0)+(+r.poke_checks||0);
-      s.dives=(s.dives||0)+(+r.diving_saves||0);   /* v3.87: Big Saves on Goalie DNA */
-    } else {
-      s.ppg=(s.ppg||0)+(+r.pp_goals||0); s.shg=(s.shg||0)+(+r.sh_goals||0);
-      s.pass=(s.pass||0)+(+r.passes_completed||0); s.passAtt=(s.passAtt||0)+(+r.passes_attempted||0);
-      s.sat=(s.sat||0)+(+r.shot_attempts||0); s.poss=(s.poss||0)+(+r.possession_seconds||0);
-      s.intc=(s.intc||0)+(+r.interceptions||0); s.pdrawn=(s.pdrawn||0)+(+r.penalties_drawn||0);
-      s.defl=(s.defl||0)+(+r.deflections||0); s.saucer=(s.saucer||0)+(+r.saucer_passes||0);
-      s._ratOff=(s._ratOff||0)+(+r.offense_rating||0); s._ratDef=(s._ratDef||0)+(+r.defense_rating||0);
-      s._ratTeam=(s._ratTeam||0)+(+r.team_play_rating||0); s._ratN=(s._ratN||0)+1;
-    }
+    var box = res.box || {};
+    var code = (box[res.home] && box[res.home][r.profile_id]) ? res.home : (box[res.away] && box[res.away][r.profile_id]) ? res.away : null;
+    if (!code) return;
+    CG.addEaRow(s, r);
+    if (s.byClub && s.byClub[code]) CG.addEaRow(s.byClub[code], r);
   });
-  CG.statPlayers(lg).forEach(function(p){   /* v4.08: players no longer rostered too */
+  CG.statPlayers(lg).forEach(function(p){   /* v4.08: players no longer rostered too; v4.13: and each club line */
     var s=pstats[p.id]; if(!s) return;
-    if (s._ratN){ s.ratOff=s._ratOff/s._ratN; s.ratDef=s._ratDef/s._ratN; s.ratTeam=s._ratTeam/s._ratN; }
+    [s].concat(Object.keys(s.byClub||{}).map(function(k){ return s.byClub[k]; })).forEach(function(x){
+      if (x._ratN){ x.ratOff=x._ratOff/x._ratN; x.ratDef=x._ratDef/x._ratN; x.ratTeam=x._ratTeam/x._ratN; }
+    });
   });
 };
 
@@ -823,12 +869,14 @@ CG.addEaMetrics = function(lg, pstats, stageResults, rows, splitRows){
 CG.playerById = function(lg,id){ return lg.players.find(function(p){ return p.id===id; }); };
 /* v3.87: one week's Players of the Week, in the order every honors surface shows them. Weeks 1
    and 2 of Season 1 named a skater and a goaltender; from Week 3 on it is a forward, a defenseman
-   and a goaltender, each with at least three games that week, all at that position. A pick who
-   has since left the league drops out and the rest still show. Returns [{p, pid, role, blurb}]. */
+   and a goaltender, each with at least three games that week, all at that position.
+   Returns [{p, pid, role, blurb, team}]. */
+/* v4.13: each pick carries the club it was won for (team: the club of the winner's last game that week, stored with the
+   award), so a winner later traded keeps the honor with that club; a winner who has since left the league still shows. */
 CG.potwPicks = function(lg, w){
   if (!w) return [];
-  return [[w.forward,"Forward",w.fBlurb], [w.skater,"Skater",w.skBlurb], [w.defense,"Defenseman",w.dBlurb], [w.goalie,"Goaltender",w.glBlurb]]
-    .map(function(r){ var p = r[0] ? CG.playerById(lg, r[0]) : null; return p ? { p:p, pid:r[0], role:r[1], blurb:r[2]||"" } : null; })
+  return [[w.forward,"Forward",w.fBlurb,w.forwardTeam], [w.skater,"Skater",w.skBlurb,w.skaterTeam], [w.defense,"Defenseman",w.dBlurb,w.defenseTeam], [w.goalie,"Goaltender",w.glBlurb,w.goalieTeam]]
+    .map(function(r){ var p = r[0] ? CG.statPlayerById(lg, r[0]) : null; return p ? { p:p, pid:r[0], role:r[1], blurb:r[2]||"", team:(r[3] && CG.TEAM[r[3]]) ? r[3] : p.team } : null; })
     .filter(Boolean);
 };
 /* Rule 8.1 (v2.22): clubs are ordered by TOTAL POINTS EARNED — games in hand are allowed to
@@ -1019,7 +1067,10 @@ if (typeof module !== "undefined" && typeof require !== "undefined" && require.m
     lg.players.forEach(function(p){
       var r = lg.ratings[p.id].ovr;
       if (r<60||r>97) errs.push(p.tag+" rating out of range: "+r);
-      if (lg.pstats[p.id].gp > lg.teams[p.team].gp) errs.push(p.tag+" GP > team GP");
+      /* v4.13: a player who changed clubs can have more games than his current club; each club line cannot */
+      var bc = lg.pstats[p.id].byClub || {}, sum = 0;
+      Object.keys(bc).forEach(function(code){ sum += bc[code].gp; if (bc[code].gp > lg.teams[code].gp) errs.push(p.tag+" GP for "+code+" > club GP"); });
+      if (sum !== lg.pstats[p.id].gp) errs.push(p.tag+" club lines do not add up to the season line");
     });
     console.log(errs.length ? "FAIL\n"+errs.slice(0,20).join("\n") : "ALL INVARIANTS PASS");
     console.log("games simulated:", totGames, "| players:", lg.players.length);

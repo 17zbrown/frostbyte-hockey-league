@@ -83,7 +83,7 @@ A("per-game bench", /Training camp · any position · 3 a week/.test(hub) && /cl
 A("availability team grid", /<b style="font-family:var\(--f-disp\)">Training camp<\/b> <span class="caption">any position · up to 3 games a week/.test(hub));
 A("Control Center rosters ledger counts the active roster only and labels camp", /var campN=players\.filter\(CG\.isCamp\)\.length, n=players\.length-campN/.test(live) && /Training camp — '\+campN\+'/.test(live));
 A("clubs table, dashboard card, roster room chip", /\+ '\+nCamp\+' camp/.test(live) && /Active roster'\+\(campN\?' · '\+campN\+' in camp':''\)/.test(live) && /r\.camp\?' · '\+r\.camp\+' in camp'/.test(live));
-A("directory, stats, matchup and profile mark camp players", /' · training camp':''/.test(pub) && (pub.match(/\(CG\.isCamp\(p\)\?' · camp':''\)/g)||[]).length === 3 && /CG\.campChip\("xs"\):''\)\+'<\/span>'/.test(pub2) && />Training camp<\/span>/.test(pub));
+A("directory, stats, matchup and profile mark camp players", /' · training camp':''/.test(pub) && /var clubNote = function\(p\)\{[\s\S]{0,700}CG\.isCamp\(p\) \? ' · camp' : ''[\s\S]{0,400}CG\.isCamp\(p\) \? ' · camp' : ''/.test(pub) && (pub.match(/clubNote\(p\)\+'<\/small>/g)||[]).length === 3 && /CG\.campChip\("xs"\):''\)\+\s*\(!pre && moved \?/.test(pub2) && />Training camp<\/span>/.test(pub));
 A("the block header style exists", /tr\.squad-head td\{/.test(head) && /\.bench-h\{/.test(head));
 
 console.log("— direct messages carry the day");
