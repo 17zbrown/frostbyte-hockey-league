@@ -77,7 +77,7 @@ console.log("\n— Rule 3.3 and the changelog, as published");
   A("Rule 3.3: a moved game is played on top of that week's schedule and never displaces another",
     /A game moved into another week is played on top of that week's schedule: it never replaces or removes any of the clubs' other games, and each club still plays every game on its schedule\./.test(r33.paragraphs[0]));
   A("...in both formats (3.3 has no separate full text)", !r33.full);
-  A("the changelog's newest entry is 4.07", rb.changelog[0].version === "4.07");
+  A("the changelog has its 4.07 entry", rb.changelog.some((c) => c.version === "4.07"));
 }
 
 console.log(fail ? `\n${fail} of ${n} FAILED` : `\nall ${n} passed`);

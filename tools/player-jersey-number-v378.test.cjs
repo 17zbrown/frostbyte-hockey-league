@@ -23,7 +23,7 @@ A("the notices quote the number he actually wears", /returning jersey_number int
 A("management's door names a clash with any spot too", /\('set_jersey_number', \$a\$and coalesce\(rs\.status,'active'\) = 'active' and rs\.jersey_number = p_number\$a\$,\s+\$b\$and rs\.jersey_number = p_number\$b\$\)/.test(sql));
 A("every patch must find its text exactly once, or nothing is applied", /the text to patch is not there exactly once/.test(sql));
 A("rehearsed and applied", /REHEARSAL OK: S1 S2 S3 S4 S5 S6 S7 S8 S9 S10 S11/.test(sql) && /APPLIED 2026-10-01 as migration v378_player_jersey_number/.test(sql));
-A("the grant audit watches the door's grant", /'can_see_match','set_my_jersey_number'\]/.test(audit));
+A("the grant audit watches the door's grant", /'can_see_match','set_my_jersey_number'[,\]]/.test(audit));
 
 A("review: the trigger guarantees a valid number (choice, else the offered number if free, else the lowest free)", /if new\.jersey_number between 1 and 99\s+and not exists[\s\S]*?then\s+return new;\s+end if;\s+select min\(n\) into v_free/.test(rev));
 A("review: a swap settles once everyone has moved, in both trade paths", /create or replace function public\._settle_jersey_choices\(p_season uuid, p_profiles uuid\[\]\)/.test(rev)

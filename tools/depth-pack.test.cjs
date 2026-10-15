@@ -175,8 +175,9 @@ console.log("\n— recognition: stars survive the night, and radars have somethi
 
   A("league-average DNA exists", /CG\.leagueDNA = function/.test(pub));
   A("...and the radars actually pass it now",
-    /CG\.vizRadar\(CG\.SKATER_DNA_AXES, CG\.skaterDNA\(s\), CG\.leagueDNA\(/.test(pub) &&
-    /CG\.vizRadar\(CG\.GOALIE_DNA_AXES, CG\.goalieDNA\(s\), CG\.leagueDNA\(/.test(pub));
+    /* v4.08: the radar reads the role line (ds), over that role's games */
+    /CG\.vizRadar\(CG\.SKATER_DNA_AXES, CG\.skaterDNA\(ds\), CG\.leagueDNA\(/.test(pub) &&
+    /CG\.vizRadar\(CG\.GOALIE_DNA_AXES, CG\.goalieDNA\(ds\), CG\.leagueDNA\(/.test(pub));
 
   const ctx = { console, Math, Object, Array, String, Number, JSON };
   ctx.window = ctx; ctx.globalThis = ctx; ctx.CG = {};

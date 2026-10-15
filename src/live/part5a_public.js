@@ -1217,11 +1217,12 @@ CG.ROUTES.home = function(){
     var pts = CG.skaterLeaders(lg,"p").slice(0,5);
     var gls = CG.skaterLeaders(lg,"g").slice(0,5);
     var gs  = CG.goalieLeaders(lg).slice(0,4);
-    function leadCard(title, rows, fmt){
+    /* v4.08: a player listed under the role he did not register for says so ("G, skating"), and one no longer rostered says that */
+    function leadCard(title, rows, fmt, role){
       return '<div class="card"><div class="card-h"><h3>'+title+'</h3><a class="sec-link" href="#/stats">All stats</a></div>'+
         rows.map(function(p,i){ var f = fmt(p);
           return '<div class="leaderrow'+(i===0?" top":"")+'" data-go="'+CG.playerRoute(p)+'"><span class="rk num">'+(i+1)+'</span>'+CG.crest(p.team,30)+
-            '<span style="min-width:0"><b style="font-size:14px">'+esc(p.tag)+'</b><small style="display:block" class="caption">'+esc(CG.TEAM[p.team].name)+' · '+p.pos+'</small></span>'+
+            '<span style="min-width:0"><b style="font-size:14px">'+esc(p.tag)+'</b><small style="display:block" class="caption">'+esc(CG.TEAM[p.team].name)+' · '+esc(CG.offRoleTag(p, role) || p.pos)+(p.former?' · no longer rostered':'')+'</small></span>'+
             '<span class="val"><b class="num">'+f[0]+'</b><span>'+f[1]+'</span></span></div>';
         }).join("")+'</div>';
     }
@@ -1229,9 +1230,9 @@ CG.ROUTES.home = function(){
       '<div class="sec-head" data-rv="mask"><div class="lead"><span class="eyebrow chr">Stat central</span><h2 class="h-sec">Who’s lighting the lamp</h2></div>'+
       '<a class="sec-link" href="#/stats">Stat central</a></div>'+
       '<div class="grid g3" data-rv="up">'+
-        leadCard("Points", pts, function(p){ var s=lg.pstats[p.id]; return [s.p, s.g+"G · "+s.a+"A"]; })+
-        leadCard("Goals", gls, function(p){ var s=lg.pstats[p.id]; return [s.g, s.gp+" GP"]; })+
-        leadCard("Goaltending", gs, function(p){ var s=lg.pstats[p.id]; return [(s.sv/Math.max(1,s.sa)).toFixed(3).replace(/^0/,""), s.w+"-"+s.l+"-"+s.otl]; })+
+        leadCard("Points", pts, function(p){ var s=lg.pstats[p.id]; return [s.p, s.g+"G · "+s.a+"A"]; }, "S")+
+        leadCard("Goals", gls, function(p){ var s=lg.pstats[p.id]; return [s.g, s.sgp+" GP"]; }, "S")+
+        leadCard("Goaltending", gs, function(p){ var s=lg.pstats[p.id]; return [(s.sv/Math.max(1,s.sa)).toFixed(3).replace(/^0/,""), s.w+"-"+s.l+"-"+s.otl]; }, "G")+
       '</div></div></section>';
   }
   /* DEADLINE DAY — silent outside its window (CG.deadlineBand returns "" when far out or unset) */
@@ -1931,6 +1932,21 @@ CG.AFTER.standings = function(param, qs){
   });
 };
 
+/* v4.08: a season line as short text, every role the player played, registered role first; a player who played both
+   says how many games each covers. A stored line from an older season (no sgp/gs) reads as it always did. */
+CG.seasonLineText = function(ps, p, opts){
+  if (!ps) return "—";
+  var isG = !!(p && p.pos === "G"), short = opts && opts.short;
+  var gTxt = function(){ return short ? (ps.gs||ps.gp ? (ps.sv/Math.max(1,ps.sa)).toFixed(3).replace(/^0/,"")+" SV%" : "—")
+                                      : ps.w+"-"+ps.l+"-"+ps.otl+" · "+(ps.sa?(ps.sv/ps.sa).toFixed(3).replace(/^0/,""):"—"); };
+  var sTxt = function(){ return short ? ps.p+" pts" : ps.p+" pts · "+ps.g+"G "+ps.a+"A"; };
+  if (ps.sgp == null && ps.gs == null) return isG ? gTxt() : sTxt();
+  var two = (ps.sgp||0) > 0 && (ps.gs||0) > 0;
+  return CG.lineRoles(ps, isG).map(function(r){
+    return (r === "G" ? gTxt() : sTxt()) + (two ? " ("+(r === "G" ? ps.gs+" in goal" : ps.sgp+" skating")+")" : "");
+  }).join(" · ");
+};
+
 /* ---------- per-profile season archive ---------- */
 CG.SEASONS_LIST = function(){
   return [ { key:"cur", label:CG.seasonTag()+" · "+CG.seasonYear(), status:"Current" } ]
@@ -2078,9 +2094,7 @@ CG.ROUTES.team = function(code, qs){
   if (tab==="roster"){
     /* v2.72: one row builder, so the active roster and training camp render as two blocks */
     var rowFor = function(p){
-        var ps = SD.pstats[p.id], line;
-        if (p.pos==="G") line = ps.w+"-"+ps.l+"-"+ps.otl+" · "+(ps.sa?(ps.sv/ps.sa).toFixed(3).replace(/^0/,""):"—");
-        else line = ps.p+" pts · "+ps.g+"G "+ps.a+"A";
+        var ps = SD.pstats[p.id], line = CG.seasonLineText(ps, p);   /* v4.08: both roles when he played both */
         var route = CG.playerRoute(p)+(archived?"?season="+seasonKey:"");
         return '<tr class="rowlink" style="--tc:'+t.color+'" data-go="'+route+'">'+
           '<td class="tleft"><span class="playercell"><span class="nm">'+esc(p.tag)+'</span>'+(p.rookie?' <span class="chip" style="font-size:9px;padding:1px 7px">R</span>':"")+
@@ -2111,8 +2125,11 @@ CG.ROUTES.team = function(code, qs){
         '<div class="card"><div class="empty" style="padding:40px 20px"><div class="e-art">'+CG.ic("chart",22)+'</div>'+
         '<b>No games played yet</b><p>Goals per game, save percentage, the overall rating and the rest fill in automatically from EA box scores after '+esc(CG.TEAM[code].name)+'’s first final. Nothing here is entered by hand.</p></div></div>';
     } else {
+      /* v4.08: the club's own goalie lines (s.gsv/s.gsa), whoever played in goal for it; an older stored season without
+         them falls back to its registered goalies */
       var _gp = Math.max(1,s.gp), _goalies = roster.filter(function(p){ return p.pos==="G"; }),
-          _svp = _goalies.reduce(function(a,p){ return a+SD.pstats[p.id].sv; },0) / Math.max(1,_goalies.reduce(function(a,p){ return a+SD.pstats[p.id].sa; },0));
+          _svp = s.gsa != null ? (s.gsv||0) / Math.max(1, s.gsa)
+               : _goalies.reduce(function(a,p){ return a+SD.pstats[p.id].sv; },0) / Math.max(1,_goalies.reduce(function(a,p){ return a+SD.pstats[p.id].sa; },0));
       teamStats = '<h3 class="h-sec" style="font-size:18px;margin:0 0 14px">Team stats</h3>'+
         '<div class="grid g4 team-stats" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">'+
         [["Goals per game",(s.gf/_gp).toFixed(2)],["Goals against per game",(s.ga/_gp).toFixed(2)],
@@ -2246,7 +2263,7 @@ CG.ROUTES.players = function(param, qs){
   if (fTeam==="FA") list = [];
   var rows = list.map(function(p){
     var s = lg.pstats[p.id];
-    var stat = p.pos==="G" ? (s.gp? (s.sv/Math.max(1,s.sa)).toFixed(3).replace(/^0/,"")+" SV%" : "—") : s.p+" pts";
+    var stat = CG.seasonLineText(s, p, { short:true });   /* v4.08: both roles when he played both */
     return '<tr class="rowlink" style="--tc:'+CG.TEAM[p.team].color+'" data-go="'+CG.playerRoute(p)+'">'+
       '<td class="tleft"><span class="playercell">'+CG.crest(p.team,24)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+esc(CG.TEAM[p.team].name)+(CG.isCamp(p)?' · training camp':'')+'</small></span>'+
         (p.rookie?'<span class="chip" style="font-size:9px;padding:1px 7px">R</span>':"")+(CG.isCamp(p)?CG.campChip("xs"):"")+'</span></td>'+
@@ -2258,12 +2275,14 @@ CG.ROUTES.players = function(param, qs){
         (CG.ovrProgress(p.id).provisional?'<span style="opacity:.75">*</span>':'')+'</span></td></tr>';
   }).join("");
   rows += freeList.map(function(u){
+    /* v4.08: a player no longer rostered shows the league games he played this season (the same line as Stat Central) */
+    var us = lg.pstats[u.id], ugp = (us && us.gp) || 0;
     /* the league mark stands in for a club crest until they have one */
     return '<tr class="rowlink" style="--tc:var(--chrome)" data-go="#/player/'+esc(u.id)+'">'+
       '<td class="tleft"><span class="playercell">'+CG.leagueMark(48,"light-tile")+'<span><span class="nm">'+esc(u.tag)+'</span><small>'+esc(u.state)+'</small></span></span></td>'+
       '<td class="tnum">'+(u.pos||"—")+'</td><td class="tnum">—</td>'+
       '<td class="tleft mono" style="font-size:12px">'+(u.eaId?esc(u.eaId):'<span class="caption">—</span>')+'</td>'+
-      '<td class="tnum">0</td><td class="tleft tnum" style="font-size:12px">—</td>'+
+      '<td class="tnum">'+ugp+'</td><td class="tleft tnum" style="font-size:12px">'+(ugp ? CG.seasonLineText(us, { pos: u.pos }, { short:true }) : '—')+'</td>'+
       '<td>'+(u.ovr!=null?'<span class="ovrbox '+CG.ovrClass(u.ovr)+'" style="min-width:34px;height:24px;font-size:13px">'+u.ovr+'</span>':'<span class="caption">—</span>')+'</td></tr>';
   }).join("");
   var shown = list.length + freeList.length;
@@ -2337,6 +2356,24 @@ CG.slab = function(mods){
     }).join("");
   }).join("")+'</div>';
 };
+/* v4.08: a player who played league games this season and is no longer rostered keeps them on his profile (Rule 6.1):
+   the season line (every role he played) and the game log, from the same lg.pstats and lg.glog Stat Central reads.
+   "" for an account with no league games this season. */
+CG.formerLeagueHtml = function(pid){
+  var lg = CG.lg, fp = (lg.formerPlayers||[]).find(function(x){ return x.id === pid; });
+  var s = fp && lg.pstats && lg.pstats[pid];
+  if (!s || !s.gp) return "";
+  var isG = fp.pos === "G";
+  var logs = CG.gameLogTables((lg.glog||{})[pid], isG, { link: true }).map(function(t){
+    return '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Game log'+(t.two ? (t.kind === "G" ? ", in goal" : ", skating") : '')+'</h3><span class="chip">'+t.n+' GP</span></div>'+
+      '<div class="tblwrap"><table class="tbl keepcols"><caption class="sr">Game-by-game, '+esc(CG.seasonTag())+'</caption><thead><tr>'+t.head+
+      '</tr></thead><tbody>'+t.rows+'</tbody></table></div></div>';
+  }).join("");
+  return '<section class="sec-tight" style="padding-top:10px"><div class="shell" style="max-width:960px">'+
+    '<div class="card"><div class="card-h"><h3>'+esc(CG.seasonTag())+' league season</h3><span class="chip">no longer rostered</span>'+
+      '<span class="caption" style="margin-left:auto">last played for '+esc((CG.TEAM[fp.team]||{}).name||fp.team)+'</span></div>'+
+      '<div class="card-b">'+CG.profileSeasonHtml(s, isG)+'</div></div>'+logs+'</div></section>';
+};
 CG.ROUTES.player = function(pid, qs){
   var lg = CG.lg;
   pid = pid || (qs && (qs.id || qs.pid)) || null;  /* accept legacy #/player?id=… links */
@@ -2345,6 +2382,7 @@ CG.ROUTES.player = function(pid, qs){
      minimal profile whose header + pickup section are filled async in AFTER.player. */
   if (!p) return CG.pageHead("Player", "Player profile", "") +
     '<div class="shell" style="max-width:960px;padding-bottom:2px"><div id="acctHdr" class="note">Loading account…</div></div>' +
+    CG.formerLeagueHtml(pid) +
     '<section class="sec-tight" style="padding-top:10px"><div class="shell" style="max-width:960px"><div id="pickupSection"></div></div></section>';
   var seasonKey = (qs.season && CG.lg.archive && CG.lg.archive[qs.season]) ? qs.season : "cur";
   var SD = CG.seasonData(seasonKey);
@@ -2428,24 +2466,40 @@ CG.ROUTES.player = function(pid, qs){
       : CG.scoutLine(p);
     /* advanced EA metrics — only when real box scores exist (auto-imported) */
     var hasAdv = !archived && s.gp>0 && s.toi!=null;
-    var advCells = isG
-      ? [["TOI/GP", s.gp?CG.fmtToi(s.toi/s.gp):"—"],["Brk SV%", s.brkShots?Math.round(100*s.brkSv/s.brkShots)+"%":"—"],
-         ["Brk saves",(s.brkSv||0)+"/"+(s.brkShots||0)],["Poke checks", s.pokes||0]]
-      : [["TOI/GP", s.gp?CG.fmtToi(s.toi/s.gp):"—"],["PPG", s.ppg||0],["SHG", s.shg||0],["Giveaways", s.gv||0],
-         ["Pass%", s.passAtt?Math.round(100*s.pass/s.passAtt)+"%":"—"],["Poss/GP",(s.gp&&s.poss!=null)?CG.fmtToi(s.poss/s.gp):"—"],
-         ["Shot att.", s.sat||0],["Interceptions", s.intc||0],["Pen. drawn", s.pdrawn||0],["Deflections", s.defl||0],["Saucer", s.saucer||0],
-         ["EA OFF", s._ratN?(+s.ratOff).toFixed(1):"—"],["EA DEF", s._ratN?(+s.ratDef).toFixed(1):"—"],["EA TP", s._ratN?(+s.ratTeam).toFixed(1):"—"]];
+    /* v4.08: one set of cells per role played, each over that role's games and ice time */
+    var advCellsFor = function(sr, goalie){
+      return goalie
+        ? [["TOI/GP", sr.gp&&sr.toi!=null?CG.fmtToi(sr.toi/sr.gp):"—"],["Brk SV%", sr.brkShots?Math.round(100*sr.brkSv/sr.brkShots)+"%":"—"],
+           ["Brk saves",(sr.brkSv||0)+"/"+(sr.brkShots||0)],["Poke checks", sr.pokes||0]]
+        : [["TOI/GP", sr.gp&&sr.toi!=null?CG.fmtToi(sr.toi/sr.gp):"—"],["PPG", sr.ppg||0],["SHG", sr.shg||0],["Giveaways", sr.gv||0],
+           ["Pass%", sr.passAtt?Math.round(100*sr.pass/sr.passAtt)+"%":"—"],["Poss/GP",(sr.gp&&sr.poss!=null)?CG.fmtToi(sr.poss/sr.gp):"—"],
+           ["Shot att.", sr.sat||0],["Interceptions", sr.intc||0],["Pen. drawn", sr.pdrawn||0],["Deflections", sr.defl||0],["Saucer", sr.saucer||0],
+           ["EA OFF", sr._ratN?(+sr.ratOff).toFixed(1):"—"],["EA DEF", sr._ratN?(+sr.ratDef).toFixed(1):"—"],["EA TP", sr._ratN?(+sr.ratTeam).toFixed(1):"—"]];
+    };
+    var advRoles = (s.sgp != null || s.gs != null) ? CG.lineRoles(s, isG) : [isG ? "G" : "S"];
+    var advGrid = function(cells){ return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:12px">'+
+      cells.map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'; };
     var advCard = hasAdv ? '<div class="card"><div class="card-h"><h3>Advanced — from EA box scores</h3><span class="chip chip-chrome">Auto-imported</span></div><div class="card-b">'+
-      '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:12px">'+
-      advCells.map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
+      advRoles.map(function(r, i){
+        var sr = (s.sgp != null || s.gs != null) ? CG.roleLine(s, r) : s;
+        return (advRoles.length > 1 ? '<div class="eyebrow" style="margin:'+(i?'14px':'0')+' 0 8px">'+(r === "G" ? "In goal" : "Skating")+' · '+sr.gp+' GP</div>' : '')+advGrid(advCellsFor(sr, r === "G"));
+      }).join("")+
       '<p class="caption" style="margin-top:12px">Every figure is pulled automatically from the EA NHL match record — no manual entry.</p></div></div>' : '';
     /* pre-season line — separate from the season, but part of the overall rating */
     var ps = preS;
+    /* v4.08: per role played, each over its own games */
+    var preCells = function(pr, goalie){
+      return goalie ? [["GP",pr.gp],["Record",pr.w+"-"+pr.l+"-"+pr.otl],["SV%",pr.sa?(pr.sv/pr.sa).toFixed(3).replace(/^0/,""):"—"],["GAA",pr.gp?(pr.ga/pr.gp).toFixed(2):"—"],["Shutouts",pr.so]]
+                    : [["GP",pr.gp],["Goals",pr.g],["Assists",pr.a],["Points",pr.p],["+/-",(pr.pm>0?"+":"")+pr.pm],["Shots",pr.shots]];
+    };
+    var preRoles = ps ? ((ps.sgp != null || ps.gs != null) ? CG.lineRoles(ps, isG) : [isG ? "G" : "S"]) : [];
     var preCard = (ps && ps.gp>0) ? '<div class="card"><div class="card-h"><h3>Pre-season</h3><span class="chip">'+ps.gp+' GP · counts toward overall</span></div><div class="card-b">'+
-      '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:12px">'+
-      (isG ? [["GP",ps.gp],["Record",ps.w+"-"+ps.l+"-"+ps.otl],["SV%",ps.sa?(ps.sv/ps.sa).toFixed(3).replace(/^0/,""):"—"],["GAA",ps.gp?(ps.ga/ps.gp).toFixed(2):"—"],["Shutouts",ps.so]]
-           : [["GP",ps.gp],["Goals",ps.g],["Assists",ps.a],["Points",ps.p],["+/-",(ps.pm>0?"+":"")+ps.pm],["Shots",ps.shots]])
-        .map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>'+
+      preRoles.map(function(r, i){
+        var pr = (ps.sgp != null || ps.gs != null) ? CG.roleLine(ps, r) : ps;
+        return (preRoles.length > 1 ? '<div class="eyebrow" style="margin:'+(i?'14px':'0')+' 0 8px">'+(r === "G" ? "In goal" : "Skating")+' · '+pr.gp+' GP</div>' : '')+
+          '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:12px">'+
+          preCells(pr, r === "G").map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:20px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>';
+      }).join("")+
       '<p class="caption" style="margin-top:12px">Pre-season games stay out of the league standings but count toward the overall rating. A returning player is draft-eligible on registration; a first-year needs three pre-season appearances to enter the draft (Rule 2.8), and is placed on a club automatically otherwise.</p></div></div>' : '';
     /* Empty-state cleanup: a first-year (or just-signed) player with no games at any stage gets a
        single broadcast "fresh sheet" panel instead of a wall of twelve zeroes. The pristine-ice
@@ -2473,19 +2527,23 @@ CG.ROUTES.player = function(pid, qs){
        can pair them with each other or with whatever else is present when one is absent. */
     var vizDna = "", vizEff = "";
     if (!(isEmpty || archived || (s.gp||0)<1)){
-      vizDna = isG
-        ? '<div class="viz-card"><div class="vch"><h4>Goalie DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.GOALIE_DNA_AXES, CG.goalieDNA(s), CG.leagueDNA(lg, true, null, p.id), p.tag, "Average goaltender")+'</div>'
-        : '<div class="viz-card"><div class="vch"><h4>Skater DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.SKATER_DNA_AXES, CG.skaterDNA(s), CG.leagueDNA(lg, false, CG.posGroup && CG.posGroup(p.pos), p.id), p.tag, "Average of other "+(CG.posGroupLabel && CG.posGroup ? CG.posGroupLabel(CG.posGroup(p.pos)) : "players"))+'</div>';
-      vizEff = isG
+      /* v4.08: the radar and gauges read the registered role's own line (or the only role he played), over that
+         role's games; the By position card and the season line show the rest */
+      var dRole = (s.sgp != null || s.gs != null) ? CG.lineRoles(s, isG)[0] : (isG ? "G" : "S");
+      var ds = (s.sgp != null || s.gs != null) ? CG.roleLine(s, dRole) : s, dG = dRole === "G";
+      vizDna = dG
+        ? '<div class="viz-card"><div class="vch"><h4>Goalie DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.GOALIE_DNA_AXES, CG.goalieDNA(ds), CG.leagueDNA(lg, true, null, p.id), p.tag, "Average goaltender")+'</div>'
+        : '<div class="viz-card"><div class="vch"><h4>Skater DNA</h4><span class="vsub">0–100 profile</span></div>'+CG.vizRadar(CG.SKATER_DNA_AXES, CG.skaterDNA(ds), CG.leagueDNA(lg, false, CG.posGroup && CG.posGroup(p.pos), p.id), p.tag, "Average of other "+(CG.posGroupLabel && CG.posGroup ? CG.posGroupLabel(CG.posGroup(p.pos)) : "players"))+'</div>';
+      vizEff = dG
         ? '<div class="viz-card"><div class="vch"><h4>Efficiency</h4><span class="vsub">goaltending</span></div><div class="vgauges">'+
-            CG.vizGauge(s.sa?(s.sv/s.sa*100):0,100, s.sa?(s.sv/s.sa).toFixed(3).replace(/^0/,""):"—","Save %")+
-            CG.vizGauge(s.gp?(3-Math.min(3,s.ga/s.gp)):0,3, s.gp?(s.ga/s.gp).toFixed(2):"—","GAA","var(--gold)")+
-            CG.vizGauge(s.qs||0, Math.max(s.gp,1), ""+(s.qs||0), "Quality starts","var(--steel)")+
+            CG.vizGauge(ds.sa?(ds.sv/ds.sa*100):0,100, ds.sa?(ds.sv/ds.sa).toFixed(3).replace(/^0/,""):"—","Save %")+
+            CG.vizGauge(ds.gp?(3-Math.min(3,ds.ga/ds.gp)):0,3, ds.gp?(ds.ga/ds.gp).toFixed(2):"—","GAA","var(--gold)")+
+            CG.vizGauge(ds.qs||0, Math.max(ds.gp,1), ""+(ds.qs||0), "Quality starts","var(--steel)")+
           '</div></div>'
         : '<div class="viz-card"><div class="vch"><h4>Efficiency</h4><span class="vsub">per game</span></div><div class="vgauges">'+
-            CG.vizGauge(s.shots?(s.g/s.shots*100):0,20,(s.shots?Math.round(s.g/s.shots*100):0)+"%","Shooting %")+
-            CG.vizGauge(s.p||0, Math.max(s.gp*3,1), ((s.p||0)/Math.max(1,s.gp)).toFixed(2), "Pts / GP","var(--steel)")+
-            CG.vizGauge(s.hits||0, Math.max(s.gp*5,1), ""+(s.hits||0), "Hits","var(--gold)")+
+            CG.vizGauge(ds.shots?(ds.g/ds.shots*100):0,20,(ds.shots?Math.round(ds.g/ds.shots*100):0)+"%","Shooting %")+
+            CG.vizGauge(ds.p||0, Math.max(ds.gp*3,1), ((ds.p||0)/Math.max(1,ds.gp)).toFixed(2), "Pts / GP","var(--steel)")+
+            CG.vizGauge(ds.hits||0, Math.max(ds.gp*5,1), ""+(ds.hits||0), "Hits","var(--gold)")+
           '</div></div>';
     }
     /* by-position split: only for the live season (archived seasons kept aggregates, not rows),
@@ -2509,7 +2567,7 @@ CG.ROUTES.player = function(pid, qs){
           posKeys.map(function(g){ return '<option value="'+g[0]+'">'+esc(g[1])+' · '+posGp(g[0])+' GP'+(g[0]===posHead?' · signed up':'')+'</option>'; }).join("")+
         '</select></label>'
       : "";
-    var kpiStrip = '<div class="pm-pad">'+posPick+'<div id="posKpi">'+CG.statCellsHtml(cells)+'</div>'+
+    var kpiStrip = '<div class="pm-pad">'+posPick+'<div id="posKpi">'+CG.profileSeasonHtml(s, isG)+'</div>'+
       (posKeys.length >= 2 ? CG.centerWingLine(posLines) : "")+'</div>';
     var scoutCard = '<div class="card"><div class="card-h"><h3>'+(archived?"Season summary":"Scouting the numbers")+'</h3><span class="chip">'+(archived?"Archived":"Derived from box scores")+'</span></div><div class="card-b">'+
         '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(scout)+'</p></div></div>';
@@ -2544,35 +2602,24 @@ CG.ROUTES.player = function(pid, qs){
   }
   if (tab==="log"){
     var log = SD.glog[p.id];
-    body += log.length ? '<div class="card"><div class="tblwrap"><table class="tbl keepcols"><caption>Game-by-game — '+esc(SD.label)+'</caption><thead><tr>'+
-      (isG?'<th>Wk</th><th class="tleft">Opponent</th><th>SA</th><th>SV</th><th>GA</th><th>Result</th>'
-          :'<th>Wk</th><th class="tleft">Opponent</th><th>G</th><th>A</th><th>P</th><th>S</th><th>+/-</th><th>PIM</th>')+
-      '</tr></thead><tbody>'+log.map(function(en){
-        var b = en.line;
-        var link = archived ? '' : ' class="rowlink" data-go="#/matchup/'+en.game+'"';
-        return '<tr'+link+'><td class="tnum">'+en.week+'</td>'+
-          '<td class="tleft"><span class="teamcell">'+CG.crest(en.opp,22)+'<span class="nm">'+esc(CG.TEAM[en.opp].name)+'</span></span></td>'+
-          (isG? '<td>'+b.sa+'</td><td>'+b.sv+'</td><td>'+b.ga+'</td><td><span class="chip '+(b.w?"chip-win":"chip-loss")+'">'+(b.w?"W":b.otl?"OTL":"L")+(b.so?" · SO":"")+'</span></td>'
-              : '<td class="'+(b.g?"":"z")+'">'+b.g+'</td><td class="'+(b.a?"":"z")+'">'+b.a+'</td><td class="pts">'+(b.g+b.a)+'</td><td>'+b.shots+'</td><td>'+(b.pm>0?"+":"")+b.pm+'</td><td class="'+(b.pim?"":"z")+'">'+b.pim+'</td>')+
-          '</tr>';
-      }).join("")+'</tbody></table></div>'+
-      (archived?'<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Archived box scores are kept for the record; match pages are only linked for the current season.</span></div>':"")+'</div>'
+    /* v4.08: a skating table and an in-goal table when he played both; each row drawn as what he played that game */
+    var logParts = CG.gameLogTables(log, isG, { link: !archived });
+    body += log.length ? logParts.map(function(t, i){
+        return '<div class="card"'+(i?' style="margin-top:18px"':'')+'>'+
+          (t.two ? '<div class="card-h"><h3>'+(t.kind === "G" ? "In goal" : "Skating")+'</h3><span class="chip">'+t.n+' GP</span></div>' : '')+
+          '<div class="tblwrap"><table class="tbl keepcols"><caption>Game-by-game'+(t.two ? (t.kind === "G" ? ", in goal" : ", skating") : '')+' — '+esc(SD.label)+'</caption><thead><tr>'+t.head+
+          '</tr></thead><tbody>'+t.rows+'</tbody></table></div>'+
+          (archived && i === logParts.length-1 ?'<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Archived box scores are kept for the record; match pages are only linked for the current season.</span></div>':"")+'</div>';
+      }).join("")
     : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("chart",22)+'</div><b>No games recorded'+(archived?" that season":" yet")+'</b><p>'+(archived?"This player didn’t draw into a lineup during "+esc(SD.label)+".":"This player hasn’t drawn into a lineup — the game log fills in after their first shift.")+'</p></div></div>';
     /* pre-season game log — its own table, never mixed into the season's */
     var preLog = (!archived && CG.lg.pre && CG.lg.pre.glog && CG.lg.pre.glog[p.id]) || [];
     if (preLog.length){
-      body += '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Pre-season games</h3><span class="chip">'+preLog.length+' GP</span></div>'+
-        '<div class="tblwrap"><table class="tbl keepcols"><caption class="sr">Pre-season game log</caption><thead><tr>'+
-        (isG?'<th>Wk</th><th class="tleft">Opponent</th><th>SA</th><th>SV</th><th>GA</th><th>Result</th>'
-            :'<th>Wk</th><th class="tleft">Opponent</th><th>G</th><th>A</th><th>P</th><th>S</th><th>+/-</th><th>PIM</th>')+
-        '</tr></thead><tbody>'+preLog.map(function(en){
-          var b = en.line;
-          return '<tr class="rowlink" data-go="#/matchup/'+en.game+'"><td class="tnum">'+en.week+'</td>'+
-            '<td class="tleft"><span class="teamcell">'+CG.crest(en.opp,22)+'<span class="nm">'+esc(CG.TEAM[en.opp].name)+'</span></span></td>'+
-            (isG? '<td>'+b.sa+'</td><td>'+b.sv+'</td><td>'+b.ga+'</td><td><span class="chip '+(b.w?"chip-win":"chip-loss")+'">'+(b.w?"W":b.otl?"OTL":"L")+(b.so?" · SO":"")+'</span></td>'
-                : '<td class="'+(b.g?"":"z")+'">'+b.g+'</td><td class="'+(b.a?"":"z")+'">'+b.a+'</td><td class="pts">'+(b.g+b.a)+'</td><td>'+b.shots+'</td><td>'+(b.pm>0?"+":"")+b.pm+'</td><td class="'+(b.pim?"":"z")+'">'+b.pim+'</td>')+
-            '</tr>';
-        }).join("")+'</tbody></table></div></div>';
+      body += CG.gameLogTables(preLog, isG, { link: true }).map(function(t){
+        return '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Pre-season games'+(t.two ? (t.kind === "G" ? ", in goal" : ", skating") : '')+'</h3><span class="chip">'+t.n+' GP</span></div>'+
+          '<div class="tblwrap"><table class="tbl keepcols"><caption class="sr">Pre-season game log</caption><thead><tr>'+t.head+
+          '</tr></thead><tbody>'+t.rows+'</tbody></table></div></div>';
+      }).join("");
     }
   }
   if (tab==="honors" && archived){
@@ -2664,11 +2711,13 @@ CG.leagueDNA = function(lg, isGoalie, posGroup, exceptId){
   var sums = null, cnt = null, n = 0;
   (lg.players||[]).forEach(function(pl){
     if (exceptId && pl.id === exceptId) return;      /* "you vs the field" must not include you */
-    var isG = pl.pos === "G";
-    if (isG !== !!isGoalie) return;
     if (posGroup && !isGoalie && CG.posGroup && CG.posGroup(pl.pos) !== posGroup) return;
-    var st = lg.pstats[pl.id];
-    if (!st || (st.gp||0) < 1) return;
+    /* v4.08: the field is everyone who played the role, each over his games in it */
+    var st0 = lg.pstats[pl.id];
+    if (!st0) return;
+    var st = (st0.sgp != null || st0.gs != null) ? CG.roleLine(st0, isGoalie ? "G" : "S") : st0;
+    if ((st0.sgp == null && st0.gs == null) && ((pl.pos === "G") !== !!isGoalie)) return;
+    if ((st.gp||0) < 1) return;
     var v = fn(st); if (!v || !v.length) return;
     if (!sums){ sums = v.map(function(){ return 0; }); cnt = v.map(function(){ return 0; }); }
     v.forEach(function(x, i){ if (x == null) return; sums[i] += x; cnt[i]++; });   /* v3.87: an untracked axis is skipped, not averaged as 0 */
@@ -2853,6 +2902,43 @@ CG.profileStatCells = function(s, goalie){
     ? [["GP",s.gp||0],["Record",(s.w||0)+"-"+(s.l||0)+"-"+(s.otl||0)],["SV%",s.sa?(s.sv/s.sa).toFixed(3).replace(/^0/,""):"—"],["GAA",s.gp?(s.ga/s.gp).toFixed(2):"—"],["Shutouts",s.so||0],["Quality starts",s.qs||0]]
     : [["GP",s.gp||0],["Goals",s.g||0],["Assists",s.a||0],["Points",s.p||0],["+/-",((s.pm||0)>0?"+":"")+(s.pm||0)],["Shots",s.shots||0],["Shooting%",s.shots?Math.round(100*s.g/s.shots)+"%":"—"],["Hits",s.hits||0],["Blocks",s.blk||0],["Takeaways",s.tk||0],["PIM",s.pim||0],["GWG",s.gwg||0]];
 };
+/* v4.08: the profile's season line, one grid per role the player played (his registered role first), each over that
+   role's own games; a player who played one role renders exactly as before. A stored older season line (no sgp/gs)
+   renders as it always did. */
+CG.profileSeasonHtml = function(s, isG){
+  s = s || {};
+  if (s.sgp == null && s.gs == null) return CG.statCellsHtml(CG.profileStatCells(s, isG));
+  var roles = CG.lineRoles(s, isG);
+  if (roles.length < 2) return CG.statCellsHtml(CG.profileStatCells(CG.roleLine(s, roles[0]), roles[0] === "G"));
+  return roles.map(function(r, i){
+    var line = CG.roleLine(s, r);
+    return '<div'+(i ? ' style="margin-top:14px"' : '')+'><div class="eyebrow" style="margin-bottom:8px">'+(r === "G" ? "In goal" : "Skating")+' · '+line.gp+' GP</div>'+
+      CG.statCellsHtml(CG.profileStatCells(line, r === "G"))+'</div>';
+  }).join("");
+};
+/* v4.08: a game log split by what was played: a skating table and an in-goal table when he played both, one table
+   otherwise. Returns [{kind, two, n, head, rows}]; the caller frames them. */
+CG.gameLogTables = function(log, isG, opts){
+  opts = opts || {};
+  var goalLine = function(b){ return !!(b && (b.goalie || (b.g == null && b.sa != null))); };
+  var groups = { G: [], S: [] };
+  (log || []).forEach(function(en){ groups[goalLine(en.line) ? "G" : "S"].push(en); });
+  var kinds = (isG ? ["G", "S"] : ["S", "G"]).filter(function(k){ return groups[k].length; });
+  return kinds.map(function(k){
+    var goalie = k === "G";
+    return { kind: k, two: kinds.length > 1, n: groups[k].length,
+      head: goalie ? '<th>Wk</th><th class="tleft">Opponent</th><th>SA</th><th>SV</th><th>GA</th><th>Result</th>'
+                   : '<th>Wk</th><th class="tleft">Opponent</th><th>G</th><th>A</th><th>P</th><th>S</th><th>+/-</th><th>PIM</th>',
+      rows: groups[k].map(function(en){
+        var b = en.line, link = opts.link ? ' class="rowlink" data-go="#/matchup/'+en.game+'"' : '';
+        return '<tr'+link+'><td class="tnum">'+en.week+'</td>'+
+          '<td class="tleft"><span class="teamcell">'+CG.crest(en.opp,22)+'<span class="nm">'+esc(CG.TEAM[en.opp].name)+'</span></span></td>'+
+          (goalie ? '<td>'+b.sa+'</td><td>'+b.sv+'</td><td>'+b.ga+'</td><td><span class="chip '+(b.w?"chip-win":"chip-loss")+'">'+(b.w?"W":b.otl?"OTL":"L")+(b.so?" · SO":"")+'</span></td>'
+                  : '<td class="'+(b.g?"":"z")+'">'+b.g+'</td><td class="'+(b.a?"":"z")+'">'+b.a+'</td><td class="pts">'+(b.g+b.a)+'</td><td>'+b.shots+'</td><td>'+(b.pm>0?"+":"")+b.pm+'</td><td class="'+(b.pim?"":"z")+'">'+b.pim+'</td>')+
+          '</tr>';
+      }).join("") };
+  });
+};
 CG.statCellsHtml = function(cells){
   return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px">'+
     cells.map(function(kv){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:24px">'+kv[1]+'</b><span>'+kv[0]+'</span></div>'; }).join("")+'</div>';
@@ -3003,20 +3089,33 @@ CG.broadcastCard = function(p){
   return h+'</div></div>';
 };
 CG.scoutLine = function(p){
-  var lg = CG.lg, s = lg.pstats[p.id], r = lg.ratings[p.id];
-  if (p.pos==="G"){
-    if (!s.gp) return p.tag+" has yet to see game action this season, so there is no performance record to evaluate.";
+  var lg = CG.lg, all = lg.pstats[p.id], r = lg.ratings[p.id];
+  var isG = p.pos==="G";
+  /* v4.08: the registered role's sentence over that role's games, then a sentence for the other role when he played it */
+  var gs = all.gs != null ? all.gs : (isG ? all.gp : 0), sgp = all.sgp != null ? all.sgp : (isG ? 0 : all.gp);
+  var goalieText = function(s){
     var svp = (s.sv/Math.max(1,s.sa)).toFixed(3).replace(/^0/,"");
-    return p.tag+" has started "+s.gp+" of "+lg.teams[p.team].gp+" club games with a "+svp+" save percentage and a "+
-      (s.ga/Math.max(1,s.gp)).toFixed(2)+" goals-against average ("+s.w+"-"+s.l+"-"+s.otl+"). "+
-      (s.so?("Has "+s.so+" shutout"+(s.so>1?"s":"")+" and "):"Has ")+s.qs+" quality starts in "+s.gp+" appearances. Every figure here is aggregated from recorded box scores.";
+    return p.tag+" has started "+gs+" of "+lg.teams[p.team].gp+" club games with a "+svp+" save percentage and a "+
+      (s.ga/Math.max(1,gs)).toFixed(2)+" goals-against average ("+s.w+"-"+s.l+"-"+s.otl+"). "+
+      (s.so?("Has "+s.so+" shutout"+(s.so>1?"s":"")+" and "):"Has ")+s.qs+" quality start"+(s.qs===1?"":"s")+" in "+gs+" appearance"+(gs===1?"":"s")+" in goal.";
+  };
+  var skaterText = function(s){
+    var ppg = (s.p/Math.max(1,sgp)).toFixed(2);
+    return p.tag+" is producing "+ppg+" points per game across "+sgp+" games ("+s.g+"G, "+s.a+"A), shooting "+
+      (s.shots?Math.round(100*s.g/s.shots):0)+"% with a "+(s.pm>0?"+":"")+s.pm+" rating. Defensive activity — "+
+      s.blk+" blocks, "+s.tk+" takeaways, "+s.hits+" hits — rates "+ (r.parts.defense>=60?"above":"near")+" the league bar for the position. Discipline: "+
+      s.pim+" PIM.";
+  };
+  if (isG){
+    if (!all.gp) return p.tag+" has yet to see game action this season, so there is no performance record to evaluate.";
+    var out = gs ? goalieText(all) : p.tag+" has not started in goal yet this season.";
+    if (sgp) out += " Also skated in "+sgp+" game"+(sgp===1?"":"s")+" ("+all.g+"G, "+all.a+"A).";
+    return out+" Every figure here is aggregated from recorded box scores.";
   }
-  if (!s.gp) return p.tag+" has not drawn into a lineup yet this season — no conclusions until the sample exists.";
-  var ppg = (s.p/s.gp).toFixed(2);
-  return p.tag+" is producing "+ppg+" points per game across "+s.gp+" games ("+s.g+"G, "+s.a+"A), shooting "+
-    (s.shots?Math.round(100*s.g/s.shots):0)+"% with a "+(s.pm>0?"+":"")+s.pm+" rating. Defensive activity — "+
-    s.blk+" blocks, "+s.tk+" takeaways, "+s.hits+" hits — rates "+ (r.parts.defense>=60?"above":"near")+" the league bar for the position. Discipline: "+
-    s.pim+" PIM. This summary is computed from verified game data only.";
+  if (!all.gp) return p.tag+" has not drawn into a lineup yet this season — no conclusions until the sample exists.";
+  var txt = sgp ? skaterText(all) : p.tag+" has not skated in a game yet this season.";
+  if (gs) txt += " Also played "+gs+" game"+(gs===1?"":"s")+" in goal ("+all.w+"-"+all.l+"-"+all.otl+", "+(all.sv/Math.max(1,all.sa)).toFixed(3).replace(/^0/,"")+" save percentage).";
+  return txt+" This summary is computed from verified game data only.";
 };
 CG.AFTER.player = function(pid, qs){
   /* v3.71 (Q30): the Position picker re-renders the season line in place, never the page */
@@ -3027,7 +3126,7 @@ CG.AFTER.player = function(pid, qs){
     if (box){
       if (v === "all"){
         var pl = (CG.lg.players || []).find(function(x){ return x.id === id; }) || {};
-        box.innerHTML = CG.statCellsHtml(CG.profileStatCells((CG.lg.pstats || {})[id], pl.pos === "G"));
+        box.innerHTML = CG.profileSeasonHtml((CG.lg.pstats || {})[id], pl.pos === "G");   /* v4.08: every role he played */
       } else {
         box.innerHTML = CG.statCellsHtml(CG.profileStatCells(CG.posGroupLines(id)[v], v === "G"));
       }
@@ -3050,7 +3149,9 @@ CG.AFTER.player = function(pid, qs){
         CG.eaIdChip(r.data.ea_id)+
         (CG.auth && CG.auth.user && CG.auth.user.id!==pid
           ? '<a class="chip chip-chrome" href="#/hub/messages" data-pm="'+esc(pid)+'" style="cursor:pointer">'+CG.ic("msg",12)+' Message</a>' : "")+
-        '</div><p class="caption" style="margin:4px 0 0">This account isn’t on a league roster — only pickup game stats show here.</p>';
+        '</div><p class="caption" style="margin:4px 0 0">'+(CG.formerLeagueHtml(pid)
+          ? 'No longer on a league roster. This season’s league games stay in the official record (Rule 6.1).'
+          : 'This account isn’t on a league roster, so only pickup game stats show here.')+'</p>';
       else { hdr.innerHTML = '<b>Profile not found.</b>'; var ps=document.getElementById("pickupSection"); if (ps) ps.innerHTML=""; }
     }, function(){});
   }
@@ -3229,13 +3330,17 @@ CG.ROUTES.stats = function(param, qs){
     '<span class="caption">Click a column to sort.</span></div>';
   var table;
   if (tab==="skaters"){
-    var list = lg.players.filter(function(p){ return p.pos!=="G" && lg.pstats[p.id].gp>=minGp && (!fTeam||p.team===fTeam); })
+    /* v4.08: everyone who skated, over his games skated (a goalie's skating games included), and players no longer
+       rostered too: every game counts (commissioner, 2026-10-14) */
+    /* (with Min GP 0, a rostered skater with no games at all is still listed, as before) */
+    var skatedOrSkater = function(p, s0){ return s0.sgp > 0 || (p.pos !== "G" && !p.former && !s0.gs); };
+    var list = CG.statPlayers(lg).filter(function(p){ var s0 = lg.pstats[p.id]; return s0 && skatedOrSkater(p, s0) && s0.sgp>=minGp && (!fTeam||p.team===fTeam); })
       .sort(function(a,b){ return lg.pstats[b.id].p-lg.pstats[a.id].p; });
     table = '<table class="tbl keepcols" id="statTbl"><caption>Skater statistics — minimum '+minGp+' GP</caption><thead><tr>'+
       '<th class="tleft">Player</th><th class="sortable">GP</th><th class="sortable">G</th><th class="sortable">A</th><th class="sortable sorted">P</th><th class="sortable">P/GP</th><th class="sortable">+/-</th><th class="sortable">S</th><th class="sortable">S%</th><th class="sortable">HIT</th><th class="sortable">BLK</th><th class="sortable">TK</th><th class="sortable">PIM</th><th class="sortable">GWG</th><th class="sortable">FO%</th></tr></thead><tbody>'+
-      list.map(function(p){ var s=lg.pstats[p.id];
+      list.map(function(p){ var s=CG.roleLine(lg.pstats[p.id], "S");
         return '<tr class="rowlink" style="--tc:'+CG.TEAM[p.team].color+'" data-go="'+CG.playerRoute(p)+'">'+
-        '<td class="tleft"><span class="playercell">'+CG.crest(p.team,22)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+p.pos+' · '+CG.TEAM[p.team].code+(CG.isCamp(p)?' · camp':'')+'</small></span></span></td>'+
+        '<td class="tleft"><span class="playercell">'+CG.crest(p.team,22)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+esc(CG.offRoleTag(p,"S")||p.pos)+' · '+CG.TEAM[p.team].code+(CG.isCamp(p)?' · camp':'')+(p.former?' · no longer rostered':'')+'</small></span></span></td>'+
         '<td data-v="'+s.gp+'">'+s.gp+'</td><td data-v="'+s.g+'" class="'+(s.g?"":"z")+'">'+s.g+'</td><td data-v="'+s.a+'" class="'+(s.a?"":"z")+'">'+s.a+'</td>'+
         '<td data-v="'+s.p+'" class="pts">'+s.p+'</td><td data-v="'+(s.p/Math.max(1,s.gp)).toFixed(2)+'">'+(s.p/Math.max(1,s.gp)).toFixed(2)+'</td>'+
         '<td data-v="'+s.pm+'">'+(s.pm>0?"+":"")+s.pm+'</td><td data-v="'+s.shots+'">'+s.shots+'</td>'+
@@ -3245,14 +3350,14 @@ CG.ROUTES.stats = function(param, qs){
         '<td data-v="'+(s.fot?100*s.fow/s.fot:0).toFixed(1)+'">'+(s.fot?(100*s.fow/s.fot).toFixed(1):"—")+'</td></tr>'; }).join("")+
       (list.length ? "" : emptyStats(15,"skater stats"))+'</tbody></table>';
   } else if (tab==="advanced"){
-    var la = lg.players.filter(function(p){ return p.pos!=="G" && lg.pstats[p.id].gp>=minGp && (!fTeam||p.team===fTeam); })
-      .sort(function(a,b){ return (lg.pstats[b.id].toi||0)-(lg.pstats[a.id].toi||0); });
+    var la = CG.statPlayers(lg).filter(function(p){ var s0 = lg.pstats[p.id]; return s0 && (s0.sgp > 0 || (p.pos !== "G" && !p.former && !s0.gs)) && s0.sgp>=minGp && (!fTeam||p.team===fTeam); })
+      .sort(function(a,b){ return (lg.pstats[b.id].skToi||0)-(lg.pstats[a.id].skToi||0); });
     table = '<table class="tbl keepcols" id="statTbl"><caption>Advanced skater metrics — auto-imported from EA box scores</caption><thead><tr>'+
       '<th class="tleft">Player</th><th class="sortable">GP</th><th class="sortable sorted">TOI/GP</th><th class="sortable">PPG</th><th class="sortable">SHG</th><th class="sortable">GV</th><th class="sortable">TK</th><th class="sortable">Pass%</th><th class="sortable">Poss/GP</th><th class="sortable">SAT</th><th class="sortable">INT</th><th class="sortable">PD</th><th class="sortable">OFF</th><th class="sortable">DEF</th><th class="sortable">TP</th></tr></thead><tbody>'+
-      la.map(function(p){ var s=lg.pstats[p.id];
+      la.map(function(p){ var s=CG.roleLine(lg.pstats[p.id], "S");   /* v4.08: skating games and skating ice time */
         var toiPg=s.gp?(s.toi||0)/s.gp:0, possPg=s.gp?(s.poss||0)/s.gp:0, passp=s.passAtt?100*s.pass/s.passAtt:0;
         return '<tr class="rowlink" style="--tc:'+CG.TEAM[p.team].color+'" data-go="'+CG.playerRoute(p)+'">'+
-        '<td class="tleft"><span class="playercell">'+CG.crest(p.team,22)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+p.pos+' · '+CG.TEAM[p.team].code+(CG.isCamp(p)?' · camp':'')+'</small></span></span></td>'+
+        '<td class="tleft"><span class="playercell">'+CG.crest(p.team,22)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+esc(CG.offRoleTag(p,"S")||p.pos)+' · '+CG.TEAM[p.team].code+(CG.isCamp(p)?' · camp':'')+(p.former?' · no longer rostered':'')+'</small></span></span></td>'+
         '<td data-v="'+s.gp+'">'+s.gp+'</td>'+
         '<td data-v="'+toiPg.toFixed(0)+'">'+(s.gp?CG.fmtToi(toiPg):"—")+'</td>'+
         '<td data-v="'+(s.ppg||0)+'" class="'+((s.ppg||0)?"":"z")+'">'+(s.ppg||0)+'</td>'+
@@ -3266,13 +3371,14 @@ CG.ROUTES.stats = function(param, qs){
         '<td data-v="'+(s._ratN?+s.ratTeam:0).toFixed(1)+'">'+(s._ratN?(+s.ratTeam).toFixed(1):"—")+'</td></tr>'; }).join("")+
       (la.length ? "" : emptyStats(15,"advanced metrics"))+'</tbody></table>';
   } else if (tab==="goalies"){
-    var gl = lg.players.filter(function(p){ return p.pos==="G" && lg.pstats[p.id].gp>=Math.min(minGp,3) && (!fTeam||p.team===fTeam); })
+    /* v4.08: everyone who played in goal, over his games in goal (a skater's starts included) */
+    var gl = CG.statPlayers(lg).filter(function(p){ var s0 = lg.pstats[p.id]; return s0 && (s0.gs > 0 || (p.pos === "G" && !p.former && !s0.sgp)) && s0.gs>=Math.min(minGp,3) && (!fTeam||p.team===fTeam); })
       .sort(function(a,b){ var A=lg.pstats[a.id],B=lg.pstats[b.id]; return B.sv/Math.max(1,B.sa)-A.sv/Math.max(1,A.sa); });
     table = '<table class="tbl keepcols" id="statTbl"><caption>Goaltender statistics</caption><thead><tr>'+
       '<th class="tleft">Goaltender</th><th class="sortable">GP</th><th class="sortable">W</th><th class="sortable">L</th><th class="sortable">OTL</th><th class="sortable">SA</th><th class="sortable">SV</th><th class="sortable sorted">SV%</th><th class="sortable">GAA</th><th class="sortable">SO</th><th class="sortable">QS</th><th class="sortable">Brk%</th><th class="sortable">Poke</th></tr></thead><tbody>'+
-      gl.map(function(p){ var s=lg.pstats[p.id]; var svp = s.sa? s.sv/s.sa : 0;
+      gl.map(function(p){ var s=CG.roleLine(lg.pstats[p.id], "G"); var svp = s.sa? s.sv/s.sa : 0;
         return '<tr class="rowlink" style="--tc:'+CG.TEAM[p.team].color+'" data-go="'+CG.playerRoute(p)+'">'+
-        '<td class="tleft"><span class="playercell">'+CG.crest(p.team,22)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+CG.TEAM[p.team].code+(CG.isCamp(p)?' · camp':'')+'</small></span></span></td>'+
+        '<td class="tleft"><span class="playercell">'+CG.crest(p.team,22)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+(CG.offRoleTag(p,"G")?esc(CG.offRoleTag(p,"G"))+' · ':'')+CG.TEAM[p.team].code+(CG.isCamp(p)?' · camp':'')+(p.former?' · no longer rostered':'')+'</small></span></span></td>'+
         '<td data-v="'+s.gp+'">'+s.gp+'</td><td data-v="'+s.w+'">'+s.w+'</td><td data-v="'+s.l+'">'+s.l+'</td><td data-v="'+s.otl+'">'+s.otl+'</td>'+
         '<td data-v="'+s.sa+'">'+s.sa+'</td><td data-v="'+s.sv+'">'+s.sv+'</td>'+
         '<td data-v="'+svp.toFixed(3)+'" class="pts">'+svp.toFixed(3).replace(/^0/,"")+'</td>'+

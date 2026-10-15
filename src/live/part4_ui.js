@@ -616,19 +616,20 @@ CG.renderChrome = function(){
     return '<a class="tk-item tk-stat" href="'+CG.playerRoute(p)+'"><span class="tk-lab">'+lab+'</span>'+
       CG.crest(p.team,16)+'<b>'+esc(p.tag)+'</b><span class="tk-val num">'+val+'</span></a>';
   }
-  var skaters = CG.lg.players.filter(function(p){ return p.pos!=="G" && ps[p.id].gp>0; });
-  var minGpG = CG.lg.players.filter(function(p){ return p.pos==="G" && ps[p.id].gp>=3; });
+  /* v4.08: by the games played in each role (sgp skating, gs in goal), whatever the registered position */
+  var skaters = CG.statPlayers(CG.lg).filter(function(p){ return ps[p.id] && ps[p.id].sgp>0; });
+  var minGpG = CG.statPlayers(CG.lg).filter(function(p){ return ps[p.id] && ps[p.id].gs>=3; });
   var ptsL = CG.skaterLeaders(CG.lg,"p")[0];
   var gL   = CG.skaterLeaders(CG.lg,"g")[0];
   var aL   = CG.skaterLeaders(CG.lg,"a")[0];
   var pmL  = skaters.slice().sort(function(a,b){ return ps[b.id].pm-ps[a.id].pm; })[0];
   var svL  = CG.goalieLeaders(CG.lg)[0];
-  var gaaL = minGpG.slice().sort(function(a,b){ return ps[a.id].ga/ps[a.id].gp - ps[b.id].ga/ps[b.id].gp; })[0];
+  var gaaL = minGpG.slice().sort(function(a,b){ return ps[a.id].ga/ps[a.id].gs - ps[b.id].ga/ps[b.id].gs; })[0];
   if (ptsL) items.push(tkLead("POINTS", ptsL, ps[ptsL.id].p+" PTS"));
   if (gL)   items.push(tkLead("GOALS", gL, ps[gL.id].g+" G"));
   if (aL)   items.push(tkLead("ASSISTS", aL, ps[aL.id].a+" A"));
   if (svL)  items.push(tkLead("SV%", svL, (ps[svL.id].sv/Math.max(1,ps[svL.id].sa)).toFixed(3).replace(/^0/,"")));
-  if (gaaL) items.push(tkLead("GAA", gaaL, (ps[gaaL.id].ga/ps[gaaL.id].gp).toFixed(2)));
+  if (gaaL) items.push(tkLead("GAA", gaaL, (ps[gaaL.id].ga/ps[gaaL.id].gs).toFixed(2)));
   if (pmL)  items.push(tkLead("+/-", pmL, (ps[pmL.id].pm>0?"+":"")+ps[pmL.id].pm));
   /* pre-season / empty ticker: show the opening slate instead of a blank bar */
   if (!items.length){

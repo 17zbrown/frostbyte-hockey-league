@@ -81,12 +81,14 @@ CG.ROUTES.awards = function(param, qs){
     : '<div class="card"><div class="empty" style="padding:60px 20px"><div class="e-art">'+CG.ic("trophy",22)+'</div><b>No weekly honors yet</b><p>The first Players of the Week are computed automatically the Monday after Week 1, straight from the imported box scores.</p></div></div>';
   }
   if (tab==="season"){
-    var mvps = CG.skaterLeaders(lg,"p").slice(0,3);
+    /* v4.08: ballots stay with rostered players, by registered position for the position awards (commissioner ruling,
+       2026-10-15); MVP is anyone rostered, by the points he scored skating */
+    var mvps = CG.skaterLeaders(lg,"p",1,{ current:true }).slice(0,3);
     /* finalized hardware first — champion + any staff-balloted awards already decided */
     var AWARD_LABELS = { mvp:"Most Valuable Player", best_goalie:"Best Goaltender", best_defenseman:"Best Defenseman", rookie_of_year:"Rookie of the Year",
       /* v3.60: the statistical titles, filed from the record at the end of the regular season */
       points_title:"Scoring Title", goals_title:"Goal-scoring Title", assists_title:"Playmaking Title", goaltending_title:"Goaltending Title" };
-    var decided = (lg.seasonAwards||[]).filter(function(a){ return a.profile_id && CG.playerById(lg, a.profile_id); });
+    var decided = (lg.seasonAwards||[]).filter(function(a){ return a.profile_id && CG.statPlayerById(lg, a.profile_id); });
     if (lg.champion || decided.length){
       body += '<div class="grid g3" style="margin-bottom:18px">'+
         (lg.champion && lg.champion.team_id && (lg._idToCode||{})[lg.champion.team_id]
@@ -95,7 +97,7 @@ CG.ROUTES.awards = function(param, qs){
                 '<div><span class="chip chip-chrome">League Champions</span><b style="display:block;font-family:var(--f-disp);font-size:17px;margin-top:7px">'+esc(CG.TEAM[code].name)+'</b>'+
                 '<span class="caption">'+esc(lg.champion.stat_line||"")+'</span></div></div></div>'; })()
           : "")+
-        decided.map(function(a){ var p = CG.playerById(lg, a.profile_id);
+        decided.map(function(a){ var p = CG.statPlayerById(lg, a.profile_id);   /* v4.08: a title can go to a player no longer rostered */
           return '<div class="card raise" data-go="'+CG.playerRoute(p)+'" role="link" tabindex="0"><div class="card-b" style="display:flex;gap:14px;align-items:center">'+CG.crest(p.team,44)+
             '<div><span class="chip chip-chrome">'+esc(AWARD_LABELS[a.category]||a.category)+'</span><b style="display:block;font-family:var(--f-disp);font-size:17px;margin-top:7px">'+esc(p.tag)+'</b>'+
             '<span class="caption">'+esc(CG.TEAM[p.team].name)+' · '+(a.decided_by==="record" ? esc(a.stat_line||"from the record") : "by vote")+'</span></div></div></div>';
@@ -105,42 +107,66 @@ CG.ROUTES.awards = function(param, qs){
        awards should be awarded by you based on per game averages for the awards. A player must be playoff
        eligible to be eligible to receive the award." */
     var floor = CG.playoffMinGp ? CG.playoffMinGp() : 0;
-    var perGame = function(p, k){ var st = lg.pstats[p.id]; return st && st.gp ? (st[k]||0)/st.gp : 0; };
-    /* v3.94: each player's own floor, prorated for a player placed after opening night (Rule 8.3) */
-    var eligibleNow = function(p){ var st = lg.pstats[p.id]; return !!st && st.gp >= Math.max(1, CG.playoffFloorFor ? CG.playoffFloorFor(p.id) : floor); };
     body += '<div class="note chr" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Voted awards are decided by the league\u2019s players.</b> '+
       'Every rostered player and every member of league staff casts one vote per award, for a player on another club, and can change it until the award is decided. '+
       'The statistical titles are not voted on: they go to the best per-game average in the official record. '+
       'Only a playoff-eligible player can win either kind'+(floor ? ' ('+floor+' regular-season games, prorated for a player placed after opening night)' : '')+' (Rules 9.2 and 9.3).</div>'+
       CG.awardBallotCard(lg)+
       '<div class="grid g3">'+
-      [["Most Valuable Player", mvps],
-       ["Best Goaltender", CG.goalieLeaders(lg).slice(0,3)],
-       ["Rookie of the Year", lg.players.filter(function(p){return p.rookie && p.pos!=="G";}).sort(function(a,b){ return lg.pstats[b.id].p-lg.pstats[a.id].p; }).slice(0,3)]
+      [["Most Valuable Player", mvps, false],
+       ["Best Goaltender", CG.goalieLeaders(lg, 3, { current:true }).filter(function(p){ return p.pos==="G"; }).slice(0,3), true],
+       ["Rookie of the Year", lg.players.filter(function(p){return p.rookie && p.pos!=="G";}).sort(function(a,b){ return lg.pstats[b.id].p-lg.pstats[a.id].p; }).slice(0,3), false]
       ].map(function(pair){
+        /* v4.08: the figure follows the award, not the player's registered position (a goalie on the MVP list shows points) */
         return '<div class="card"><div class="card-h"><h3>'+pair[0]+'</h3><span class="chip">Front-runners</span></div>'+
           pair[1].map(function(p,i){ var st = lg.pstats[p.id];
             return '<div class="leaderrow'+(i===0?" top":"")+'" data-go="'+CG.playerRoute(p)+'"><span class="rk num">'+(i+1)+'</span>'+CG.crest(p.team,28)+
               '<span style="min-width:0"><b style="font-size:14px">'+esc(p.tag)+'</b><small class="caption" style="display:block">'+esc(CG.TEAM[p.team].name)+'</small></span>'+
-              '<span class="val"><b class="num">'+(p.pos==="G"?(st.sv/Math.max(1,st.sa)).toFixed(3).replace(/^0/,""):st.p)+'</b><span>'+(p.pos==="G"?"SV%":"PTS")+'</span></span></div>';
+              '<span class="val"><b class="num">'+(pair[2]?(st.sv/Math.max(1,st.sa)).toFixed(3).replace(/^0/,""):st.p)+'</b><span>'+(pair[2]?"SV%":"PTS")+'</span></span></div>';
           }).join("")+'</div>';
       }).join("")+'</div>'+
-      /* the four statistical titles, as they stand: per-game averages among players who have reached the floor */
-      '<h3 class="h-sec" style="font-size:18px;margin:26px 0 10px">Statistical titles <span class="caption" style="font-size:12px">per game, from the record'+(floor?' · '+floor+' games to qualify':'')+'</span></h3>'+
-      '<div class="grid g4" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr))">'+
-      [["Scoring Title","p",false,"PTS/GP"],["Goal-scoring Title","g",false,"G/GP"],["Playmaking Title","a",false,"A/GP"],["Goaltending Title","ga",true,"GA/GP"]].map(function(t){
-        var won = (lg.seasonAwards||[]).find(function(a){ return AWARD_LABELS[a.category]===t[0]; });
-        var rows = lg.players.filter(function(p){ return (t[2] ? p.pos==="G" : p.pos!=="G") && eligibleNow(p); })
-          .sort(function(a,b){ var d = perGame(b,t[1]) - perGame(a,t[1]); return t[2] ? -d : d; }).slice(0,3);
-        return '<div class="card"><div class="card-h"><h3>'+t[0]+'</h3><span class="chip'+(won?" chip-win":"")+'">'+(won?"Decided":"Leaders")+'</span></div>'+
-          (rows.length ? rows.map(function(p,i){
-            return '<div class="leaderrow'+(i===0?" top":"")+'" data-go="'+CG.playerRoute(p)+'"><span class="rk num">'+(i+1)+'</span>'+CG.crest(p.team,28)+
-              '<span style="min-width:0"><b style="font-size:14px">'+esc(p.tag)+'</b><small class="caption" style="display:block">'+lg.pstats[p.id].gp+' GP</small></span>'+
-              '<span class="val"><b class="num">'+perGame(p,t[1]).toFixed(2)+'</b><span>'+t[3]+'</span></span></div>';
-          }).join("") : '<div class="card-b"><p class="caption">Nobody has reached '+Math.max(1,floor)+' games yet.</p></div>')+'</div>';
-      }).join("")+'</div>';
+      /* the four statistical titles, as they stand. v4.08: read from public.statistical_title_board, the same definition
+         statistical_titles files the titles from, so the page cannot disagree with the filing (filled in AFTER.awards) */
+      '<h3 class="h-sec" style="font-size:18px;margin:26px 0 10px">Statistical titles <span class="caption" style="font-size:12px">per game, from the record'+(floor?' · '+floor+' games at the position to qualify':'')+'</span></h3>'+
+      '<div id="titleBoard">'+CG.titleBoardHtml(lg)+'</div>';
   }
   return head + tabs + body + '</div>';
+};
+/* v4.08: the statistical-title leaders, as public.statistical_title_board ranks them: the ONE definition of Rule 9.2,
+   the same one public.statistical_titles files the titles from (eligibility, the floor at the position, every line,
+   the tie order). The page never ranks the titles itself. Cached per season so a repaint never blanks the cards. */
+CG.TITLE_CARDS = [["points_title","Scoring Title","PTS/GP",false],["goals_title","Goal-scoring Title","G/GP",false],
+                  ["assists_title","Playmaking Title","A/GP",false],["goaltending_title","Goaltending Title","GA/GP",true]];
+CG._titleBoard = CG._titleBoard || {};
+CG.titleBoardHtml = function(lg){
+  var sid = CG.SEASON && CG.SEASON.id, board = CG._titleBoard[sid];
+  var floor = CG.playoffMinGp ? CG.playoffMinGp() : 0;
+  return '<div class="grid g4" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr))">'+
+    CG.TITLE_CARDS.map(function(t){
+      var won = (lg.seasonAwards||[]).some(function(a){ return a.category === t[0]; });
+      var rows = board ? board.filter(function(r){ return r.category === t[0]; }).sort(function(a,b){ return a.place - b.place; }) : [];
+      return '<div class="card"><div class="card-h"><h3>'+t[1]+'</h3><span class="chip'+(won?" chip-win":"")+'">'+(won?"Decided":"Leaders")+'</span></div>'+
+        (!board ? '<div class="card-b"><p class="caption">'+(CG.sb ? 'Reading the official record\u2026' : 'The leaders are read from the official record.')+'</p></div>'
+        : rows.length ? rows.map(function(r, i){
+            var p = CG.statPlayerById(lg, r.profile_id);
+            var tag = p ? p.tag : (r.gamertag || "Player");
+            return '<div class="leaderrow'+(i===0?" top":"")+'"'+(p ? ' data-go="'+CG.playerRoute(p)+'"' : '')+'><span class="rk num">'+r.place+'</span>'+(p ? CG.crest(p.team,28) : '')+
+              '<span style="min-width:0"><b style="font-size:14px">'+esc(tag)+'</b><small class="caption" style="display:block">'+r.gp+' GP'+(t[3]?' in goal':' skating')+(p && p.former?' · no longer rostered':'')+'</small></span>'+
+              '<span class="val"><b class="num">'+Number(r.per_game).toFixed(2)+'</b><span>'+t[2]+'</span></span></div>';
+          }).join("")
+        : '<div class="card-b"><p class="caption">Nobody has reached '+Math.max(1,floor)+' games at the position yet.</p></div>')+'</div>';
+    }).join("")+'</div>';
+};
+CG.loadTitleBoard = function(){
+  var sid = CG.SEASON && CG.SEASON.id;
+  if (!sid || !CG.sb) return;
+  CG.sb.rpc("statistical_title_board", { p_season: sid, p_top: 3 }).then(function(r){
+    if (r.error){ console.warn("title board:", r.error.message); return; }
+    var was = JSON.stringify(CG._titleBoard[sid] || null);
+    CG._titleBoard[sid] = r.data || [];
+    var el = document.getElementById("titleBoard");
+    if (el && JSON.stringify(CG._titleBoard[sid]) !== was) el.innerHTML = CG.titleBoardHtml(CG.lg);
+  }, function(){});
 };
 /* v3.60: the ballot, for every rostered player and league staff (the database decides who may vote,
    public.can_vote_awards; this only decides whether to show the card). One vote per award, for a player on
@@ -177,6 +203,7 @@ CG.awardBallotCard = function(lg){
 };
 CG.AFTER.awards = function(param){
   var sid = CG.SEASON && CG.SEASON.id, uid = CG.auth && CG.auth.user && CG.auth.user.id;
+  if (document.getElementById("titleBoard")) CG.loadTitleBoard();
   if (sid && uid && CG.sb && document.querySelector("[data-aw-cat]")){
     CG.sb.from("award_ballots").select("category,profile_id").eq("season_id", sid).eq("voter_id", uid).then(function(r){
       ((r && r.data) || []).forEach(function(row){
@@ -569,7 +596,11 @@ CG.ROUTES.matchup = function(id){
     /* a box line can outlive its roster spot (players released after the pre-season,
        unlinked EA accounts) — fall back to the name the EA record carried */
     function boxPlayer(pid, code, b){
-      return CG.playerById(lg, pid) || { id:null, tag:(b&&b.name)||"Former roster player", pos:(b&&b.pos)||"", team:code };
+      /* v4.08: a player no longer rostered keeps his league name (lg.formerPlayers) rather than his EA name, and wears
+         the crest of the club he played THIS game for (his entry carries only the last club he played for) */
+      var fp = (lg.formerPlayers||[]).find(function(x){ return x.id === pid; });
+      return CG.playerById(lg, pid) || (fp && Object.assign({}, fp, { team: code }))
+        || { id:null, tag:(b&&b.name)||"Former roster player", pos:(b&&b.pos)||"", team:code };
     }
     /* Rule 8.3: no more than four appearances per player in one series — flag a 5th */
     var seriesKey = [g.home,g.away].sort().join("~");
@@ -600,7 +631,7 @@ CG.ROUTES.matchup = function(id){
       body += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3><span style="display:inline-flex;align-items:center;gap:9px">'+CG.crest(code,22)+esc(CG.TEAM[code].name)+' — '+res.score[code]+'</span></h3></div>'+
         '<div class="tblwrap"><table class="tbl keepcols"><thead><tr><th class="tleft">Skater</th><th>G</th><th>A</th><th>P</th><th>S</th><th>HIT</th><th>BLK</th><th>TK</th><th>GV</th><th>PIM</th><th>+/-</th><th>TOI</th></tr></thead><tbody>'+
         sk.map(function(row){ var b=row.b;
-          return '<tr'+(row.p.id?' class="rowlink" data-go="'+CG.playerRoute(row.p)+'"':'')+'><td class="tleft"><span class="playercell"><span class="nm">'+esc(row.p.tag)+'</span><small>'+esc(row.p.pos||"")+'</small>'+capFlag(row.pid, false)+'</span></td>'+
+          return '<tr'+(row.p.id?' class="rowlink" data-go="'+CG.playerRoute(row.p)+'"':'')+'><td class="tleft"><span class="playercell"><span class="nm">'+esc(row.p.tag)+'</span><small>'+esc((row.p.pos === "G" && row.b.pos) ? row.b.pos : (row.p.pos||""))+'</small>'+capFlag(row.pid, false)+'</span></td>'+
           '<td class="'+(b.g?"":"z")+'">'+b.g+'</td><td class="'+(b.a?"":"z")+'">'+b.a+'</td><td class="pts">'+(b.g+b.a)+'</td><td>'+b.shots+'</td>'+
           '<td class="'+(b.hits?"":"z")+'">'+b.hits+'</td><td class="'+(b.blk?"":"z")+'">'+b.blk+'</td><td class="'+(b.tk?"":"z")+'">'+(b.tk||0)+'</td><td class="'+(b.gv?"":"z")+'">'+(b.gv||0)+'</td>'+
           '<td class="'+(b.pim?"":"z")+'">'+b.pim+'</td><td>'+(b.pm>0?"+":"")+b.pm+'</td><td class="mono" style="font-size:11px">'+(b.toi?CG.fmtToi(b.toi):"—")+'</td></tr>';
@@ -692,7 +723,9 @@ CG.ROUTES.matchup = function(id){
     body += '<div class="card"><div class="card-h"><h3>'+(pre?"Top-rated skaters":"Players to watch")+'</h3>'+
       (pre?'<span class="chip">Ratings only · no games played</span>':"")+'</div><div class="grid g2" style="gap:0">'+
       [g.away,g.home].map(function(code){
-        var top = (lg.byTeam[code]||[]).filter(function(p){ return p.pos!=="G"; })
+        /* v4.08: the club's skaters, plus a goalie who has skated (his skating points count). A club that has not played
+           yet still lists its skaters: "pre" only means no game anywhere is final. */
+        var top = (lg.byTeam[code]||[]).filter(function(p){ return p.pos!=="G" || (!pre && ((lg.pstats[p.id]||{}).sgp||0) > 0); })
           .sort(function(a,b){ return pre ? mxOvr(b)-mxOvr(a) : mxPts(b)-mxPts(a); }).slice(0,3);
         if (!top.length) return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><p class="caption">No skaters signed yet.</p></div>';
         return '<div style="border-top:1px solid var(--line-soft)">'+top.map(function(p,i){

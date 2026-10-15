@@ -18,7 +18,10 @@ A("read-only and public (no PUBLIC default; anon and authenticated)", /revoke ex
 
 console.log("— the site");
 A("floors load for everyone with the season extras", /CG\.sb\.rpc\("playoff_floors", \{ p_season: CG\.SEASON\.id \}\)/.test(live));
-A("Road to 16, the hub card and the awards page read each player's own number", /var min = CG\.playoffFloorFor\(pl\.id\);/.test(live) && /myMin = CG\.playoffFloorFor\(me\.id\)/.test(hub) && /CG\.playoffFloorFor \? CG\.playoffFloorFor\(p\.id\) : floor/.test(pub2));
+/* v4.08: the awards page no longer ranks the titles itself; it reads public.statistical_title_board, whose floor is
+   public.player_playoff_floor (the same prorated number) */
+A("Road to 16, the hub card and the awards page read each player's own number", /var min = CG\.playoffFloorFor\(pl\.id\);/.test(live) && /myMin = CG\.playoffFloorFor\(me\.id\)/.test(hub) &&
+  /CG\.sb\.rpc\("statistical_title_board"/.test(pub2) && /greatest\(1, public\.player_playoff_floor\(p_season, x\.profile_id\)\) fl/.test(fs.readFileSync(path.join(__dirname, "..", "sql/2026-10-15-two-way-stats-v408.sql"), "utf8")));
 const fnSrc = (name) => { const i = live.indexOf("CG." + name + " = function"); return live.slice(i, live.indexOf("\n};", i) + 3); };
 const ctx = { CG: { lg: { playoffFloors: { late: 8 } } } };
 ctx.CG.playoffMinGp = () => 16;

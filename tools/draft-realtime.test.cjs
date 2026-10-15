@@ -35,6 +35,8 @@ for (const fn of ["mapDraftData", "applyDraftRow", "applyPickToRoster", "applyDr
   if (!m) { A("located CG." + fn, false); process.exit(1); }
   vm.runInContext(m[0], ctx);
 }
+/* v4.08: a provisional row gets the one season-line shape, defined in the engine */
+vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "src/live/part2_engine.js"), "utf8").match(/CG\.blankStatLine = function[\s\S]*?\n\};/)[0], ctx);
 
 const CLUBS = { t1: "TOR", t2: "BOS" };
 ctx.CG.lg = {

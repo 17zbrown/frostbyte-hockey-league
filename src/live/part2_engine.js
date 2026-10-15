@@ -502,15 +502,33 @@ CG.DEFAULT_WEIGHTS = {
   team:   { record:38, goalDiff:22, goaltending:14, depth:14, form:12 }
 };
 
+/* v4.08 (commissioner, 2026-10-14: "Make sure to count every player's stats of every game. Even if they disconnect."):
+   ONE season-line shape for everyone. It used to be chosen by the REGISTERED position, so a registered goalie's skating
+   games added into keys he did not have (NaN, shown blank: Bowman's 1G 12A in 6 games) and a registered skater's games in
+   goal did the same to his goalie keys (Easy pickins' 8 starts). A line is counted by what the player PLAYED that game.
+     gp  = every appearance at any position (Rules 2.4, 8.3, 9.3 count those: eligibility, floors, minimum service)
+     sgp = games skated, gs = games in goal; gp === sgp + gs (one line per player per game, Rule 6.3)
+   Skater totals come only from skating lines and goalie totals only from goalie lines. */
+CG.blankStatLine = function(){
+  return { gp:0, sgp:0, gs:0,
+    g:0,a:0,p:0,pm:0,shots:0,hits:0,blk:0,gv:0,tk:0,pim:0,fow:0,fot:0,gwg:0,
+    w:0,l:0,otl:0,sa:0,sv:0,ga:0,so:0,qs:0,
+    weekly:{}, weeklyG:{} };
+};
+/* Everyone whose season stats count: the rostered players, and the players who played this season but are no longer
+   rostered (waived, left the league, removed). Their games are part of the official record (Rule 6.1). */
+CG.statPlayers = function(lg){ return (lg.players||[]).concat(lg.formerPlayers||[]); };
+CG.statPlayerById = function(lg, id){
+  return CG.playerById(lg, id) || (lg.formerPlayers||[]).find(function(p){ return p.id === id; }) || null;
+};
 CG.aggregate = function(lg, overrides){
   var W = (overrides && overrides.weights) || CG.DEFAULT_WEIGHTS;
   var teams = {}, pstats = {}, glog = {};
+  /* gsv/gsa: the club's goalie lines, whoever played in goal (team save percentage) */
   CG.TEAMS.forEach(function(t){ teams[t.code] = { code:t.code, gp:0,w:0,l:0,otl:0,rw:0,gf:0,ga:0,
-    hw:0,hl:0,aw:0,al:0, res:[], sf:0, sa:0 }; });
-  lg.players.forEach(function(p){
-    pstats[p.id] = p.pos==="G"
-      ? { gp:0,gs:0,w:0,l:0,otl:0,sa:0,sv:0,ga:0,so:0,qs:0, weekly:{} }
-      : { gp:0,g:0,a:0,p:0,pm:0,shots:0,hits:0,blk:0,gv:0,tk:0,pim:0,fow:0,fot:0,gwg:0, weekly:{} };
+    hw:0,hl:0,aw:0,al:0, res:[], sf:0, sa:0, gsv:0, gsa:0 }; });
+  CG.statPlayers(lg).forEach(function(p){
+    pstats[p.id] = CG.blankStatLine();
     glog[p.id] = [];
   });
 
@@ -532,18 +550,21 @@ CG.aggregate = function(lg, overrides){
       else { t.l++; (code===r.home?t.hl++:t.al++); t.res.push("L"); }
       Object.keys(r.box[code]).forEach(function(pid){
         var b = r.box[code][pid], s = pstats[pid];
+        /* v4.08: the club's totals count EVERY line, including a player no longer rostered or one EA could not link
+           (shots for used to skip them while shots against counted them) */
+        if (b.goalie){ t.gsv += (b.sv||0); t.gsa += (b.sa||0); }
+        else t.sf += (b.shots||0);
         if (!s) return;
         if (b.goalie){
           s.gp++; s.gs++; s.sa+=b.sa; s.sv+=b.sv; s.ga+=b.ga; s.w+=b.w; s.l+=b.l; s.otl+=b.otl; s.so+=b.so; s.qs+=b.qs;
-          s.weekly[r.week] = (s.weekly[r.week]||0) + b.sv*.09 + b.w*1.2 + b.so*2;
+          s.weeklyG[r.week] = (s.weeklyG[r.week]||0) + b.sv*.09 + b.w*1.2 + b.so*2;
           glog[pid].push({ game:r.id, week:r.week, opp:opp, line:b });
         } else {
-          s.gp++; s.g+=b.g; s.a+=b.a; s.p+=b.g+b.a; s.pm+=b.pm; s.shots+=b.shots; s.hits+=b.hits;
+          s.gp++; s.sgp++; s.g+=b.g; s.a+=b.a; s.p+=b.g+b.a; s.pm+=b.pm; s.shots+=b.shots; s.hits+=b.hits;
           s.blk+=b.blk; s.gv+=b.gv; s.tk+=b.tk; s.pim+=b.pim; s.fow+=b.fow; s.fot+=b.fot; s.gwg+=b.gwg;
           s.weekly[r.week] = (s.weekly[r.week]||0) + b.g*2 + b.a;
           glog[pid].push({ game:r.id, week:r.week, opp:opp, line:b });
         }
-        var tb = teams[code]; tb.sf += (b.shots||0); tb.sa += 0;
       });
     });
   });
@@ -574,19 +595,20 @@ CG.aggregate = function(lg, overrides){
   var goalies = lg.players.filter(function(p){ return p.pos==="G"; });
   var C = 4; /* regression constant: small samples pull to league average */
   var lgPts = skaters.reduce(function(s,p){ return s+pstats[p.id].p; },0);
-  var lgGp  = skaters.reduce(function(s,p){ return s+pstats[p.id].gp; },0) || 1;
+  /* v4.08: skater rates over games SKATED, goalie rates over games in goal */
+  var lgGp  = skaters.reduce(function(s,p){ return s+pstats[p.id].sgp; },0) || 1;
   var avgPpg = lgPts/lgGp;
   function pct(list, v){ var below = list.filter(function(x){ return x < v; }).length; return list.length? below/list.length : .5; }
-  var adjPpgs = skaters.map(function(p){ var s=pstats[p.id]; return (s.p + C*avgPpg)/((s.gp||0)+C); });
+  var adjPpgs = skaters.map(function(p){ var s=pstats[p.id]; return (s.p + C*avgPpg)/((s.sgp||0)+C); });
 
   lg.ratings = {};
   skaters.forEach(function(p, i){
     var s = pstats[p.id];
     var isD = ["LD","RD"].indexOf(p.pos)>=0;
-    var prod = pct(adjPpgs, (s.p + C*avgPpg)/((s.gp||0)+C));
+    var prod = pct(adjPpgs, (s.p + C*avgPpg)/((s.sgp||0)+C));
     var eff  = s.shots>0 ? Math.min(1,(s.g/s.shots)/.22)*.6 + Math.min(1,Math.max(0,(s.pm+10)/20))*.4 : .5;
-    var dfc  = Math.min(1, ((s.blk*(isD?1:1.6)) + s.tk + s.hits*.5) / Math.max(1,s.gp) / 6);
-    var disc = Math.max(0, 1 - (s.pim/Math.max(1,s.gp))/2.2);
+    var dfc  = Math.min(1, ((s.blk*(isD?1:1.6)) + s.tk + s.hits*.5) / Math.max(1,s.sgp) / 6);
+    var disc = Math.max(0, 1 - (s.pim/Math.max(1,s.sgp))/2.2);
     var wk = Object.keys(s.weekly).map(Number).sort(function(a,b){return a-b;});
     var recent = wk.slice(-2).reduce(function(a,w){ return a+s.weekly[w]; },0);
     var early  = wk.slice(0,-2).reduce(function(a,w){ return a+s.weekly[w]; },0);
@@ -604,8 +626,8 @@ CG.aggregate = function(lg, overrides){
     var svp = s.sa>0 ? s.sv/s.sa : .885;
     var adjSvp = (s.sv + 35*.885)/(Math.max(0,s.sa) + 35);
     var saves = Math.min(1, Math.max(0,(adjSvp-.84)/.10));
-    var work  = Math.min(1, s.gp/ Math.max(1, CG.SEASON.completedWeeks*2*.62));
-    var wins  = s.gp>0 ? (s.w + .5*s.otl)/s.gp : .5;
+    var work  = Math.min(1, s.gs/ Math.max(1, CG.SEASON.completedWeeks*2*.62));
+    var wins  = s.gs>0 ? (s.w + .5*s.otl)/s.gs : .5;
     var wsum = W.goalie.saves+W.goalie.workload+W.goalie.wins+W.goalie.discipline;
     var mix = (saves*W.goalie.saves + work*W.goalie.workload + wins*W.goalie.wins + .9*W.goalie.discipline)/wsum;
     var ovr = Math.round(63 + Math.min(1,mix)*34);
@@ -617,15 +639,20 @@ CG.aggregate = function(lg, overrides){
   /* ----- team overall + power rankings ----- */
   lg.teamRatings = {};
   var maxDiffPer = .9;
+  /* v4.08: goaltending is measured against THIS league's save percentage, not an NHL band (.840 to .940 put every
+     CGHL club at 0). A club at the league's figure reads 50; each .015 above or below it moves the bar 10. */
+  var lgGsv = 0, lgGsa = 0;
+  CG.TEAMS.forEach(function(tm){ lgGsv += teams[tm.code].gsv; lgGsa += teams[tm.code].gsa; });
+  var lgSvp = lgGsa ? lgGsv/lgGsa : .885;
   CG.TEAMS.forEach(function(tm){
     var t = teams[tm.code];
     var roster = lg.byTeam[tm.code];
     var top9 = roster.map(function(p){ return lg.ratings[p.id].ovr; }).sort(function(a,b){return b-a;}).slice(0,9);
     var depth = (top9.reduce(function(a,b){return a+b;},0)/9 - 63)/34;
     var gd = t.gp? Math.min(1,Math.max(0,(t.diff/t.gp + maxDiffPer)/(2*maxDiffPer))) : .5;
-    var gts = roster.filter(function(p){return p.pos==="G";})
-                    .map(function(p){ return lg.ratings[p.id].parts.saves||50; });
-    var gt = (gts.reduce(function(a,b){return a+b;},0)/Math.max(1,gts.length))/100;
+    /* v4.08: the club's own goalie lines, whoever was in goal (the registered goalies' ratings missed every game a
+       skater played in net, and counted a goalie's games for other clubs) */
+    var gt = t.gsa ? Math.min(1, Math.max(0, .5 + ((t.gsv + 35*lgSvp)/(t.gsa + 35) - lgSvp)/.15)) : .5;
     var l5 = t.last5.filter(function(r){ return r==="W"; }).length/Math.max(1,t.last5.length);
     var wsum = W.team.record+W.team.goalDiff+W.team.goaltending+W.team.depth+W.team.form;
     var mix = (t.ptsPct*W.team.record + gd*W.team.goalDiff + gt*W.team.goaltending + depth*W.team.depth + l5*W.team.form)/wsum;
@@ -666,9 +693,9 @@ CG.aggregate = function(lg, overrides){
   for (var w=1; w<=CG.SEASON.completedWeeks; w++){
     var bestSk=null, bestG=null;
     lg.players.forEach(function(p){
-      var v = pstats[p.id].weekly[w]||0;
-      if (p.pos==="G"){ if (!bestG || v>bestG.v) bestG={p:p,v:v}; }
-      else { if (!bestSk || v>bestSk.v) bestSk={p:p,v:v}; }
+      var v = pstats[p.id].weekly[w]||0, vG = pstats[p.id].weeklyG[w]||0;
+      if (vG && (!bestG || vG>bestG.v)) bestG={p:p,v:vG};
+      if (v && (!bestSk || v>bestSk.v)) bestSk={p:p,v:v};
     });
     lg.potw.push({ week:w, skater:bestSk&&bestSk.p.id, goalie:bestG&&bestG.p.id });
   }
@@ -805,16 +832,47 @@ CG.standings = function(lg, div){
   }
   return out;
 };
-CG.skaterLeaders = function(lg, key, minGp){
-  return lg.players.filter(function(p){ return p.pos!=="G" && lg.pstats[p.id].gp >= (minGp||1); })
+/* v4.08: boards admit by the games played IN THAT ROLE, never by registered position: a goalie who skated is on the
+   skater boards for his skating games, a skater who played goal is on the goalie boards for his starts. Players no longer
+   rostered are on them too (their games are the official record, Rule 6.1); pass {current:true} for an award ballot. */
+CG.skaterLeaders = function(lg, key, minGp, opts){
+  var pool = (opts && opts.current) ? lg.players : CG.statPlayers(lg);
+  return pool.filter(function(p){ var s = lg.pstats[p.id]; return s && s.sgp >= (minGp||1); })
     .sort(function(a,b){ return lg.pstats[b.id][key]-lg.pstats[a.id][key] || lg.pstats[b.id].p-lg.pstats[a.id].p; });
 };
-CG.goalieLeaders = function(lg, minGp){
-  return lg.players.filter(function(p){ return p.pos==="G" && lg.pstats[p.id].gp >= (minGp||3); })
+CG.goalieLeaders = function(lg, minGp, opts){
+  var pool = (opts && opts.current) ? lg.players : CG.statPlayers(lg);
+  return pool.filter(function(p){ var s = lg.pstats[p.id]; return s && s.gs >= (minGp||3); })
     .sort(function(a,b){
       var A=lg.pstats[a.id], B=lg.pstats[b.id];
       return (B.sv/Math.max(1,B.sa)) - (A.sv/Math.max(1,A.sa));
     });
+};
+/* One role's line, with gp and toi set to that role's own games and ice time, so any "x / s.gp" rate reads per role.
+   role "S" (skating) or "G" (in goal). */
+CG.roleLine = function(s, role){
+  if (!s) return s;
+  var o = {}; for (var k in s) o[k] = s[k];
+  if (role === "G"){ o.gp = s.gs||0; o.toi = s.gToi; }
+  else { o.gp = s.sgp||0; o.toi = s.skToi; }
+  return o;
+};
+/* The roles a player actually played this season, his registered role first; with no games, just the registered role. */
+CG.lineRoles = function(s, isG){
+  var first = isG ? "G" : "S", second = isG ? "S" : "G";
+  var has = function(r){ return !!s && (r === "G" ? (s.gs||0) : (s.sgp||0)) > 0; };
+  var out = [];
+  if (has(first) || !has(second)) out.push(first);
+  if (has(second)) out.push(second);
+  return out;
+};
+/* "G, skating" / "RD, in goal" when a player is listed under the role he did not register for; "" otherwise. */
+CG.offRoleTag = function(p, role){
+  if (!p) return "";
+  var regG = p.pos === "G";
+  if (role === "S" && regG) return "G, skating";
+  if (role === "G" && !regG) return (p.pos || "Skater") + ", in goal";
+  return "";
 };
 
 /* ---------- node test / facts harness ---------- */

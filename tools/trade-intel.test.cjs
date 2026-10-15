@@ -31,7 +31,8 @@ console.log("— the value model, run for real");
     { id: "b", tag: "Wall", team: "DET", pos: "G", overall: 78, salary: 750000, squad: "tc" },
     { id: "c", tag: "Fresh", team: "DET", pos: "LW", overall: 70, salary: 750000, squad: "pro" },
   ];
-  CG.lg.pstats = { a: { gp: 10, g: 8, a: 12, p: 20 }, b: { gp: 6, w: 4, l: 2, otl: 0, sa: 200, sv: 184, ga: 16 }, c: { gp: 0 } };
+  /* v4.08: season lines carry games per role (sgp skating, gs in goal) */
+  CG.lg.pstats = { a: { gp: 10, sgp: 10, gs: 0, g: 8, a: 12, p: 20 }, b: { gp: 6, sgp: 0, gs: 6, w: 4, l: 2, otl: 0, sa: 200, sv: 184, ga: 16 }, c: { gp: 0, sgp: 0, gs: 0 } };
   const va = CG.tradeValue("a"), vb = CG.tradeValue("b"), vc = CG.tradeValue("c"), vg = CG.tradeValue("ghost");
   A("overall carries 10 per point above 60", va.ovr === 250 && vc.ovr === 100);
   A("a skater's production is points per game × 40, weighted in over five games", va.prod === 80);

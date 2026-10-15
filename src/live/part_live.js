@@ -1035,10 +1035,29 @@ CG.buildLiveLeague = async function(opts){
      never appeared. It is computed from the table now (CG.clinchedCodes), with the old config
      list still honoured as a manual override if a commissioner ever sets one. */
   var clinchedCfg = (CG._siteCfg && CG._siteCfg["clinched_"+((season&&season.number)||1)]) || [];
+  /* v4.08 (commissioner, 2026-10-14: "Make sure to count every player's stats of every game"): players with this
+     season's stat lines who are not rostered now (waived, left the league, removed). Their games are part of the official
+     record (Rule 6.1), so they get season lines and appear in the stat tables and leaders, marked as no longer rostered.
+     They are never added to lg.players, so nothing about rosters, caps, seats or ballots sees them. Club and position
+     come from their latest line this season. */
+  var rosteredNow = {}; players.forEach(function(p){ rosteredNow[p.id] = true; });
+  var schedAt = {}; schedule.forEach(function(g){ schedAt[g.id] = g.at; });
+  var formerById = {};
+  gameStatsRows.forEach(function(r){
+    if (!r.profile_id || rosteredNow[r.profile_id] || schedAt[r.game_id] == null) return;
+    var at = schedAt[r.game_id], cur = formerById[r.profile_id];
+    if (cur && cur._at >= at) return;
+    var pr = profById[r.profile_id] || {};
+    formerById[r.profile_id] = { id: r.profile_id, tag: pr.gamertag || r.skater_name || "Former player",
+      team: id2code[r.team_id] || null, pos: r.is_goalie ? "G" : (r.position || "C"), former: true,
+      avatar: pr.avatar_url || "", eaId: pr.ea_id || "", platform: pr.platform || "", _at: at };
+  });
+  var formerPlayers = Object.keys(formerById).map(function(k){ return formerById[k]; })
+    .filter(function(p){ return !!p.team; });
   var lg = { players:players, byTeam:byTeam, schedule:schedule, results:regResults,
              allResults:results, playoffGames:playoffGames, clinched:clinchedCfg,
              suspensions:suspMapped, warnings:warnMapped, demoNow:CG.now(), season:season, live:true,
-             posOvr:posOvr };
+             posOvr:posOvr, formerPlayers:formerPlayers };
   if (preResults.length){
     CG.SEASON.completedWeeks = preWeeksDone;
     lg.results = preResults; CG.aggregate(lg, {});
@@ -1122,6 +1141,9 @@ CG.buildLiveLeague = async function(opts){
       (lg.posSplitRows[r.profile_id] = lg.posSplitRows[r.profile_id] || []).push(r);
       var s = lg.pstats[r.profile_id]; if (!s) return;
       s.toi = (s.toi||0) + (+r.time_on_ice_seconds||0);
+      /* v4.08: ice time per role, so a per-game figure divides each role's time by that role's games */
+      if (r.is_goalie) s.gToi = (s.gToi||0) + (+r.time_on_ice_seconds||0);
+      else s.skToi = (s.skToi||0) + (+r.time_on_ice_seconds||0);
       if (r.is_goalie){
         s.brkShots=(s.brkShots||0)+(+r.breakaway_shots||0);
         s.brkSv=(s.brkSv||0)+(+r.breakaway_saves||0);
@@ -1137,7 +1159,7 @@ CG.buildLiveLeague = async function(opts){
         s._ratTeam=(s._ratTeam||0)+(+r.team_play_rating||0); s._ratN=(s._ratN||0)+1;
       }
     });
-    lg.players.forEach(function(p){
+    CG.statPlayers(lg).forEach(function(p){   /* v4.08: players no longer rostered too */
       var s=lg.pstats[p.id]; if(!s) return;
       if (s._ratN){ s.ratOff=s._ratOff/s._ratN; s.ratDef=s._ratDef/s._ratN; s.ratTeam=s._ratTeam/s._ratN; }
     });
@@ -4583,9 +4605,7 @@ CG.applyPickToRoster = function(row){
   lg.players = lg.players || []; lg.players.push(entry);
   (lg.byTeam[code] = lg.byTeam[code] || []).push(entry);
   lg._rosteredIds[row.player_id] = true;
-  if (lg.pstats && !lg.pstats[row.player_id]) lg.pstats[row.player_id] = entry.pos === "G"
-    ? { gp:0, gs:0, w:0, l:0, otl:0, sa:0, sv:0, ga:0, so:0, qs:0, weekly:{} }
-    : { gp:0, g:0, a:0, p:0, pm:0, shots:0, hits:0, blk:0, gv:0, tk:0, pim:0, fow:0, fot:0, gwg:0, weekly:{} };
+  if (lg.pstats && !lg.pstats[row.player_id]) lg.pstats[row.player_id] = CG.blankStatLine();   /* v4.08: one shape */
   return true;
 };
 /* the front offices and the league office need the roster exact (spot ids for squad moves, the
@@ -14432,13 +14452,15 @@ CG.splitSquads = function(list){
 CG.tradeStats = function(pid){
   var lg = CG.lg, p = CG.tPlayer(pid), s = (lg.pstats||{})[pid] || {};
   var goalie = !!(p && p.pos === "G"), gp = s.gp || 0;
-  if (goalie){
-    var sa = s.sa||0, sv = s.sv||0, svp = sa ? sv/sa : null, gaa = gp ? (s.ga||0)/gp : null;
-    return { goalie:true, gp:gp, w:s.w||0, l:s.l||0, otl:s.otl||0, svp:svp, gaa:gaa, so:s.so||0,
-      line: gp ? (s.w||0)+"-"+(s.l||0)+"-"+(s.otl||0)+" · "+(svp!=null?svp.toFixed(3).replace(/^0/,""):"—")+" SV% · "+(gaa!=null?gaa.toFixed(2):"—")+" GAA · "+gp+" GP" : "no games yet" };
-  }
-  return { goalie:false, gp:gp, g:s.g||0, a:s.a||0, p:s.p||0, pm:s.pm||0, pim:s.pim||0, ppg: gp ? (s.p||0)/gp : 0,
-    line: gp ? (s.g||0)+"G "+(s.a||0)+"A "+(s.p||0)+"P · "+gp+" GP · "+(((s.p||0)/gp).toFixed(2))+" P/GP" : "no games yet" };
+  /* v4.08: each role over its own games (sgp skating, gs in goal); gp stays every appearance. A player who played both
+     roles gets both lines, his registered role first. */
+  var sgp = s.sgp || 0, gs = s.gs || 0;
+  var sa = s.sa||0, sv = s.sv||0, svp = sa ? sv/sa : null, gaa = gs ? (s.ga||0)/gs : null, ppg = sgp ? (s.p||0)/sgp : 0;
+  var gLine = gs ? (s.w||0)+"-"+(s.l||0)+"-"+(s.otl||0)+" · "+(svp!=null?svp.toFixed(3).replace(/^0/,""):"—")+" SV% · "+(gaa!=null?gaa.toFixed(2):"—")+" GAA · "+gs+" GP" : "";
+  var sLine = sgp ? (s.g||0)+"G "+(s.a||0)+"A "+(s.p||0)+"P · "+sgp+" GP · "+ppg.toFixed(2)+" P/GP" : "";
+  var line = (goalie ? [gLine, sLine && (sLine+" skating")] : [sLine, gLine && (gLine+" in goal")]).filter(Boolean).join(" · ") || "no games yet";
+  return { goalie:goalie, gp:gp, sgp:sgp, gs:gs, g:s.g||0, a:s.a||0, p:s.p||0, pm:s.pm||0, pim:s.pim||0, ppg:ppg,
+    w:s.w||0, l:s.l||0, otl:s.otl||0, svp:svp, gaa:gaa, so:s.so||0, line:line };
 };
 /* One number per player, in the open, so a lopsided offer shows before it is accepted. Scouted
    overall carries most of it (10 per overall above 60); this season's production adds to it once
@@ -14449,7 +14471,10 @@ CG.tradeValue = function(pid){
   var st = CG.tradeStats(pid);
   var ovr = Math.max(0, (p.overall||70) - 60) * 10, prod = 0;
   if (st.gp >= 1){
-    prod = st.goalie ? Math.max(0, ((st.svp||0) - 0.880) * 2000) + (st.w||0) * 3 : st.ppg * 40;
+    /* v4.08: production from each role he played, weighted by its games */
+    var gProd = st.gs ? Math.max(0, ((st.svp||0) - 0.880) * 2000) + (st.w||0) * 3 : 0;
+    var sProd = st.sgp ? st.ppg * 40 : 0;
+    prod = (sProd * (st.sgp||0) + gProd * (st.gs||0)) / st.gp;
     prod = Math.round(prod * Math.min(1, st.gp / 5));
   }
   var cap = -Math.round(((p.salary||0)/1e6) * 8);
@@ -14462,7 +14487,8 @@ CG.tradeSide = function(pids){
     out.n++; out.value += v.value;
     if (!pl){ out.missing++; return; }
     out.ovrSum += pl.overall||70; out.salary += pl.salary||0; if (CG.isCamp(pl)) out.camp++;
-    out.gp += st.gp; if (st.goalie) out.goalies++; else { out.g += st.g; out.a += st.a; out.p += st.p; }
+    out.gp += st.gp; if (st.goalie) out.goalies++;
+    out.g += st.g; out.a += st.a; out.p += st.p;   /* v4.08: a goalie's skating points are points too */
   });
   out.avgOvr = (out.n - out.missing) ? Math.round(out.ovrSum / (out.n - out.missing)) : 0;
   return out;
