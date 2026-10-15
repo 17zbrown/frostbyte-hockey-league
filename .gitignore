@@ -48,3 +48,6 @@ docs/guides/phone/_report.json
 tools/guides/src-phone/
 docs/guides/pages/_shots-*.json
 docs/guides/pages/_report.json
+
+# graphify knowledge graph output (local only)
+graphify-out/
