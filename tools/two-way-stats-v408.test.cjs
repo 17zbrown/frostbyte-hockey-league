@@ -27,7 +27,7 @@ ctx.esc = (s) => String(s);
 vm.createContext(ctx);
 ctx.CG.playerById = (lg, id) => lg.players.find((p) => p.id === id);
 for (const f of ["blankStatLine", "statPlayers", "aggregate", "skaterLeaders", "goalieLeaders", "roleLine", "lineRoles", "offRoleTag"]) vm.runInContext(grab(eng, f), ctx);
-for (const f of ["seasonLineText", "profileSeasonHtml", "gameLogTables", "profileStatCells", "statCellsHtml", "scoutLine", "leagueDNA", "formerLeagueHtml"]) vm.runInContext(grab(pub, f), ctx);
+for (const f of ["seasonLineText", "profileSeasonHtml", "gameLogTables", "profileStatCells", "statCellsHtml", "scoutLine", "leagueDNA", "formerLeagueHtml", "playoffLine", "playoffCardHtml", "playoffLogHtml"]) vm.runInContext(grab(pub, f), ctx);
 vm.runInContext(pub2.slice(pub2.indexOf("CG.TITLE_CARDS = "), pub2.indexOf("CG.loadTitleBoard = function")), ctx);
 const CG = ctx.CG;
 
@@ -176,8 +176,9 @@ console.log("\n— the statistical titles come from the database's one ranking")
 
 console.log("\n— the readers use role games, never registered position");
 A("Stat central: skaters, advanced and goalies by role games and role lines",
-  /CG\.statPlayers\(lg\)\.filter\(function\(p\)\{ var s0 = lg\.pstats\[p\.id\]; return s0 && skatedOrSkater\(p, s0\) && s0\.sgp>=minGp/.test(pub) &&
-  /var s=CG\.roleLine\(lg\.pstats\[p\.id\], "S"\);/.test(pub) && /var s=CG\.roleLine\(lg\.pstats\[p\.id\], "G"\); var svp/.test(pub));
+  /* v4.09: the tables read SL, the league or its playoff view, through the same role-game filters */
+  /CG\.statPlayers\(SL\)\.filter\(function\(p\)\{ var s0 = SL\.pstats\[p\.id\]; return s0 && skatedOrSkater\(p, s0\) && s0\.sgp>=minGp/.test(pub) &&
+  /var s=CG\.roleLine\(SL\.pstats\[p\.id\], "S"\);/.test(pub) && /var s=CG\.roleLine\(SL\.pstats\[p\.id\], "G"\); var svp/.test(pub));
 A("no stats tab filters on registered position any more", !/lg\.players\.filter\(function\(p\)\{ return p\.pos!=="G" && lg\.pstats\[p\.id\]\.gp>=minGp/.test(pub) && !/return p\.pos==="G" && lg\.pstats\[p\.id\]\.gp>=Math\.min\(minGp,3\)/.test(pub));
 A("the ticker's GAA divides by games in goal", /ps\[gaaL\.id\]\.ga\/ps\[gaaL\.id\]\.gs/.test(ui) && !/ps\[a\.id\]\.ga\/ps\[a\.id\]\.gp/.test(ui));
 A("the awards page reads the title leaders from the database and ranks nothing itself", /CG\.sb\.rpc\("statistical_title_board", \{ p_season: sid, p_top: 3 \}\)/.test(pub2) &&
@@ -188,7 +189,8 @@ A("Players to watch keeps the club's skaters before they have played, plus a goa
 A("a former player's box-score line wears the crest of the club he played that game for", /fp && Object\.assign\(\{\}, fp, \{ team: code \}\)/.test(pub2));
 A("the directory reads a former player's games instead of printing 0", /var us = lg\.pstats\[u\.id\], ugp = \(us && us\.gp\) \|\| 0;/.test(pub) && !/<td class="tnum">0<\/td><td class="tleft tnum" style="font-size:12px">—<\/td>/.test(pub));
 A("the account page's caption has no dash, and names the record for a former player", /No longer on a league roster\. This season(’|\\u2019)s league games stay in the official record \(Rule 6\.1\)\./.test(pub) && !/isn’t on a league roster —/.test(pub));
-A("ice time is split by role", /s\.gToi = \(s\.gToi\|\|0\)/.test(live) && /s\.skToi = \(s\.skToi\|\|0\)/.test(live));
+/* v4.09: the step moved into the engine (CG.addEaMetrics), which the live build calls for each line */
+A("ice time is split by role", /s\.gToi = \(s\.gToi\|\|0\)/.test(eng) && /s\.skToi = \(s\.skToi\|\|0\)/.test(eng) && /CG\.addEaMetrics\(lg, lg\.pstats, regResults, gameStatsRows, lg\.posSplitRows\);/.test(live));
 A("players no longer rostered are kept apart from lg.players", /formerPlayers:formerPlayers/.test(live) && /CG\.statPlayers = function\(lg\)\{ return \(lg\.players\|\|\[\]\)\.concat\(lg\.formerPlayers\|\|\[\]\); \};/.test(eng));
 A("the provisional draft row uses the one shape", /lg\.pstats\[row\.player_id\] = CG\.blankStatLine\(\);/.test(live));
 
@@ -225,8 +227,10 @@ console.log("\n— the record, the rulebook and the changelog");
   A("Rule 9.2 requires the floor at the title's position", /games-played floor of Rule 8\.3 that applies to the player at the title's position/.test(sec("9.2").paragraphs[1]));
   A("...and breaks a tie at the same rate toward more games at that position", /A tie at the same rate goes to the player with more games played at that position\./.test(sec("9.2").paragraphs[1]) &&
     !/A tie goes to the higher total/.test(sec("9.2").paragraphs[1]));
-  A("the changelog's newest entry is 4.08", rb.changelog[0].version === "4.08");
-  A("...with no em dashes", !/—/.test(JSON.stringify(rb.changelog[0])));
+  /* by version, never by position: a later release takes changelog[0] */
+  const e408 = rb.changelog.find((c) => c.version === "4.08");
+  A("the changelog has its 4.08 entry", !!e408);
+  A("...with no em dashes", !/—/.test(JSON.stringify(e408)));
 }
 
 console.log(fail ? `\n${fail} of ${n} FAILED` : `\nall ${n} passed`);

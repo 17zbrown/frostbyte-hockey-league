@@ -998,9 +998,12 @@ CG.buildLiveLeague = async function(opts){
     });
 
   /* stage split: pre-season keeps its own standings and player lines, the regular
-     season owns the league standings, and overalls/parts see every game played */
-  var preResults = results.filter(function(r){ return r.stage==="preseason"; });
-  var regResults = results.filter(function(r){ return r.stage!=="preseason" && r.stage!=="playoff"; });
+     season owns the league standings, and overalls/parts see every game played.
+     v4.09: the playoffs keep their own player lines too (lg.playoff), shown beside the regular season's and never added
+     into them: regular-season totals, the statistical titles (Rule 9.2) and the playoff floor (Rule 8.3) count regular
+     games only. */
+  var stages = CG.splitStages(results);
+  var poResults = stages.po, regResults = stages.reg;
   /* discipline record straight from the suspensions table (newest first) */
   /* v3.51: whether a suspension is running comes from the database (suspension_record.running,
      which is public.suspension_running_at, the one definition). The client used to re-derive it and
@@ -1058,20 +1061,9 @@ CG.buildLiveLeague = async function(opts){
              allResults:results, playoffGames:playoffGames, clinched:clinchedCfg,
              suspensions:suspMapped, warnings:warnMapped, demoNow:CG.now(), season:season, live:true,
              posOvr:posOvr, formerPlayers:formerPlayers };
-  if (preResults.length){
-    CG.SEASON.completedWeeks = preWeeksDone;
-    lg.results = preResults; CG.aggregate(lg, {});
-    lg.pre = { teams: lg.teams, pstats: lg.pstats, glog: lg.glog, results: preResults };
-    CG.SEASON.completedWeeks = allWeeksDone;
-    lg.results = results; CG.aggregate(lg, {});      /* every stage -> ratings */
-    var ratingsAll = lg.ratings, teamRatingsAll = lg.teamRatings;
-    CG.SEASON.completedWeeks = regMaxWk;             /* honors only ever see regular weeks */
-    lg.results = regResults; CG.aggregate(lg, {});   /* regular season -> standings + stats */
-    lg.ratings = ratingsAll;
-    if (teamRatingsAll) lg.teamRatings = teamRatingsAll;
-  } else {
-    CG.aggregate(lg, {});
-  }
+  /* v4.09: every stage's lines in one engine step: lg.playoff and lg.pre kept apart, ratings from every stage, and the
+     regular season alone in lg.pstats, lg.glog and the standings (CG.aggregateStages) */
+  CG.aggregateStages(lg, stages, { pre: preWeeksDone, all: allWeeksDone, reg: regMaxWk });
   /* clinch is computed from the finished table, so it can only be resolved once aggregate has
      produced lg.teams. A commissioner-set override in site_config still wins if one exists. */
   lg.race = CG.raceMath(lg);
@@ -1134,36 +1126,9 @@ CG.buildLiveLeague = async function(opts){
   /* extend season stat lines with EA-only advanced metrics (base G/A/P/etc. came
      from the box above via CG.aggregate; these power the advanced leaders + profiles) */
   lg.posSplitRows = {};   // per-player raw stat lines for the by-position profile split
-  if (gameStatsRows.length){
-    var finalIds = {}; regResults.forEach(function(r){ finalIds[r.id]=true; });
-    gameStatsRows.forEach(function(r){
-      if (!finalIds[r.game_id] || !r.profile_id) return;
-      (lg.posSplitRows[r.profile_id] = lg.posSplitRows[r.profile_id] || []).push(r);
-      var s = lg.pstats[r.profile_id]; if (!s) return;
-      s.toi = (s.toi||0) + (+r.time_on_ice_seconds||0);
-      /* v4.08: ice time per role, so a per-game figure divides each role's time by that role's games */
-      if (r.is_goalie) s.gToi = (s.gToi||0) + (+r.time_on_ice_seconds||0);
-      else s.skToi = (s.skToi||0) + (+r.time_on_ice_seconds||0);
-      if (r.is_goalie){
-        s.brkShots=(s.brkShots||0)+(+r.breakaway_shots||0);
-        s.brkSv=(s.brkSv||0)+(+r.breakaway_saves||0);
-        s.pokes=(s.pokes||0)+(+r.poke_checks||0);
-        s.dives=(s.dives||0)+(+r.diving_saves||0);   /* v3.87: Big Saves on Goalie DNA */
-      } else {
-        s.ppg=(s.ppg||0)+(+r.pp_goals||0); s.shg=(s.shg||0)+(+r.sh_goals||0);
-        s.pass=(s.pass||0)+(+r.passes_completed||0); s.passAtt=(s.passAtt||0)+(+r.passes_attempted||0);
-        s.sat=(s.sat||0)+(+r.shot_attempts||0); s.poss=(s.poss||0)+(+r.possession_seconds||0);
-        s.intc=(s.intc||0)+(+r.interceptions||0); s.pdrawn=(s.pdrawn||0)+(+r.penalties_drawn||0);
-        s.defl=(s.defl||0)+(+r.deflections||0); s.saucer=(s.saucer||0)+(+r.saucer_passes||0);
-        s._ratOff=(s._ratOff||0)+(+r.offense_rating||0); s._ratDef=(s._ratDef||0)+(+r.defense_rating||0);
-        s._ratTeam=(s._ratTeam||0)+(+r.team_play_rating||0); s._ratN=(s._ratN||0)+1;
-      }
-    });
-    CG.statPlayers(lg).forEach(function(p){   /* v4.08: players no longer rostered too */
-      var s=lg.pstats[p.id]; if(!s) return;
-      if (s._ratN){ s.ratOff=s._ratOff/s._ratN; s.ratDef=s._ratDef/s._ratN; s.ratTeam=s._ratTeam/s._ratN; }
-    });
-  }
+  /* v4.09: both lines that carry them, the regular season's and the playoffs', each from its own finals (CG.addEaMetrics) */
+  CG.addEaMetrics(lg, lg.pstats, regResults, gameStatsRows, lg.posSplitRows);
+  CG.addEaMetrics(lg, lg.playoff.pstats, poResults, gameStatsRows, null);
 
   /* ---- power rankings from real results ----
      points% (60) + capped goal-diff/game (25) + last-5 form (15). Until games are

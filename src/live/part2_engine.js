@@ -706,6 +706,79 @@ CG.aggregate = function(lg, overrides){
   lg.teams = teams; lg.pstats = pstats; lg.glog = glog;
   return lg;
 };
+/* v4.09: one season's finals by stage. A game with no stage is a regular-season game. */
+CG.splitStages = function(results){
+  results = results || [];
+  return { all: results,
+    pre: results.filter(function(r){ return r.stage==="preseason"; }),
+    po:  results.filter(function(r){ return r.stage==="playoff"; }),
+    reg: results.filter(function(r){ return r.stage!=="preseason" && r.stage!=="playoff"; }) };
+};
+/* v4.09: every stage's lines from one season's finals (st = CG.splitStages), the one place the live league builds them.
+     lg.playoff  the playoff line (built even before the first playoff final, so every reader finds a line of zeros)
+     lg.pre      the pre-season line, when there were pre-season games
+     lg.ratings  every stage (the overall sees every game played, Rule 6.1)
+     lg.pstats, lg.glog, lg.teams and the honors: the REGULAR season alone. Regular-season totals, the statistical
+     titles (Rule 9.2) and the playoff floor (Rule 8.3) never see a playoff or pre-season game.
+   Each line has the one shape of CG.blankStatLine (gp = sgp + gs, every role played, players no longer rostered
+   included). weeks = { pre, all, reg }: the completed weeks each pass sees; weekly honors are minted from regular weeks
+   only, so the playoff pass sees none. */
+CG.aggregateStages = function(lg, st, weeks){
+  weeks = weeks || {};
+  CG.SEASON.completedWeeks = 0;
+  lg.results = st.po; CG.aggregate(lg, {});
+  lg.playoff = { teams: lg.teams, pstats: lg.pstats, glog: lg.glog, results: st.po };
+  if (st.pre.length){
+    CG.SEASON.completedWeeks = weeks.pre || 0;
+    lg.results = st.pre; CG.aggregate(lg, {});
+    lg.pre = { teams: lg.teams, pstats: lg.pstats, glog: lg.glog, results: st.pre };
+  }
+  var ratingsAll = null, teamRatingsAll = null;
+  if (st.pre.length || st.po.length){
+    CG.SEASON.completedWeeks = weeks.all || 0;
+    lg.results = st.all; CG.aggregate(lg, {});      /* every stage -> ratings */
+    ratingsAll = lg.ratings; teamRatingsAll = lg.teamRatings;
+  }
+  CG.SEASON.completedWeeks = weeks.reg || 0;        /* honors only ever see regular weeks */
+  lg.results = st.reg; CG.aggregate(lg, {});        /* regular season -> standings + stats */
+  if (ratingsAll) lg.ratings = ratingsAll;
+  if (teamRatingsAll) lg.teamRatings = teamRatingsAll;
+  return lg;
+};
+/* EA-only advanced metrics onto a line (base G/A/P and the rest come from CG.aggregate), from the game_stats rows of
+   that stage's finals: ice time per role, special-teams goals, passing, possession and EA's own ratings. v4.09: run for
+   the regular-season line and the playoff line alike, each from its own finals. splitRows, when given, collects each
+   player's raw rows for the profile's By position card. */
+CG.addEaMetrics = function(lg, pstats, stageResults, rows, splitRows){
+  var finalIds = {}; (stageResults||[]).forEach(function(r){ finalIds[r.id]=true; });
+  (rows||[]).forEach(function(r){
+    if (!finalIds[r.game_id] || !r.profile_id) return;
+    if (splitRows) (splitRows[r.profile_id] = splitRows[r.profile_id] || []).push(r);
+    var s = pstats[r.profile_id]; if (!s) return;
+    s.toi = (s.toi||0) + (+r.time_on_ice_seconds||0);
+    /* v4.08: ice time per role, so a per-game figure divides each role's time by that role's games */
+    if (r.is_goalie) s.gToi = (s.gToi||0) + (+r.time_on_ice_seconds||0);
+    else s.skToi = (s.skToi||0) + (+r.time_on_ice_seconds||0);
+    if (r.is_goalie){
+      s.brkShots=(s.brkShots||0)+(+r.breakaway_shots||0);
+      s.brkSv=(s.brkSv||0)+(+r.breakaway_saves||0);
+      s.pokes=(s.pokes||0)+(+r.poke_checks||0);
+      s.dives=(s.dives||0)+(+r.diving_saves||0);   /* v3.87: Big Saves on Goalie DNA */
+    } else {
+      s.ppg=(s.ppg||0)+(+r.pp_goals||0); s.shg=(s.shg||0)+(+r.sh_goals||0);
+      s.pass=(s.pass||0)+(+r.passes_completed||0); s.passAtt=(s.passAtt||0)+(+r.passes_attempted||0);
+      s.sat=(s.sat||0)+(+r.shot_attempts||0); s.poss=(s.poss||0)+(+r.possession_seconds||0);
+      s.intc=(s.intc||0)+(+r.interceptions||0); s.pdrawn=(s.pdrawn||0)+(+r.penalties_drawn||0);
+      s.defl=(s.defl||0)+(+r.deflections||0); s.saucer=(s.saucer||0)+(+r.saucer_passes||0);
+      s._ratOff=(s._ratOff||0)+(+r.offense_rating||0); s._ratDef=(s._ratDef||0)+(+r.defense_rating||0);
+      s._ratTeam=(s._ratTeam||0)+(+r.team_play_rating||0); s._ratN=(s._ratN||0)+1;
+    }
+  });
+  CG.statPlayers(lg).forEach(function(p){   /* v4.08: players no longer rostered too */
+    var s=pstats[p.id]; if(!s) return;
+    if (s._ratN){ s.ratOff=s._ratOff/s._ratN; s.ratDef=s._ratDef/s._ratN; s.ratTeam=s._ratTeam/s._ratN; }
+  });
+};
 
 /* ---------- convenience selectors ---------- */
 CG.playerById = function(lg,id){ return lg.players.find(function(p){ return p.id===id; }); };

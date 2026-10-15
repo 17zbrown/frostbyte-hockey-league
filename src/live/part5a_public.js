@@ -2362,7 +2362,9 @@ CG.slab = function(mods){
 CG.formerLeagueHtml = function(pid){
   var lg = CG.lg, fp = (lg.formerPlayers||[]).find(function(x){ return x.id === pid; });
   var s = fp && lg.pstats && lg.pstats[pid];
-  if (!s || !s.gp) return "";
+  /* v4.09: his playoff games too, on their own line */
+  var po = fp ? CG.playoffLine(pid) : null;
+  if (!s || (!s.gp && !(po && po.gp))) return "";
   var isG = fp.pos === "G";
   var logs = CG.gameLogTables((lg.glog||{})[pid], isG, { link: true }).map(function(t){
     return '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Game log'+(t.two ? (t.kind === "G" ? ", in goal" : ", skating") : '')+'</h3><span class="chip">'+t.n+' GP</span></div>'+
@@ -2372,7 +2374,34 @@ CG.formerLeagueHtml = function(pid){
   return '<section class="sec-tight" style="padding-top:10px"><div class="shell" style="max-width:960px">'+
     '<div class="card"><div class="card-h"><h3>'+esc(CG.seasonTag())+' league season</h3><span class="chip">no longer rostered</span>'+
       '<span class="caption" style="margin-left:auto">last played for '+esc((CG.TEAM[fp.team]||{}).name||fp.team)+'</span></div>'+
-      '<div class="card-b">'+CG.profileSeasonHtml(s, isG)+'</div></div>'+logs+'</div></section>';
+      '<div class="card-b">'+CG.profileSeasonHtml(s, isG)+'</div></div>'+
+    (po && po.gp ? '<div style="margin-top:18px">'+CG.playoffCardHtml(pid, isG)+'</div>' : '')+
+    logs+CG.playoffLogHtml(pid, isG)+'</div></section>';
+};
+/* v4.09: a player's playoff line, kept apart from his regular-season line (Rule 6.1): the same one shape (a line per role
+   played, gp = sgp + gs), from lg.playoff, which buildLiveLeague builds from the playoff finals alone. null outside the
+   live league; a line of zeros before his first playoff game. */
+CG.playoffLine = function(pid){
+  var po = CG.lg && CG.lg.playoff;
+  return (po && po.pstats && po.pstats[pid]) || null;
+};
+/* the profile's Playoffs card: the playoff line, one grid per role played. "" with no playoff games. */
+CG.playoffCardHtml = function(pid, isG){
+  var s = CG.playoffLine(pid);
+  if (!s || !s.gp) return "";
+  return '<div class="card"><div class="card-h"><h3>Playoffs</h3><span class="chip">'+s.gp+' GP</span></div><div class="card-b">'+
+    CG.profileSeasonHtml(s, isG)+
+    '<p class="caption" style="margin-top:12px">Playoff games are kept apart from the regular season. They never count toward the regular-season line, the statistical titles (Rule 9.2) or the playoff eligibility floor (Rule 8.3), and they do count toward the overall rating (Rule 6.1).</p></div></div>';
+};
+/* the playoff game log: its own tables, never mixed into the regular season's, with the round in the first column */
+CG.playoffLogHtml = function(pid, isG){
+  var po = CG.lg && CG.lg.playoff, log = (po && po.glog && po.glog[pid]) || [];
+  if (!log.length) return "";
+  return CG.gameLogTables(log, isG, { link: true, wk: "Rd" }).map(function(t){
+    return '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Playoff games'+(t.two ? (t.kind === "G" ? ", in goal" : ", skating") : '')+'</h3><span class="chip">'+t.n+' GP</span></div>'+
+      '<div class="tblwrap"><table class="tbl keepcols"><caption class="sr">Playoff game log, '+esc(CG.seasonTag())+'</caption><thead><tr>'+t.head+
+      '</tr></thead><tbody>'+t.rows+'</tbody></table></div></div>';
+  }).join("");
 };
 CG.ROUTES.player = function(pid, qs){
   var lg = CG.lg;
@@ -2395,7 +2424,8 @@ CG.ROUTES.player = function(pid, qs){
   /* "no games" has to mean no games at ANY stage: s.gp is regular-season only, and a player
      with a handful of pre-season appearances does have a sample to talk about. */
   var preS = (!archived && CG.lg.pre && CG.lg.pre.pstats) ? CG.lg.pre.pstats[p.id] : null;
-  var anyGp = (s.gp||0) + ((preS && preS.gp)||0);
+  var poS = archived ? null : CG.playoffLine(p.id);   /* v4.09: the playoff line, kept apart */
+  var anyGp = (s.gp||0) + ((preS && preS.gp)||0) + ((poS && poS.gp)||0);
   /* Broadcast-grade backdrop: a rink-level environment (Higgsfield soul_location) under a heavy
      charcoal scrim so the crest, name and overall stay fully legible; the club colour rides the
      6px border. The base #101519 shows if the image 404s. */
@@ -2567,7 +2597,8 @@ CG.ROUTES.player = function(pid, qs){
           posKeys.map(function(g){ return '<option value="'+g[0]+'">'+esc(g[1])+' · '+posGp(g[0])+' GP'+(g[0]===posHead?' · signed up':'')+'</option>'; }).join("")+
         '</select></label>'
       : "";
-    var kpiStrip = '<div class="pm-pad">'+posPick+'<div id="posKpi">'+CG.profileSeasonHtml(s, isG)+'</div>'+
+    var kpiStrip = '<div class="pm-pad">'+(poS && poS.gp ? '<div class="eyebrow" style="margin:0 0 10px">Regular season</div>' : '')+
+      posPick+'<div id="posKpi">'+CG.profileSeasonHtml(s, isG)+'</div>'+
       (posKeys.length >= 2 ? CG.centerWingLine(posLines) : "")+'</div>';
     var scoutCard = '<div class="card"><div class="card-h"><h3>'+(archived?"Season summary":"Scouting the numbers")+'</h3><span class="chip">'+(archived?"Archived":"Derived from box scores")+'</span></div><div class="card-b">'+
         '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(scout)+'</p></div></div>';
@@ -2594,6 +2625,7 @@ CG.ROUTES.player = function(pid, qs){
          { html: contractCard }, { html: CG.broadcastCard(p) }]
       : [{ html: vizDna }, { html: vizEff },
          { html: kpiStrip, wide: true },
+         { html: archived ? "" : CG.playoffCardHtml(p.id, isG), wide: true },
          { html: sideCard }, { html: contractCard },
          { html: scoutCard }, { html: CG.broadcastCard(p) },
          { html: posCard, wide: true },
@@ -2611,7 +2643,12 @@ CG.ROUTES.player = function(pid, qs){
           '</tr></thead><tbody>'+t.rows+'</tbody></table></div>'+
           (archived && i === logParts.length-1 ?'<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Archived box scores are kept for the record; match pages are only linked for the current season.</span></div>':"")+'</div>';
       }).join("")
-    : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("chart",22)+'</div><b>No games recorded'+(archived?" that season":" yet")+'</b><p>'+(archived?"This player didn’t draw into a lineup during "+esc(SD.label)+".":"This player hasn’t drawn into a lineup — the game log fills in after their first shift.")+'</p></div></div>';
+    /* v4.09: games at another stage are listed below, so the empty state only speaks for the regular season then */
+    : (!archived && ((CG.playoffLine(p.id)||{}).gp || (preS && preS.gp))
+      ? '<div class="card"><div class="card-b"><span class="caption">No regular-season games recorded yet.</span></div></div>'
+      : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("chart",22)+'</div><b>No games recorded'+(archived?" that season":" yet")+'</b><p>'+(archived?"This player didn’t draw into a lineup during "+esc(SD.label)+".":"This player hasn’t drawn into a lineup. The game log fills in after their first shift.")+'</p></div></div>');
+    /* v4.09: the playoff game log, its own tables, never mixed into the regular season's */
+    if (!archived) body += CG.playoffLogHtml(p.id, isG);
     /* pre-season game log — its own table, never mixed into the season's */
     var preLog = (!archived && CG.lg.pre && CG.lg.pre.glog && CG.lg.pre.glog[p.id]) || [];
     if (preLog.length){
@@ -2917,9 +2954,11 @@ CG.profileSeasonHtml = function(s, isG){
   }).join("");
 };
 /* v4.08: a game log split by what was played: a skating table and an in-goal table when he played both, one table
-   otherwise. Returns [{kind, two, n, head, rows}]; the caller frames them. */
+   otherwise. Returns [{kind, two, n, head, rows}]; the caller frames them. v4.09: opts.wk heads the first column ("Rd"
+   for the playoffs, where a game's week is its round). */
 CG.gameLogTables = function(log, isG, opts){
   opts = opts || {};
+  var wk = opts.wk || "Wk";
   var goalLine = function(b){ return !!(b && (b.goalie || (b.g == null && b.sa != null))); };
   var groups = { G: [], S: [] };
   (log || []).forEach(function(en){ groups[goalLine(en.line) ? "G" : "S"].push(en); });
@@ -2927,8 +2966,8 @@ CG.gameLogTables = function(log, isG, opts){
   return kinds.map(function(k){
     var goalie = k === "G";
     return { kind: k, two: kinds.length > 1, n: groups[k].length,
-      head: goalie ? '<th>Wk</th><th class="tleft">Opponent</th><th>SA</th><th>SV</th><th>GA</th><th>Result</th>'
-                   : '<th>Wk</th><th class="tleft">Opponent</th><th>G</th><th>A</th><th>P</th><th>S</th><th>+/-</th><th>PIM</th>',
+      head: goalie ? '<th>'+wk+'</th><th class="tleft">Opponent</th><th>SA</th><th>SV</th><th>GA</th><th>Result</th>'
+                   : '<th>'+wk+'</th><th class="tleft">Opponent</th><th>G</th><th>A</th><th>P</th><th>S</th><th>+/-</th><th>PIM</th>',
       rows: groups[k].map(function(en){
         var b = en.line, link = opts.link ? ' class="rowlink" data-go="#/matchup/'+en.game+'"' : '';
         return '<tr'+link+'><td class="tnum">'+en.week+'</td>'+
@@ -3303,28 +3342,45 @@ CG.AFTER.pickup = function(id){
 };
 
 /* ---------- STATS CENTRAL ---------- */
+/* v4.09: the Playoffs view reads the playoff lines (lg.playoff, built from the playoff finals alone) through the same
+   tables; the regular season stays the default and its figures never include a playoff game. */
+CG.playoffView = function(lg){
+  var po = lg.playoff || {};
+  return { players: lg.players, formerPlayers: lg.formerPlayers, pstats: po.pstats || {}, teams: po.teams || {}, results: po.results || [] };
+};
 CG.ROUTES.stats = function(param, qs){
   var _partial = (CG.statsPartialNote ? CG.statsPartialNote() : "");
   var lg = CG.lg;
-  var tab = qs.tab||"skaters", minGp = qs.min===undefined? 3 : +qs.min, fTeam = qs.team||"";
+  var PO = qs.stage === "playoff", SL = PO ? CG.playoffView(lg) : lg;
+  /* a playoff series is short, so the Playoffs view starts at 1 GP */
+  var tab = qs.tab||"skaters", minGp = qs.min===undefined? (PO ? 1 : 3) : +qs.min, fTeam = qs.team||"";
   /* an empty table has two very different causes, and the reader can only act on one of them */
-  var noGames = !(lg.allResults||lg.results).length;
+  var noGames = PO ? !SL.results.length : !(lg.allResults||lg.results).length;
   var emptyStats = function(cols, what){
     return noGames
-      ? CG.emptyRow(cols, "No "+what+" yet",
-          "The season hasn’t started. Every column here fills in automatically from EA box scores after the first final.")
+      ? (PO ? CG.emptyRow(cols, "No playoff "+what+" yet",
+                "The playoffs haven’t started. Every column here fills in automatically from EA box scores after the first playoff final.")
+            : CG.emptyRow(cols, "No "+what+" yet",
+                "The season hasn’t started. Every column here fills in automatically from EA box scores after the first final."))
       : CG.emptyRow(cols, "No "+what+" match this view",
-          "Lower the minimum GP or pick a different club — the filters above are hiding everyone.");
+          "Lower the minimum GP or pick a different club. The filters above are hiding everyone.");
   };
-  var head = CG.pageHead("Stat central","League statistics",
-    "Sortable, filterable, exportable. "+(lg.results.length
-      ? "Auto-imported from EA box scores after every final — "+lg.results.length+" game"+(lg.results.length===1?"":"s")+" recorded."
+  var nRec = SL.results.length;
+  var head = CG.pageHead("Stat central", PO ? "Playoff statistics" : "League statistics",
+    "Sortable, filterable, exportable. "+(PO
+      ? (nRec ? "Playoff games only, kept apart from the regular season: "+nRec+" game"+(nRec===1?"":"s")+" recorded."
+              : "Playoff lines fill in automatically from EA box scores after the first playoff final, kept apart from the regular season.")
+      : nRec
+      ? "Auto-imported from EA box scores after every final: "+nRec+" regular-season game"+(nRec===1?"":"s")+" recorded."
       : "Every category fills in automatically from EA box scores once the season starts.")
     ,'<button class="btn btn-ghost btn-sm" id="csvStats" style="align-self:flex-end">'+CG.ic("dl",14)+'Export view</button>');
   var tabs = '<div class="shell"><div class="tabs" role="tablist">'+
     [["skaters","Skaters"],["advanced","Advanced"],["goalies","Goaltenders"],["teams","Teams"]].map(function(x){
       return '<button role="tab" aria-selected="'+(tab===x[0])+'" class="'+(tab===x[0]?"on":"")+'" data-tab="'+x[0]+'">'+x[1]+'</button>'; }).join("")+'</div>'+
     '<div class="filters" style="margin:16px 0 18px">'+
+    '<div class="seg" role="group" aria-label="Stage">'+[["regular","Regular season"],["playoff","Playoffs"]].map(function(x){
+      var on = (x[0]==="playoff") === PO;
+      return '<button type="button" class="'+(on?"on":"")+'" aria-pressed="'+on+'" data-stage="'+x[0]+'">'+x[1]+'</button>'; }).join("")+'</div>'+
     (tab!=="teams"?'<select id="sTeam" style="max-width:190px" aria-label="Filter by club"><option value="">All clubs</option>'+CG.TEAMS.map(function(t){ return '<option value="'+t.code+'"'+(fTeam===t.code?" selected":"")+'>'+esc(t.name)+'</option>'; }).join("")+'</select>':"")+
     (tab!=="teams"?'<label style="display:flex;align-items:center;gap:8px;font-family:var(--f-mono);font-size:12px;color:var(--steel)">Min GP <input type="number" id="sMin" min="0" max="12" value="'+minGp+'" style="width:70px"></label>':"")+
     '<span class="caption">Click a column to sort.</span></div>';
@@ -3334,11 +3390,11 @@ CG.ROUTES.stats = function(param, qs){
        rostered too: every game counts (commissioner, 2026-10-14) */
     /* (with Min GP 0, a rostered skater with no games at all is still listed, as before) */
     var skatedOrSkater = function(p, s0){ return s0.sgp > 0 || (p.pos !== "G" && !p.former && !s0.gs); };
-    var list = CG.statPlayers(lg).filter(function(p){ var s0 = lg.pstats[p.id]; return s0 && skatedOrSkater(p, s0) && s0.sgp>=minGp && (!fTeam||p.team===fTeam); })
-      .sort(function(a,b){ return lg.pstats[b.id].p-lg.pstats[a.id].p; });
-    table = '<table class="tbl keepcols" id="statTbl"><caption>Skater statistics — minimum '+minGp+' GP</caption><thead><tr>'+
+    var list = CG.statPlayers(SL).filter(function(p){ var s0 = SL.pstats[p.id]; return s0 && skatedOrSkater(p, s0) && s0.sgp>=minGp && (!fTeam||p.team===fTeam); })
+      .sort(function(a,b){ return SL.pstats[b.id].p-SL.pstats[a.id].p; });
+    table = '<table class="tbl keepcols" id="statTbl"><caption>'+(PO?"Playoff skater":"Skater")+' statistics, minimum '+minGp+' GP</caption><thead><tr>'+
       '<th class="tleft">Player</th><th class="sortable">GP</th><th class="sortable">G</th><th class="sortable">A</th><th class="sortable sorted">P</th><th class="sortable">P/GP</th><th class="sortable">+/-</th><th class="sortable">S</th><th class="sortable">S%</th><th class="sortable">HIT</th><th class="sortable">BLK</th><th class="sortable">TK</th><th class="sortable">PIM</th><th class="sortable">GWG</th><th class="sortable">FO%</th></tr></thead><tbody>'+
-      list.map(function(p){ var s=CG.roleLine(lg.pstats[p.id], "S");
+      list.map(function(p){ var s=CG.roleLine(SL.pstats[p.id], "S");
         return '<tr class="rowlink" style="--tc:'+CG.TEAM[p.team].color+'" data-go="'+CG.playerRoute(p)+'">'+
         '<td class="tleft"><span class="playercell">'+CG.crest(p.team,22)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+esc(CG.offRoleTag(p,"S")||p.pos)+' · '+CG.TEAM[p.team].code+(CG.isCamp(p)?' · camp':'')+(p.former?' · no longer rostered':'')+'</small></span></span></td>'+
         '<td data-v="'+s.gp+'">'+s.gp+'</td><td data-v="'+s.g+'" class="'+(s.g?"":"z")+'">'+s.g+'</td><td data-v="'+s.a+'" class="'+(s.a?"":"z")+'">'+s.a+'</td>'+
@@ -3350,11 +3406,11 @@ CG.ROUTES.stats = function(param, qs){
         '<td data-v="'+(s.fot?100*s.fow/s.fot:0).toFixed(1)+'">'+(s.fot?(100*s.fow/s.fot).toFixed(1):"—")+'</td></tr>'; }).join("")+
       (list.length ? "" : emptyStats(15,"skater stats"))+'</tbody></table>';
   } else if (tab==="advanced"){
-    var la = CG.statPlayers(lg).filter(function(p){ var s0 = lg.pstats[p.id]; return s0 && (s0.sgp > 0 || (p.pos !== "G" && !p.former && !s0.gs)) && s0.sgp>=minGp && (!fTeam||p.team===fTeam); })
-      .sort(function(a,b){ return (lg.pstats[b.id].skToi||0)-(lg.pstats[a.id].skToi||0); });
-    table = '<table class="tbl keepcols" id="statTbl"><caption>Advanced skater metrics — auto-imported from EA box scores</caption><thead><tr>'+
+    var la = CG.statPlayers(SL).filter(function(p){ var s0 = SL.pstats[p.id]; return s0 && (s0.sgp > 0 || (p.pos !== "G" && !p.former && !s0.gs)) && s0.sgp>=minGp && (!fTeam||p.team===fTeam); })
+      .sort(function(a,b){ return (SL.pstats[b.id].skToi||0)-(SL.pstats[a.id].skToi||0); });
+    table = '<table class="tbl keepcols" id="statTbl"><caption>'+(PO?"Playoff advanced":"Advanced")+' skater metrics, auto-imported from EA box scores</caption><thead><tr>'+
       '<th class="tleft">Player</th><th class="sortable">GP</th><th class="sortable sorted">TOI/GP</th><th class="sortable">PPG</th><th class="sortable">SHG</th><th class="sortable">GV</th><th class="sortable">TK</th><th class="sortable">Pass%</th><th class="sortable">Poss/GP</th><th class="sortable">SAT</th><th class="sortable">INT</th><th class="sortable">PD</th><th class="sortable">OFF</th><th class="sortable">DEF</th><th class="sortable">TP</th></tr></thead><tbody>'+
-      la.map(function(p){ var s=CG.roleLine(lg.pstats[p.id], "S");   /* v4.08: skating games and skating ice time */
+      la.map(function(p){ var s=CG.roleLine(SL.pstats[p.id], "S");   /* v4.08: skating games and skating ice time */
         var toiPg=s.gp?(s.toi||0)/s.gp:0, possPg=s.gp?(s.poss||0)/s.gp:0, passp=s.passAtt?100*s.pass/s.passAtt:0;
         return '<tr class="rowlink" style="--tc:'+CG.TEAM[p.team].color+'" data-go="'+CG.playerRoute(p)+'">'+
         '<td class="tleft"><span class="playercell">'+CG.crest(p.team,22)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+esc(CG.offRoleTag(p,"S")||p.pos)+' · '+CG.TEAM[p.team].code+(CG.isCamp(p)?' · camp':'')+(p.former?' · no longer rostered':'')+'</small></span></span></td>'+
@@ -3372,11 +3428,11 @@ CG.ROUTES.stats = function(param, qs){
       (la.length ? "" : emptyStats(15,"advanced metrics"))+'</tbody></table>';
   } else if (tab==="goalies"){
     /* v4.08: everyone who played in goal, over his games in goal (a skater's starts included) */
-    var gl = CG.statPlayers(lg).filter(function(p){ var s0 = lg.pstats[p.id]; return s0 && (s0.gs > 0 || (p.pos === "G" && !p.former && !s0.sgp)) && s0.gs>=Math.min(minGp,3) && (!fTeam||p.team===fTeam); })
-      .sort(function(a,b){ var A=lg.pstats[a.id],B=lg.pstats[b.id]; return B.sv/Math.max(1,B.sa)-A.sv/Math.max(1,A.sa); });
-    table = '<table class="tbl keepcols" id="statTbl"><caption>Goaltender statistics</caption><thead><tr>'+
+    var gl = CG.statPlayers(SL).filter(function(p){ var s0 = SL.pstats[p.id]; return s0 && (s0.gs > 0 || (p.pos === "G" && !p.former && !s0.sgp)) && s0.gs>=Math.min(minGp,3) && (!fTeam||p.team===fTeam); })
+      .sort(function(a,b){ var A=SL.pstats[a.id],B=SL.pstats[b.id]; return B.sv/Math.max(1,B.sa)-A.sv/Math.max(1,A.sa); });
+    table = '<table class="tbl keepcols" id="statTbl"><caption>'+(PO?"Playoff goaltender":"Goaltender")+' statistics</caption><thead><tr>'+
       '<th class="tleft">Goaltender</th><th class="sortable">GP</th><th class="sortable">W</th><th class="sortable">L</th><th class="sortable">OTL</th><th class="sortable">SA</th><th class="sortable">SV</th><th class="sortable sorted">SV%</th><th class="sortable">GAA</th><th class="sortable">SO</th><th class="sortable">QS</th><th class="sortable">Brk%</th><th class="sortable">Poke</th></tr></thead><tbody>'+
-      gl.map(function(p){ var s=CG.roleLine(lg.pstats[p.id], "G"); var svp = s.sa? s.sv/s.sa : 0;
+      gl.map(function(p){ var s=CG.roleLine(SL.pstats[p.id], "G"); var svp = s.sa? s.sv/s.sa : 0;
         return '<tr class="rowlink" style="--tc:'+CG.TEAM[p.team].color+'" data-go="'+CG.playerRoute(p)+'">'+
         '<td class="tleft"><span class="playercell">'+CG.crest(p.team,22)+'<span><span class="nm">'+esc(p.tag)+'</span><small>'+(CG.offRoleTag(p,"G")?esc(CG.offRoleTag(p,"G"))+' · ':'')+CG.TEAM[p.team].code+(CG.isCamp(p)?' · camp':'')+(p.former?' · no longer rostered':'')+'</small></span></span></td>'+
         '<td data-v="'+s.gp+'">'+s.gp+'</td><td data-v="'+s.w+'">'+s.w+'</td><td data-v="'+s.l+'">'+s.l+'</td><td data-v="'+s.otl+'">'+s.otl+'</td>'+
@@ -3388,9 +3444,16 @@ CG.ROUTES.stats = function(param, qs){
         '<td data-v="'+(s.pokes||0)+'">'+(s.pokes||0)+'</td></tr>'; }).join("")+
       (gl.length ? "" : emptyStats(13,"goaltender stats"))+'</tbody></table>';
   } else {
-    table = '<table class="tbl keepcols" id="statTbl"><caption>Team statistics</caption><thead><tr>'+
-      '<th class="tleft">Club</th><th class="sortable">GP</th><th class="sortable">GF/GP</th><th class="sortable">GA/GP</th><th class="sortable sorted">DIFF</th><th class="sortable">S/GP</th><th class="sortable">SA/GP</th><th class="sortable">S%</th><th class="sortable">Home</th><th class="sortable">Road</th><th class="sortable">PTS%</th></tr></thead><tbody>'+
-      CG.standings(lg).map(function(r){
+    /* v4.09: in the Playoffs view, the clubs that have played a playoff game, by wins, with a win percentage in place of
+       points (the playoffs award none) */
+    var teamRows = PO
+      ? CG.TEAMS.filter(function(t){ return SL.teams[t.code] && SL.teams[t.code].gp > 0; })
+          .map(function(t){ return Object.assign({ team:t }, SL.teams[t.code]); })
+          .sort(function(a,b){ return b.w-a.w || b.diff-a.diff || b.gf-a.gf; })
+      : CG.standings(lg);
+    table = '<table class="tbl keepcols" id="statTbl"><caption>'+(PO?"Playoff team":"Team")+' statistics</caption><thead><tr>'+
+      '<th class="tleft">Club</th><th class="sortable">GP</th><th class="sortable">GF/GP</th><th class="sortable">GA/GP</th><th class="sortable sorted">DIFF</th><th class="sortable">S/GP</th><th class="sortable">SA/GP</th><th class="sortable">S%</th><th class="sortable">Home</th><th class="sortable">Road</th><th class="sortable">'+(PO?"W%":"PTS%")+'</th></tr></thead><tbody>'+
+      teamRows.map(function(r){
         var gp = Math.max(1,r.gp);
         return '<tr class="rowlink" style="--tc:'+r.team.color+'" data-go="#/team/'+r.code+'">'+
         '<td class="tleft"><span class="teamcell">'+CG.crest(r.code,24)+'<span class="nm">'+esc(r.team.name)+'</span></span></td>'+
@@ -3399,20 +3462,29 @@ CG.ROUTES.stats = function(param, qs){
         '<td data-v="'+(r.sf/gp).toFixed(1)+'">'+(r.sf/gp).toFixed(1)+'</td><td data-v="'+(r.sa/gp).toFixed(1)+'">'+(r.sa/gp).toFixed(1)+'</td>'+
         '<td data-v="'+(r.sf?100*r.gf/r.sf:0).toFixed(1)+'">'+(r.sf?(100*r.gf/r.sf).toFixed(1):"—")+'</td>'+
         '<td data-v="'+r.hw+'">'+r.hw+"-"+r.hl+'</td><td data-v="'+r.aw+'">'+r.aw+"-"+r.al+'</td>'+
-        '<td data-v="'+(r.ptsPct*100).toFixed(0)+'">'+(r.ptsPct*100).toFixed(0)+'%</td></tr>'; }).join("")+'</tbody></table>';
+        (PO ? '<td data-v="'+(100*r.w/gp).toFixed(0)+'">'+(100*r.w/gp).toFixed(0)+'%</td></tr>'
+            : '<td data-v="'+(r.ptsPct*100).toFixed(0)+'">'+(r.ptsPct*100).toFixed(0)+'%</td></tr>'); }).join("")+
+      (teamRows.length ? "" : emptyStats(11,"team stats"))+'</tbody></table>';
   }
   return head + _partial + tabs + '<div class="card"><div class="tblwrap">'+table+'</div></div>'+
+    (PO ? '<p class="caption" style="margin:14px 0 0">Playoff lines are kept apart from the regular season (Rule 6.1). They never count toward regular-season totals, the statistical titles (Rule 9.2) or the playoff eligibility floor (Rule 8.3).</p>' : '')+
     '<p class="caption" style="margin:14px 0 40px">Definitions: P/GP points per game · S% shooting percentage · TK takeaways · GV giveaways · GWG game-winning goals · FO% faceoff win rate · QS quality starts (≥.885 SV% in a start) · TOI/GP time on ice per game · Pass% pass completion · SAT shot attempts · INT interceptions · PD penalties drawn · OFF/DEF/TP EA offense / defense / team-play ratings · Brk% breakaway save rate. Everything is auto-imported from EA box scores — metrics the data can’t support aren’t shown.</p></div>';
 };
 CG.AFTER.stats = function(param, qs){
   var tab = qs.tab||"skaters";
-  $$("[data-tab]").forEach(function(b){ b.addEventListener("click", function(){ location.hash="#/stats?tab="+b.getAttribute("data-tab"); }); });
-  var st = $("#sTeam"); if (st) st.addEventListener("change", function(){ location.hash="#/stats?tab="+tab+"&team="+this.value+"&min="+($("#sMin")?$("#sMin").value:3); });
-  var sm = $("#sMin"); if (sm) sm.addEventListener("change", function(){ location.hash="#/stats?tab="+tab+"&team="+(st?st.value:"")+"&min="+this.value; });
+  /* v4.09: the stage rides along with every tab and filter change; switching stage resets Min GP to that view's default */
+  var stg = qs.stage === "playoff" ? "&stage=playoff" : "";
+  $$("[data-tab]").forEach(function(b){ b.addEventListener("click", function(){ location.hash="#/stats?tab="+b.getAttribute("data-tab")+stg; }); });
+  $$("[data-stage]").forEach(function(b){ b.addEventListener("click", function(){
+    var to = b.getAttribute("data-stage") === "playoff" ? "&stage=playoff" : "";
+    if (to !== stg) location.hash = "#/stats?tab="+tab+(qs.team ? "&team="+encodeURIComponent(qs.team) : "")+to;
+  }); });
+  var st = $("#sTeam"); if (st) st.addEventListener("change", function(){ location.hash="#/stats?tab="+tab+"&team="+this.value+"&min="+($("#sMin")?$("#sMin").value:3)+stg; });
+  var sm = $("#sMin"); if (sm) sm.addEventListener("change", function(){ location.hash="#/stats?tab="+tab+"&team="+(st?st.value:"")+"&min="+this.value+stg; });
   $("#csvStats").addEventListener("click", function(){
     var rows = $$("#statTbl tr").map(function(tr){
       return $$("th,td",tr).map(function(c){ return c.textContent.trim().replace(/\s+/g," "); });
     });
-    CG.exportCSV("cghl-stats-"+tab+".csv", rows);
+    CG.exportCSV("cghl-stats-"+(stg ? "playoffs-" : "")+tab+".csv", rows);
   });
 };
