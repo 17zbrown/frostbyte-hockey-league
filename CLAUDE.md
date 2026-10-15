@@ -26,8 +26,10 @@ The GitHub repo is public: nothing secret belongs in it.
 - `netlify/functions/*.js`: HTTP functions (ingest-stats, discord-interactions, discord-ops, pickup-import, ea-poll
   fallback) plus gated stand-ins for the five jobs. Every file is ESM; CommonJS must be `.cjs` (Netlify's bundler
   refuses it; `tools/netlify-functions-esm.test.cjs`). A file there with no schedule export is a PUBLIC endpoint.
-- `jobs/` + `edge/`: discord-sync, twitch-live-sync, lfg-timers, discord-scheduler and discord-welcome run as Supabase
-  Edge Functions (pg_cron + pg_net, host switch `public.job_hosts`). Supabase does NOT redeploy on push.
+- `jobs/` + `edge/`: discord-sync, twitch-live-sync, lfg-timers, discord-scheduler and discord-welcome. Each runs on the
+  host `public.job_hosts` names: the Netlify stand-in or a Supabase Edge Function (pg_cron + pg_net). As of 2026-10-15
+  all five are on `netlify`; the Edge cutover is built and waits on the user adding the Edge secrets. Read
+  `job_hosts` before assuming either. Supabase does NOT redeploy on push.
 - `bot/`: the gateway bot and EA score poller on an Oracle VM that pulls `main` and restarts on `bot/` or `shared/`
   changes; no new work goes onto the VM. `shared/`: helpers for functions, jobs and bot (`discord-links.cjs`,
   `game-window.cjs`, `roles.mjs`); `.cjs` files use `exports.x =` lines so ESM imports them by name.
