@@ -187,7 +187,8 @@ const lib = new Function("etFmt", "const etDayUnix = (s) => etFmt.format(new Dat
   A("...keeping the v4.08 wording", /two season lines, one from the games skated and one from the games played in goal/.test(r61) && /including a line cut short by a disconnection/.test(r61));
   A("Rule 4.3: the combined record keeps a line per role", /A player who skated in one sitting and played goal in another keeps one line for each role in that record, and the game counts once \(Rule 6\.1\)\./.test(sec("4.3").paragraphs[2]));
   const cl = rb.changelog.find((c) => c.version === "4.11");
-  A("the changelog's newest entry is 4.11", rb.changelog[0].version === "4.11" && !!cl);
+  /* by version, never by position: a later release takes changelog[0] (v4.12 did) */
+  A("the changelog has its 4.11 entry, newer releases only in front of it", !!cl && rb.changelog.slice(0, rb.changelog.indexOf(cl)).every((c) => +c.version > 4.11));
   A("...no em dashes and no spaced hyphens", !/—| - /.test(JSON.stringify(cl)) && !/—| - /.test(r61));
   A("...and it does not claim a changed result (none existed)", /No game so far had such a player/.test(cl.items[0]));
 

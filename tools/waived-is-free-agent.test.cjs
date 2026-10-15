@@ -18,7 +18,8 @@ const flat = rec.replace(/\n--\s?/g, " ").replace(/\s+/g, " ");
 console.log("\n— the stamp is carried all the way to the client");
 {
   A("the Control Center select asks for waived_at",
-    /season_registrations"\)\.select\("[^"]*,waived_at,/.test(live));
+    /* v4.12: the office's copy is read by key, CG.sbAll("season_registrations","<columns>", ...) */
+    /CG\.sbAll\("season_registrations","[^"]*,waived_at,/.test(live));
   A("the record notes the public RPC returns it too", /registration_pool/.test(flat) && /waived_at/.test(flat));
 }
 

@@ -225,12 +225,13 @@ console.log("\n— the adversarial review's confirmed findings stay fixed");
   /* 4 · the ticker orders by when the pick was made, not its number */
   A("the ticker sorts on pickedAt with overall as the legacy fallback",
     /Date\.parse\(b\.pickedAt\|\|""\)\|\|0\)-\(Date\.parse\(a\.pickedAt\|\|""\)\|\|0\) \|\| \(b\.overall\|\|0\)-\(a\.overall\|\|0\)/.test(live));
-  /* three now: the manager reload, the spectator load, and the realtime reconcile refetch */
-  A("every draft select fetches picked_at",
-    (live.match(/from\("draft_picks"\)\.select\(/g) || []).length ===
-    (live.match(/from\("draft_picks"\)\.select\("[^"]*picked_at/g) || []).length);
+  /* three now: the manager reload, the spectator load, and the realtime reconcile refetch. v4.12: they read by key,
+     CG.sbAll("draft_picks","<columns>", ...), so both forms are counted; the public boot slot carries no pick times. */
+  const draftSel = (live.match(/(?:from\("draft_picks"\)\.select\(|CG\.sbAll\("draft_picks",)"[^"]*"/g) || []);
+  A("every draft select fetches picked_at, the public boot slot aside",
+    draftSel.filter((m) => !/picked_at/.test(m)).length === 1 && /function\(\)\{ return CG\.sbAll\("draft_picks","id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped",/.test(live), draftSel);
   A("...and there are three of them",
-    (live.match(/from\("draft_picks"\)\.select\("[^"]*picked_at/g) || []).length === 3);
+    draftSel.filter((m) => /picked_at/.test(m)).length === 3, draftSel.length);
 
   /* 5 · spectator hardening */
   A("only draft-running roles fire the auto-advance RPC",

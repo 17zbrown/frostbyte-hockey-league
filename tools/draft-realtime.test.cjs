@@ -25,6 +25,9 @@ ctx.CG = {
   now: () => Date.now(),
   SEASON: { number: 1, id: "s1" },
   sb: { from: () => { queries++; return { select: () => ({ order: () => Promise.resolve({ data: [], error: null }) }) }; } },
+  /* v4.12: the pick list is read by key (CG.sbAll) and the draft state bounded (CG.sbCapped); each counts as a query */
+  sbAll: () => { queries++; return Promise.resolve({ data: [], error: null }); },
+  sbCapped: (p) => Promise.resolve(p),
   rerenderKeepScroll: () => { repaints++; },
   router: () => { repaints++; },
   contractHeldIds: () => ({}),

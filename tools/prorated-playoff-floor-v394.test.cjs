@@ -17,7 +17,8 @@ A("the playoff lineup gate and award eligibility read it", /public\.player_playo
 A("read-only and public (no PUBLIC default; anon and authenticated)", /revoke execute on function public\.playoff_floors\(uuid\) from public;/.test(sql) && /grant execute on function public\.playoff_floors\(uuid\) to anon, authenticated;/.test(sql));
 
 console.log("— the site");
-A("floors load for everyone with the season extras", /CG\.sb\.rpc\("playoff_floors", \{ p_season: CG\.SEASON\.id \}\)/.test(live));
+/* v4.12: read by key (tools/keyset-paging-v412.test.cjs) */
+A("floors load for everyone with the season extras", /CG\.sbAllRpc\("playoff_floors", \{ p_season: CG\.SEASON\.id \}, "profile_id"\)/.test(live));
 /* v4.08: the awards page no longer ranks the titles itself; it reads public.statistical_title_board, whose floor is
    public.player_playoff_floor (the same prorated number) */
 A("Road to 16, the hub card and the awards page read each player's own number", /var min = CG\.playoffFloorFor\(pl\.id\);/.test(live) && /myMin = CG\.playoffFloorFor\(me\.id\)/.test(hub) &&

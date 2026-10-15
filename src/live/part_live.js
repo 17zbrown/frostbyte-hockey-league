@@ -418,54 +418,163 @@ CG.toiMin = function(sec){ return Math.round((+sec||0)/60); };
 
 CG.LIVE = { loaded:false, error:null };
 
-/* PostgREST caps a single response at 1,000 rows and truncates silently. Any table that
-   grows past that (game_stats ~12 rows/final crosses it around week 3) must be paged, or box
-   scores, season totals, leaders, and the career/eligibility counts quietly undercount.
-   Returns a Supabase-shaped {data,error} so callers are unchanged. */
-/* Reads a whole table past PostgREST's 1000-row ceiling. Pages are fetched CONCURRENTLY: the old
-   loop awaited each page before asking for the next, so a table crossing N pages cost N round
-   trips in series — game_stats alone reaches ~7 pages by December, adding seconds to every page
-   load. One count, then every page at once. */
-CG.sbAll = async function(table, sel, orderCol, ascending, filterFn){
-  var page=1000, asc = ascending!==false;
-  var build = function(){
-    var qb = CG.sb.from(table).select(sel||"*");
-    if (filterFn) qb = filterFn(qb);
-    if (orderCol) qb = qb.order(orderCol,{ ascending:asc });
-    return qb;
+/* v4.12: KEYSET READS. PostgREST caps one response at CG.API_MAX_ROWS rows and truncates silently, so every list that
+   can grow is read here a page at a time, walking a UNIQUE KEY (id ascending unless told otherwise): each page asks for
+   the rows after the last key it saw (.gt("id", last)). The old reader paged by OFFSET, and offsets move: when the
+   importer deleted and re-inserted one game's box score (a re-filed or merged game) while a read was under way, every
+   later row shifted, so lines of games nobody touched were skipped or read twice, and nothing healed them until a full
+   reload. A key does not move, so a row that exists for the whole read comes back exactly once, however the rows
+   around it change. A row written DURING the read can come back in either state: the league pulse names every game
+   written after the page's baseline and re-reads it whole, and CG._settleStats repairs a box score caught in two states.
+   Speed: a uuid key is spread evenly, so the first page shows how far through the key space the table runs, and the
+   rest is split into key ranges read at the same time (each one walked by key). That is as quick as the old concurrent
+   offset pages, without their count request.
+   The order a caller asks for is applied to the finished set (CG._sortRows), never to the pages: a keyset read walks
+   its key first, so a filter that adds its own .order() or .limit() is refused (pass the order as orderCol).
+   Returns a Supabase-shaped {data,error}; on any error data is null, so a partial set never escapes. */
+CG.API_MAX_ROWS = 1000;   /* Supabase max-rows for this project; checked 2026-10-15 (limit=5000 still answers 0-999) */
+CG._keyCols = function(key){ return Array.isArray(key) ? key.slice() : [key || "id"]; };
+/* the select must carry the key, or the next page has nothing to start after */
+CG._withKeyCols = function(sel, keys){
+  sel = sel || "*";
+  var top = [], depth = 0, cur = "";
+  for (var i = 0; i < sel.length; i++){
+    var ch = sel.charAt(i);
+    if (ch === "(") depth++; else if (ch === ")") depth--;
+    if (ch === "," && depth === 0){ top.push(cur.trim()); cur = ""; } else cur += ch;
+  }
+  top.push(cur.trim());
+  if (top.indexOf("*") >= 0) return sel;
+  var add = keys.filter(function(k){ return top.indexOf(k) < 0; });
+  return add.length ? sel + "," + add.join(",") : sel;
+};
+/* a PostgREST logic-tree value, quoted so a comma, dot or parenthesis in a key cannot break the filter */
+CG._pgrstQuote = function(v){ return '"' + String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"'; };
+/* the rows after `last` in key order: k1 > v1, or k1 = v1 and k2 > v2, and so on */
+CG._afterKey = function(qb, keys, last){
+  if (keys.length === 1) return qb.gt(keys[0], last[keys[0]]);
+  return qb.or(keys.map(function(k, i){
+    var parts = keys.slice(0, i).map(function(e){ return e + ".eq." + CG._pgrstQuote(last[e]); });
+    parts.push(k + ".gt." + CG._pgrstQuote(last[k]));
+    return parts.length > 1 ? "and(" + parts.join(",") + ")" : parts[0];
+  }).join(","));
+};
+/* what a keyset read cannot honour, said out loud instead of read wrong */
+CG._keysetRefusal = function(qb, keys){
+  var sp = qb && qb.url && qb.url.searchParams;
+  if (!sp) return null;
+  if (sp.has("order")) return "the filter orders the rows; pass the order as orderCol, because the read walks its key first";
+  if (sp.has("limit") || sp.has("offset")) return "the filter limits the rows; a whole-table read takes no limit";
+  if (keys.length > 1 && sp.has("or")) return "a read keyed on several columns cannot also take an or() filter";
+  return null;
+};
+CG._uuidAt = function(n){ var h = n.toString(16); while (h.length < 8) h = "0" + h; return h + "-0000-0000-0000-000000000000"; };
+/* the key ranges left after a full first page that ended at lastKey, sized from how far through the key space it got:
+   about 600 rows each, so a range rarely needs a second page, and never more than 16 at once */
+CG._keyRanges = function(lastKey){
+  var p = parseInt(String(lastKey).slice(0, 8), 16), span = 4294967296, cap = CG.API_MAX_ROWS;
+  var covered = (p + 1) / span, left = cap * (1 - covered) / covered;
+  var n = Math.max(1, Math.min(16, Math.ceil(left / (cap * 0.6)))), bounds = [];
+  for (var i = 1; i < n; i++){
+    var b = p + 1 + Math.floor((span - 1 - p) * i / n);   /* every bound lies past the last key already read */
+    if (b < span && (!bounds.length || b > bounds[bounds.length - 1])) bounds.push(b);
+  }
+  return bounds.map(CG._uuidAt);
+};
+/* every row make() selects; make() returns a fresh filter builder (a table select or an rpc) */
+CG._keysetRead = async function(make, keys, label){
+  var cap = CG.API_MAX_ROWS;
+  var refusal = CG._keysetRefusal(make(), keys);
+  if (refusal) return { data:null, error:{ message: label + ": " + refusal, code:"CG_KEYSET" } };
+  var fail = function(m){ return { rows:null, error:{ message: label + ": " + m, code:"CG_KEYSET" } }; };
+  /* one page of one key range. from: null, { after: row } or { at: uuid bound }; hi: the range's end, not included */
+  var page = async function(from, hi){
+    var qb = make();
+    if (from && from.after) qb = CG._afterKey(qb, keys, from.after);
+    else if (from && from.at) qb = qb.gte(keys[0], from.at);
+    if (hi) qb = qb.lt(keys[0], hi);
+    keys.forEach(function(k){ qb = qb.order(k, { ascending:true }); });
+    var r = await qb.limit(cap);
+    if (r.error) return { rows:null, error:r.error };
+    var rows = r.data || [], last = rows[rows.length - 1];
+    if (rows.length >= cap && keys.some(function(k){ return last[k] == null; })) return fail("the rows carry no " + keys.join("/") + " to page on");
+    return { rows:rows, error:null, more: rows.length >= cap, last:last };
+  };
+  /* a whole key range, page after page */
+  var walk = async function(from, hi){
+    var out = [];
+    for (var n = 0; n < 5000; n++){
+      var r = await page(from, hi);
+      if (r.error) return r;
+      for (var i = 0; i < r.rows.length; i++) out.push(r.rows[i]);
+      if (!r.more) return { rows:out, error:null };
+      from = { after: r.last };
+    }
+    return fail("the read did not end");
   };
   try {
-    var first = await build().range(0, page-1);
+    var first = await page(null, null);
     if (first.error) return { data:null, error:first.error };
-    var rows = first.data||[];
-    if (rows.length < page) return { data: rows, error: null };
-
-    var cq = CG.sb.from(table).select(sel||"*", { count:"exact", head:true });
-    if (filterFn) cq = filterFn(cq);
-    var cr = await cq;
-    var total = (cr && !cr.error && typeof cr.count === "number") ? cr.count : null;
-    if (total == null){
-      /* count refused — walk it serially rather than silently losing rows */
-      var from = page, out = rows.slice();
-      while (true){
-        var r = await build().range(from, from+page-1);
-        if (r.error) return { data: out, error: r.error };
-        var rr = r.data||[];
-        out = out.concat(rr);
-        if (rr.length < page || from > 500000) break;
-        from += page;
-      }
-      return { data: out, error: null };
+    if (!first.more) return { data:first.rows, error:null };
+    var key0 = first.last[keys[0]];
+    var rest = (keys.length === 1 && CG._UUID_RE.test(String(key0))) ? CG._keyRanges(String(key0).toLowerCase()) : null;
+    var parts = rest
+      ? await Promise.all([walk({ after:first.last }, rest[0] || null)].concat(rest.map(function(b, i){ return walk({ at:b }, rest[i + 1] || null); })))
+      : [await walk({ after:first.last }, null)];
+    var rows = first.rows.slice();
+    for (var j = 0; j < parts.length; j++){
+      if (parts[j].error) return { data:null, error:parts[j].error };
+      for (var k = 0; k < parts[j].rows.length; k++) rows.push(parts[j].rows[k]);
     }
-    var reqs = [];
-    for (var start = page; start < total; start += page) reqs.push(build().range(start, start+page-1));
-    var pages = await Promise.all(reqs);
-    for (var i=0; i<pages.length; i++){
-      if (pages[i].error) return { data: rows, error: pages[i].error };
-      rows = rows.concat(pages[i].data||[]);
-    }
-    return { data: rows, error: null };
+    return { data:rows, error:null };
   } catch(e){ return { data:null, error:e }; }
+};
+/* the database's ORDER BY on the finished set: numbers by value, timestamps, dates, uuids and codes by their text (the
+   API writes every timestamp in one zone, so its text sorts in time order), false before true; ascending puts nulls
+   last and descending puts them first, as Postgres does. Ties keep key order. Free text is not ordered here: the
+   database's collation is not the browser's. */
+CG._pgCmp = function(a, b, asc){
+  var an = a == null, bn = b == null;
+  if (an || bn) return (an && bn) ? 0 : (an ? 1 : -1) * (asc ? 1 : -1);
+  var c = (typeof a === "number" && typeof b === "number") ? a - b : (a < b ? -1 : a > b ? 1 : 0);
+  return asc ? c : -c;
+};
+CG._sortRows = function(rows, orderCol, asc, keys){
+  var cols = Array.isArray(orderCol) ? orderCol : orderCol ? [orderCol] : [];
+  if (!cols.length || (asc && cols.join() === keys.join())) return rows;
+  return rows.map(function(r, i){ return { r:r, i:i }; }).sort(function(x, y){
+    for (var c = 0; c < cols.length; c++){ var d = CG._pgCmp(x.r[cols[c]], y.r[cols[c]], asc); if (d) return d; }
+    return x.i - y.i;
+  }).map(function(x){ return x.r; });
+};
+/* Reads a whole table, view or filtered set past the row ceiling. orderCol: a column or a list of columns, all in the
+   one direction `ascending` gives. opts.key: the unique key to walk, a column or a list ("id" unless told). */
+CG.sbAll = async function(table, sel, orderCol, ascending, filterFn, opts){
+  var keys = CG._keyCols(opts && opts.key), cols = CG._withKeyCols(sel, keys);
+  var r = await CG._keysetRead(function(){
+    var qb = CG.sb.from(table).select(cols);
+    return filterFn ? filterFn(qb) : qb;
+  }, keys, table);
+  return r.error ? r : { data: CG._sortRows(r.data, orderCol, ascending !== false, keys), error:null };
+};
+/* the same for a set-returning database function (PostgREST filters, orders and limits its rows like a table's) */
+CG.sbAllRpc = async function(fn, args, key, orderCol, ascending){
+  var keys = CG._keyCols(key);
+  var r = await CG._keysetRead(function(){ return CG.sb.rpc(fn, args || {}); }, keys, fn);
+  return r.error ? r : { data: CG._sortRows(r.data, orderCol, ascending !== false, keys), error:null };
+};
+/* A read that is not paged (a tiny or tightly scoped list) goes through here: if it comes back AT the ceiling it may be
+   missing rows, so it fails loudly (logged, and returned as an error the caller already handles) instead of rendering a
+   short list as if it were whole. Such a read belongs in CG.sbAll. */
+CG.sbCapped = function(p, label){
+  return Promise.resolve(p).then(function(r){
+    if (r && !r.error && Array.isArray(r.data) && r.data.length >= CG.API_MAX_ROWS){
+      var msg = label + " came back at the " + CG.API_MAX_ROWS + "-row API limit and may be missing rows; read it with CG.sbAll";
+      try { console.error(msg); } catch(e){}
+      return { data:null, error:{ message:msg, code:"CG_ROW_CAP" } };
+    }
+    return r;
+  }, function(e){ return { data:null, error:e }; });
 };
 
 /* Columns of `profiles` the public league load may read. Deliberately excludes the identity
@@ -517,7 +626,8 @@ CG.BOOT_PPO = 17; CG.BOOT_CAREER = 18; CG.BOOT_CODES = 19;
 /* v3.74: the per-position ratings, ~300 rows, and the map every rating surface reads */
 CG._posOvrLoad = function(){
   if (!CG.sb) return Promise.resolve({ data:[], error:null });
-  return CG.sbAll("player_position_overalls","profile_id,pos_cat,overall,gp,headline","profile_id")
+  /* v4.12: keyed on the table's own primary key, (profile_id, pos_cat) */
+  return CG.sbAll("player_position_overalls","profile_id,pos_cat,overall,gp,headline","profile_id",true,null,{ key:["profile_id","pos_cat"] })
     .then(function(r){ return r; }, function(e){ return { data:null, error:e }; });
 };
 CG._posOvrMap = function(res){
@@ -531,7 +641,60 @@ CG._posOvrMap = function(res){
   });
   return out;
 };
-CG._deltaBoot = async function(cached, gameIds, roster){
+/* v4.12: one box-score line's identity, as the table's unique indexes have it since v4.11: one line per player per club
+   per game in each role (game_stats_one_row_per_player) and one credit per member per game in each role
+   (game_stats_one_credit_per_game). A player who skated one sitting and played goal in another holds two lines. */
+CG._statLineKeys = function(r){
+  var who = r.ea_player_id != null ? String(r.ea_player_id) : r.profile_id != null ? String(r.profile_id) : String(r.skater_name || "").toLowerCase();
+  var role = r.is_goalie ? "G" : "S";
+  var keys = [r.game_id + "|" + r.team_id + "|" + role + "|" + who];
+  if (r.profile_id != null) keys.push(r.game_id + "|p|" + role + "|" + r.profile_id);
+  return keys;
+};
+/* v4.12: the box scores of the named games, scoped to the season the stats slot holds. 50 games a request keeps the URL
+   short and a request at about 650 rows, so each chunk is one request and one consistent read; a chunk that ever grew
+   past the ceiling would still page by key rather than lose rows. */
+CG.STATS_CHUNK = 50;
+CG._statsForGames = async function(ids, season){
+  ids = (ids || []).filter(function(x){ return typeof x === "string" && CG._UUID_RE.test(x); });
+  var chunks = [];
+  for (var i = 0; i < ids.length; i += CG.STATS_CHUNK) chunks.push(ids.slice(i, i + CG.STATS_CHUNK));
+  var res = await Promise.all(chunks.map(function(c){
+    return CG.sbAll("game_stats", "*", "id", true, function(qb){ qb = qb.in("game_id", c); return season ? qb.eq("season_id", season) : qb; });
+  }));
+  var rows = [];
+  for (var j = 0; j < res.length; j++){
+    if (res[j].error) return { data:null, error:res[j].error };
+    rows = rows.concat(res[j].data || []);
+  }
+  return { data:rows, error:null };
+};
+/* v4.12: a box score read while the importer was rewriting it can hold one player's line twice (the old row read before
+   the delete, the new row after the insert). Any game whose lines repeat a player is read again, whole, in one request.
+   A line missing for the same reason cannot be seen from here: the league pulse names that game and re-reads it. */
+CG._settleStats = async function(res, season){
+  if (!res || res.error || !res.data) return res;
+  var seen = {}, torn = {};
+  res.data.forEach(function(r){ CG._statLineKeys(r).forEach(function(k){ if (seen[k]) torn[r.game_id] = 1; seen[k] = 1; }); });
+  var ids = Object.keys(torn);
+  if (!ids.length) return res;
+  var fresh = await CG._statsForGames(ids, season);
+  if (fresh.error) return { data:null, error:fresh.error };
+  return { data: res.data.filter(function(r){ return !torn[r.game_id]; }).concat(fresh.data), error:null };
+};
+/* v4.12: the stats slot (12): this season's box scores, or every season's while the season is not known yet */
+CG._statsLoad = function(season){
+  return CG.sbAll("game_stats", "*", "id", true, function(qb){ return season ? qb.eq("season_id", season) : qb; })
+    .then(function(r){ return CG._settleStats(r, season); });
+};
+/* v4.12: the stats slot with the named games' box scores replaced by a fresh read of them (null when that read failed) */
+CG._mergeStats = async function(slot, ids, season){
+  var fresh = await CG._statsForGames(ids, season);
+  if (fresh.error) return null;
+  var named = {}; ids.forEach(function(id){ named[id] = 1; });
+  return { data: (slot.data || []).filter(function(r){ return !named[r.game_id]; }).concat(fresh.data), error:null };
+};
+CG._deltaBoot = async function(cached, gameIds, roster, hint){
   var q = cached.slice();
   if (gameIds){
     var games = await CG.sbAll("games", CG.GAME_PUBLIC_COLS, "scheduled_at");
@@ -539,11 +702,8 @@ CG._deltaBoot = async function(cached, gameIds, roster){
     q[6] = games;
     var ids = (gameIds||[]).filter(function(x){ return typeof x === "string" && CG._UUID_RE.test(x); });
     if (ids.length && q[12] && !q[12].error){
-      var fresh = await CG.sb.from("game_stats").select("*").in("game_id", ids);
-      if (!fresh.error){
-        var keep = (q[12].data||[]).filter(function(r){ return ids.indexOf(r.game_id) < 0; });
-        q[12] = { data: keep.concat(fresh.data||[]), error:null };
-      }
+      var merged = await CG._mergeStats(q[12], ids, hint);
+      if (merged) q[12] = merged;
     }
     q[CG.BOOT_CODES] = await CG._codesToday();
     /* v3.74: a final re-rates everyone, so the per-position ratings are re-read with the games */
@@ -581,11 +741,9 @@ CG._deltaSlots = async function(cached, opts, hint){
   } else if (opts.statsIds && opts.statsIds.length && q[12] && !q[12].error){
     var ids = opts.statsIds.filter(function(x){ return typeof x === "string" && CG._UUID_RE.test(x); });
     if (ids.length){
-      var fresh = await CG.sb.from("game_stats").select("*").in("game_id", ids).then(function(r){ return r; }, function(e){ return { error:e }; });
-      if (!fresh.error){
-        var keep = (q[12].data||[]).filter(function(r){ return ids.indexOf(r.game_id) < 0; });
-        q[12] = { data: keep.concat(fresh.data||[]), error:null };
-      } else failed.statsIds = ids;
+      /* v4.12: read by key in chunks of 50 games; this was one unpaged request, cut off at the row ceiling */
+      var merged = await CG._mergeStats(q[12], ids, hint).then(function(r){ return r; }, function(){ return null; });
+      if (merged) q[12] = merged; else failed.statsIds = ids;
     }
   }
   /* what could not be read is retried by liveReload, so a version the page already marked as seen is not lost */
@@ -598,7 +756,8 @@ CG._codesToday = function(){
   if (!CG.sb) return Promise.resolve({ data:[], error:null });
   var now = CG.now ? CG.now() : Date.now();
   var from = new Date(now - 12*3600000).toISOString(), to = new Date(now + 36*3600000).toISOString();
-  return CG.sb.from("games_public").select("id,game_code,server").gte("scheduled_at", from).lte("scheduled_at", to)
+  /* v4.12: read by key like every list the pulse re-reads (a night is a dozen games; the walk costs nothing extra) */
+  return CG.sbAll("games_public", "id,game_code,server", null, true, function(qb){ return qb.gte("scheduled_at", from).lte("scheduled_at", to); })
     .then(function(r){ return r; }, function(e){ return { data:[], error:e }; });
 };
 /* Rule 4.2 (v2.78): the codes are minted with the schedule but masked until 30 minutes before the
@@ -667,12 +826,16 @@ CG.armCodeWatch = function(){
 };
 /* v4.05: the boot queries as thunks, one per slot, so the league pulse can re-run exactly the slots whose data changed
    and nothing else. The full boot runs them all at once, as before; tools/boot-index.test.cjs counts them. */
+/* v4.12: the pulse re-reads these, so every one is either read by key (CG.sbAll, CG.sbAllRpc) or, when it is a handful
+   of rows read in the database's own order, bounded by CG.sbCapped, which fails loudly at the row ceiling.
+   tools/keyset-paging-v412.test.cjs runs each slot against a table larger than the ceiling. */
 CG._bootLoaders = function(_hintUsed){
   var sb = CG.sb;
   return [
-    function(){ return sb.from("teams").select("*"); },
-    function(){ return sb.from("divisions").select("*").order("sort_order"); },
-    function(){ return sb.from("seasons").select("*").order("number", { ascending:false }); },
+    /* the clubs in the database's order, which every club list follows; eight rows, bounded */
+    function(){ return CG.sbCapped(sb.from("teams").select("*"), "teams"); },
+    function(){ return CG.sbAll("divisions","*","sort_order"); },
+    function(){ return CG.sbAll("seasons","*","number",false); },
     /* Explicit column list, not "*": this load runs for signed-out visitors too, and anon's
        grant on profiles is now column-scoped so identity columns (discord_id, discord_username,
        platform_gamertag) and moderation columns (is_admin, ban_reason, banned_at, banned_by)
@@ -684,23 +847,21 @@ CG._bootLoaders = function(_hintUsed){
     function(){ return CG.sbAll("games",CG.GAME_PUBLIC_COLS,"scheduled_at"); },
     function(){ return CG.sbAll("transactions","*","occurred_at",false); },
     function(){ return CG.sbAll("news","*","published_at",false); },
-    /* both orders go through the builder: sbAll applies filterFn before its own orderCol, so
-       passing season_number as orderCol would demote it below round and invert the sort */
-    function(){ return CG.sbAll("draft_picks","id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped",null,true,
-      function(qb){ return qb.order("season_number").order("round"); }); },
+    /* v4.12: season, then round, applied to the finished set (a keyset read walks its id first) */
+    function(){ return CG.sbAll("draft_picks","id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped",["season_number","round"]); },
     /* The registration BOARD is public record, read through a SECURITY DEFINER pool. Reading the
        table directly here meant RLS silently hid everyone else's rows from members and guests, so
        every public surface undercounted the sign-ups — the directory called 46 of 47 registered
        members "Not signed up". Notes and scouting marks stay staff-only; staff and commissioners
        reload the full table (with scout_ovr) after auth exactly as before. */
-    function(){ return CG.sb.rpc("registration_pool").then(function(r){
+    function(){ return CG.sbAllRpc("registration_pool", null, "id").then(function(r){
       return { data: (r.data||[]).map(function(x){
         return { id:x.id, profile_id:x.profile_id, season_id:x.season_id, status:x.status,
                  position:x.position, scout_ovr:null, created_at:x.created_at,
                  profiles:{ gamertag:x.gamertag, ea_id:x.ea_id } };
       }), error:r.error };
     }); },
-    function(){ return sb.from("leagues").select("*").order("sort_order"); },
+    function(){ return CG.sbAll("leagues","*","sort_order"); },
     /* Scoped to the season being viewed. game_stats is the largest thing this boot loads (~12
        lines per game), and unscoped it would carry every season ever played forever — Season 2
        starting at Season 1's final row count. season_id is filled by trg_game_stats_season.
@@ -708,11 +869,10 @@ CG._bootLoaders = function(_hintUsed){
     /* Scoped to the season being viewed — see CG._seasonHint above for why the id comes from a
        stored hint and what happens without one. Career totals do NOT come from this load; they
        come from the career_games_played aggregate below. */
-    function(){ return CG.sbAll("game_stats","*","id",true, function(qb){
-      return _hintUsed ? qb.eq("season_id", _hintUsed) : qb;
-    }); },
-    function(){ return sb.from("feature_flags").select("key,enabled"); },
-    function(){ return sb.from("site_config").select("key,value"); },
+    /* v4.12: read by key, and a box score caught mid-rewrite is read again whole (CG._settleStats) */
+    function(){ return CG._statsLoad(_hintUsed); },
+    function(){ return CG.sbAll("feature_flags","key,enabled",null,true,null,{ key:"key" }); },
+    function(){ return CG.sbAll("site_config","key,value",null,true,null,{ key:"key" }); },
     /* v3.51: the suspension_record view, not the table. The public sees a suspension's length and
        headings; the member and league staff also see the reason, and staff the issuing official
        (commissioner, 2026-09-28, Q61). The table itself is no longer readable from the site. */
@@ -723,7 +883,7 @@ CG._bootLoaders = function(_hintUsed){
        player — and the OVR surfaces would call a settled rating "provisional" league-wide. */
     /* v3.74: a rating per position (player_position_overalls), one of them the headline */
     function(){ return CG._posOvrLoad(); },
-    function(){ return CG.sb.rpc("career_games_played"); },
+    function(){ return CG.sbAllRpc("career_games_played", null, "profile_id"); },
     /* tonight's lobby codes and server picks through the masked view (Rule 4.2) */
     function(){ return CG._codesToday(); }
   ];
@@ -751,7 +911,7 @@ CG.buildLiveLeague = async function(opts){
   CG.LIVE = CG.LIVE || {}; CG.LIVE.partial = {};
   var _hintUsed = CG._seasonHint();      /* which season the box-score query is scoped to */
   if (!sb) throw new Error("Supabase client unavailable");
-  var q = ((opts.delta || opts.roster) && CG._bootCache) ? await CG._deltaBoot(CG._bootCache, opts.delta, opts.roster)
+  var q = ((opts.delta || opts.roster) && CG._bootCache) ? await CG._deltaBoot(CG._bootCache, opts.delta, opts.roster, _hintUsed)
         : (opts.slots && CG._bootCache) ? await CG._deltaSlots(CG._bootCache, opts, _hintUsed)
         : await Promise.all(CG._bootLoaders(_hintUsed).map(function(f){ return f(); }));
   CG._bootCache = q;
@@ -1611,14 +1771,16 @@ CG.loadManagerData = async function(){
   var role = CG.auth.role;
   if (role!=="mgmt" && role!=="commish" && role!=="staff") return;
   try {
+    /* v4.12: the league pulse re-runs this for sign-ups and picks, so the two lists that grow every season are read by key
+       and every scoped list below fails loudly at the row ceiling (CG.sbCapped) instead of rendering short */
     var q = await Promise.all([
-      CG.sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped,picked_at").order("season_number").order("round"),
+      CG.sbAll("draft_picks","id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped,picked_at",["season_number","round"]),
       /* v3.32: `note` was dropped from this table in v3.25 when the sign-up note box was retired,
          and this select still asked for it. PostgREST refuses the WHOLE query for one unknown
          column, so every registration vanished from the Control Center and Draft & placement read
          "no sign-ups" in the middle of a season with 179 of them. */
-      CG.sb.from("season_registrations").select("id,profile_id,season_id,status,position,scout_ovr,created_at,waived_at, profiles(gamertag,ea_id,platform,platform_gamertag,jersey_number,overall)"),
-      CG.sb.from("draft_state").select("*")
+      CG.sbAll("season_registrations","id,profile_id,season_id,status,position,scout_ovr,created_at,waived_at, profiles(gamertag,ea_id,platform,platform_gamertag,jersey_number,overall)","created_at"),
+      CG.sbCapped(CG.sb.from("draft_state").select("*"), "draft_state")
     ]);
     /* ...and it failed SILENTLY, because an error fell back to [] and an empty board looks exactly
        like a league where nobody has signed up. Say it out loud and keep what we already had. */
@@ -1654,32 +1816,32 @@ CG.loadManagerData = async function(){
        the lineup tools (an excepted player may be dressed past his limit in that game) and listed on
        the Officials' desk. Signed-in members only (RLS). */
     if (CG.SEASON && CG.SEASON.id && CG.auth && CG.auth.user){
-      jobs.push(CG.sb.from("weekly_cap_exceptions").select("id,game_id,profile_id,team_id,reason,granted_by,created_at").eq("season_id", CG.SEASON.id)
+      jobs.push(CG.sbCapped(CG.sb.from("weekly_cap_exceptions").select("id,game_id,profile_id,team_id,reason,granted_by,created_at").eq("season_id", CG.SEASON.id), "weekly_cap_exceptions")
         .then(function(r){ if (r && !r.error) CG.lg.capExceptions = r.data || []; }, function(){}));
     }
     /* v3.94: every rostered player's playoff floor (Rule 8.3), prorated for a player placed after opening night.
        Public record, so it loads for everyone; until it lands CG.playoffFloorFor falls back to the season's floor. */
     if (CG.SEASON && CG.SEASON.id){
-      jobs.push(CG.sb.rpc("playoff_floors", { p_season: CG.SEASON.id })
+      jobs.push(CG.sbAllRpc("playoff_floors", { p_season: CG.SEASON.id }, "profile_id")
         .then(function(r){ if (r && !r.error){ var m = {}; (r.data||[]).forEach(function(x){ m[x.profile_id] = x.floor; }); CG.lg.playoffFloors = m; } }, function(){}));
     }
     /* my club's private draft board (ranked wishlist; RLS keeps it club-only) */
     if (myBoardTeam && myBoardTeam.id && CG.SEASON && CG.SEASON.id){
-      jobs.push(CG.sb.from("draft_boards").select("profile_id,rank")
-        .eq("season_id", CG.SEASON.id).eq("team_id", myBoardTeam.id).order("rank")
+      jobs.push(CG.sbCapped(CG.sb.from("draft_boards").select("profile_id,rank")
+        .eq("season_id", CG.SEASON.id).eq("team_id", myBoardTeam.id).order("rank"), "draft_boards")
         .then(function(db){ if (db && !db.error) CG.lg._myBoard = (db.data||[]).map(function(r){ return r.profile_id; }); }, function(){}));
     }
     if (role==="commish" || role==="staff"){
       /* both tables now have TWO fkeys to profiles (the applicant + decided_by), so a bare
          profiles(...) embed is ambiguous and PostgREST rejects the whole query. Name the applicant
          constraint; the key stays "profiles" so the render code is unchanged. */
-      jobs.push(CG.sb.from("owner_applications").select("*, profiles!owner_applications_profile_id_fkey(gamertag)").order("created_at",{ascending:false})
+      jobs.push(CG.sbAll("owner_applications","*, profiles!owner_applications_profile_id_fkey(gamertag)","created_at",false)
         .then(function(oa){ CG.lg._ownerApps = (oa && !oa.error && oa.data) || []; }, function(){ CG.lg._ownerApps = []; }));
-      jobs.push(CG.sb.from("staff_applications").select("*, profiles!staff_applications_profile_id_fkey(gamertag)").order("created_at",{ascending:false})
+      jobs.push(CG.sbAll("staff_applications","*, profiles!staff_applications_profile_id_fkey(gamertag)","created_at",false)
         .then(function(sa2){ CG.lg._staffApps = (sa2 && !sa2.error && sa2.data) || []; }, function(){ CG.lg._staffApps = []; }));
       /* staff ballots on applications — RLS on application_ballots keeps these office-only, so the
          applicant can never read them however this loads */
-      jobs.push(CG.sb.from("application_ballots").select("app_type,application_id,voter_id,vote,note,updated_at, voter:profiles!application_ballots_voter_id_fkey(gamertag)")
+      jobs.push(CG.sbAll("application_ballots","app_type,application_id,voter_id,vote,note,updated_at, voter:profiles!application_ballots_voter_id_fkey(gamertag)")
         .then(function(vb){ CG.lg._appBallots = (vb && !vb.error && vb.data) || []; }, function(){ CG.lg._appBallots = []; }));
     }
     /* application chat — RLS returns the office everything and an applicant only their own
@@ -1687,14 +1849,14 @@ CG.loadManagerData = async function(){
        after the league builds), so this only fires on post-auth reloads — the authoritative
        load lives in applySession. */
     if (CG.auth.user){
-      /* PostgREST caps a response at 1000 rows and truncates SILENTLY. Ascending order meant the
-         rows dropped were the newest — the ones people are reading. Newest-first + an explicit cap,
-         then re-sorted for display. */
-      jobs.push(CG.sb.from("application_messages").select("app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)").order("created_at",{ascending:false}).limit(900)
+      /* PostgREST caps a response at 1000 rows and truncates SILENTLY. This was newest-first with a cap of 900, so a
+         long-running thread lost its oldest messages without a sign. v4.12: every message, read by key, newest first,
+         re-sorted for display in the grouper. */
+      jobs.push(CG.sbAll("application_messages","app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)","created_at",false)
         .then(function(mm){ CG.lg._appMsgs = CG._groupAppMsgs((mm && !mm.error && mm.data) || []); }, function(){ CG.lg._appMsgs = {}; }));
       /* GM/AGM appointment applications — two FKs to profiles (submitter + nominee) so qualify both.
          RLS: the office sees all; an owner their own; a nominee theirs. */
-      jobs.push(CG.sb.from("management_applications").select("*, nominee:profiles!management_applications_nominee_id_fkey(gamertag), submitter:profiles!management_applications_submitted_by_fkey(gamertag)").order("created_at",{ascending:false})
+      jobs.push(CG.sbAll("management_applications","*, nominee:profiles!management_applications_nominee_id_fkey(gamertag), submitter:profiles!management_applications_submitted_by_fkey(gamertag)","created_at",false)
         .then(function(ma){ CG.lg._mgmtApps = (ma && !ma.error && ma.data) || []; }, function(){ CG.lg._mgmtApps = []; }));
     }
     if (myTid){
@@ -1704,20 +1866,22 @@ CG.loadManagerData = async function(){
       CG.lg._mgmtPolicy = null; CG.lg._mgmtMoves = [];
       jobs.push(CG.sb.from("team_mgmt_policy").select("policy,updated_at,updated_by").eq("team_id", myTid).maybeSingle()
         .then(function(pp){ CG.lg._mgmtPolicy = (pp && !pp.error && pp.data && pp.data.policy) || {}; CG._mgmtPolicyCache = CG.lg._mgmtPolicy; CG.lg._mgmtPolicyAt = (pp && pp.data && pp.data.updated_at) || null; }, function(){ CG.lg._mgmtPolicy = CG._mgmtPolicyCache || {}; }));
-      jobs.push(CG.sb.from("team_mgmt_moves").select("*, requester:profiles!team_mgmt_moves_requested_by_fkey(gamertag), decider:profiles!team_mgmt_moves_decided_by_fkey(gamertag)")
-        .eq("team_id", myTid).order("created_at",{ascending:false}).limit(80)
+      /* v4.12: every move, read by key. The newest 80 used to be all there was, so a request still waiting behind 80
+         newer ones dropped out of the Owner's queue and the pending count. */
+      jobs.push(CG.sbAll("team_mgmt_moves","*, requester:profiles!team_mgmt_moves_requested_by_fkey(gamertag), decider:profiles!team_mgmt_moves_decided_by_fkey(gamertag)","created_at",false,
+        function(qb){ return qb.eq("team_id", myTid); })
         .then(function(mm){ CG.lg._mgmtMoves = (mm && !mm.error && mm.data) || []; CG._mgmtMovesCache = CG.lg._mgmtMoves; }, function(){ CG.lg._mgmtMoves = CG._mgmtMovesCache || []; }));
       /* my club's live trades (incoming + outgoing, still open) */
-      jobs.push(CG.sb.from("trades").select("*").or("from_team_id.eq."+myTid+",to_team_id.eq."+myTid).eq("status","proposed").eq("season_id", (CG.SEASON||{}).id || "00000000-0000-0000-0000-000000000000").order("created_at",{ascending:false})
+      jobs.push(CG.sbCapped(CG.sb.from("trades").select("*").or("from_team_id.eq."+myTid+",to_team_id.eq."+myTid).eq("status","proposed").eq("season_id", (CG.SEASON||{}).id || "00000000-0000-0000-0000-000000000000").order("created_at",{ascending:false}), "trades")
         .then(function(tr){ CG.lg._myTrades = (tr && !tr.error && tr.data) || []; }, function(){ CG.lg._myTrades = []; }));
       /* v3.98: past the movement deadline a club signs only to replace a player whose sign-up was removed after it,
          one signing per removal (Rule 2.4); the Sign button opens only while the club holds one */
       CG.lg._replacements = 0;
-      if (CG.SEASON && CG.SEASON.id) jobs.push(CG.sb.from("replacement_signings").select("id").eq("team_id", myTid).eq("season_id", CG.SEASON.id).is("used_at", null)
+      if (CG.SEASON && CG.SEASON.id) jobs.push(CG.sbCapped(CG.sb.from("replacement_signings").select("id").eq("team_id", myTid).eq("season_id", CG.SEASON.id).is("used_at", null), "replacement_signings")
         .then(function(rr){ CG.lg._replacements = (rr && !rr.error && rr.data) ? rr.data.length : 0; }, function(){ CG.lg._replacements = 0; }));
       /* server vetoes + resolved servers for my club's upcoming games */
       if (upIds.length){
-        jobs.push(CG.sb.from("game_vetoes").select("game_id,team_id,veto,preferred,pref1,pref2").in("game_id", upIds)
+        jobs.push(CG.sbCapped(CG.sb.from("game_vetoes").select("game_id,team_id,veto,preferred,pref1,pref2").in("game_id", upIds), "game_vetoes")
           .then(function(vv){ (vv && !vv.error && vv.data || []).forEach(function(v){ if(v.team_id===myTid) CG.lg._vetoes[v.game_id]=v; }); }, function(){}));
         /* Rule 4.2: a night settles TOGETHER at its first puck drop minus 30, which is what
            CG.codeReleaseAt answers. Gating on each game's own T-30 meant the second and third
@@ -1730,19 +1894,19 @@ CG.loadManagerData = async function(){
         });
       }
       if (CG.SEASON && CG.SEASON.id){
-        jobs.push(CG.sb.from("game_lineups").select("*").eq("season_id", CG.SEASON.id).eq("team_id", myTid)
+        jobs.push(CG.sbCapped(CG.sb.from("game_lineups").select("*").eq("season_id", CG.SEASON.id).eq("team_id", myTid), "game_lineups")
           .then(function(lu){ (lu && !lu.error && lu.data || []).forEach(function(row){ CG.lg._lineups[myCode+":"+row.game_id]=row; }); }, function(){}));
         /* Line creator: the club's saved combinations + which line each night dresses. RLS keeps
            these management-only, so ordinary players get empty rows here and never see a plan. */
         CG.lg._teamLines = {}; CG.lg._linePlan = {};
-        jobs.push(CG.sb.from("team_lines").select("*").eq("season_id", CG.SEASON.id).eq("team_id", myTid)
+        jobs.push(CG.sbCapped(CG.sb.from("team_lines").select("*").eq("season_id", CG.SEASON.id).eq("team_id", myTid), "team_lines")
           .then(function(tl){ (tl && !tl.error && tl.data || []).forEach(function(row){ CG.lg._teamLines[row.slot]=row; }); }, function(){}));
         /* v2.89: the per-GAME plan, which overrides the night's default. A night is up to three
            games and a club may want a different line in each. */
-        jobs.push(CG.sb.from("team_game_line_plan").select("game_id,slot").eq("season_id", CG.SEASON.id).eq("team_id", myTid)
+        jobs.push(CG.sbCapped(CG.sb.from("team_game_line_plan").select("game_id,slot").eq("season_id", CG.SEASON.id).eq("team_id", myTid), "team_game_line_plan")
           .then(function(gp){ CG.lg._gameLinePlan = {}; ((gp && !gp.error && gp.data) || []).forEach(function(r){ CG.lg._gameLinePlan[r.game_id] = r.slot; }); },
                 function(){ CG.lg._gameLinePlan = CG.lg._gameLinePlan || {}; }));
-        jobs.push(CG.sb.from("team_line_plan").select("night,slot").eq("season_id", CG.SEASON.id).eq("team_id", myTid)
+        jobs.push(CG.sbCapped(CG.sb.from("team_line_plan").select("night,slot").eq("season_id", CG.SEASON.id).eq("team_id", myTid), "team_line_plan")
           .then(function(tp){ (tp && !tp.error && tp.data || []).forEach(function(row){ CG.lg._linePlan[row.night]=row.slot; }); }, function(){}));
       }
     }
@@ -4536,8 +4700,8 @@ CG.loadSpectatorDraft = async function(){
   if (!CG.sb || !CG.lg) return;
   try {
     var q = await Promise.all([
-      CG.sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped,picked_at").order("overall_pick"),
-      CG.sb.from("draft_state").select("*")
+      CG.sbAll("draft_picks","id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped,picked_at","overall_pick"),
+      CG.sbCapped(CG.sb.from("draft_state").select("*"), "draft_state")
     ]);
     if (q[0] && !q[0].error){ CG.lg._draftPicksRaw = q[0].data||[]; CG.mapDraftData(CG.lg, CG.lg._draftPicksRaw, CG.lg._registrationsRaw||[]); }
     var states = (q[1]&&!q[1].error&&q[1].data)||[];
@@ -4643,8 +4807,8 @@ CG.refreshDraftLite = function(){
   if (!CG.sb || !CG.lg) return Promise.resolve();
   if (CG._draftLiteInFlight) return CG._draftLiteInFlight;
   CG._draftLiteInFlight = Promise.all([
-    CG.sb.from("draft_picks").select("id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped,picked_at").order("overall_pick"),
-    CG.sb.from("draft_state").select("*")
+    CG.sbAll("draft_picks","id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped,picked_at","overall_pick"),
+    CG.sbCapped(CG.sb.from("draft_state").select("*"), "draft_state")
   ]).then(function(q){
     if (q[0] && !q[0].error){ CG.lg._draftPicksRaw = q[0].data||[]; CG.mapDraftData(CG.lg, CG.lg._draftPicksRaw, CG.lg._registrationsRaw||[]); }
     if (q[1] && !q[1].error){
@@ -9599,8 +9763,7 @@ CG._byCreatedAsc = function(a,b){
   return (a.id||"") < (b.id||"") ? -1 : (a.id||"") > (b.id||"") ? 1 : 0;
 };
 CG._groupAppMsgs = function(rows){
-  /* rows arrive newest-first (the fetch is capped, and a silent truncation must lose the oldest,
-     not the newest) — the thread itself reads oldest-first */
+  /* rows arrive newest-first (v4.12: every message, read by key); the thread itself reads oldest-first */
   var map = {};
   (rows||[]).slice().sort(CG._byCreatedAsc)
     .forEach(function(m){ var k = m.app_type+":"+m.application_id; (map[k] = map[k]||[]).push(m); });
@@ -9613,10 +9776,10 @@ CG.appMsgsFor = function(type, id){ return ((CG.lg && CG.lg._appMsgs) || {})[typ
    previous map — blanking it would repaint an open thread as "No messages yet" over a blip. */
 CG.loadAppMessages = function(){
   if (!CG.sb || !CG.auth.user) return Promise.resolve(false);
-  /* newest-first + an explicit cap: PostgREST truncates at 1000 SILENTLY, and ascending order
-     meant the rows lost were the newest. _groupAppMsgs re-sorts for display, so the fingerprint
-     below reads the NEWEST row from the front of the list. */
-  return CG.sb.from("application_messages").select("app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)").order("created_at",{ascending:false}).limit(900)
+  /* newest first: _groupAppMsgs re-sorts for display, so the fingerprint below reads the NEWEST row from the front of
+     the list. v4.12: every message, read by key, the same read loadManagerData makes; the old cap of 900 would have
+     dropped a long thread's oldest messages without a sign. */
+  return CG.sbAll("application_messages","app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)","created_at",false)
     .then(function(mm){
       if (!mm || mm.error) return false;
       var rows = mm.data || [];

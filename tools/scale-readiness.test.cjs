@@ -16,9 +16,12 @@ const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"}
 
 console.log("— whole-table reads don't get slower one round trip at a time");
 {
-  A("sbAll fetches pages concurrently", /var pages = await Promise\.all\(reqs\);/.test(live));
-  A("...after asking how many there are", /\{ count:"exact", head:true \}/.test(live));
-  A("...and still walks serially if the count is refused", /count refused — walk it serially/.test(live));
+  /* v4.12: pages walk a unique key instead of offsets (a re-filed box score shifted offsets mid-read); the key ranges
+     after the first page are read at the same time, so no count request is needed. tools/keyset-paging-v412.test.cjs
+     measures it against a fake PostgREST. */
+  A("sbAll reads the key ranges after the first page concurrently", /\? await Promise\.all\(\[walk\(\{ after:first\.last \}, rest\[0\] \|\| null\)\]/.test(live));
+  A("...sized from how far through the key space the first page got", /CG\._keyRanges = function\(lastKey\)/.test(live));
+  A("...and any other key is walked page after page", /: \[await walk\(\{ after:first\.last \}, null\)\];/.test(live));
   A("the old serial-only loop is gone", !/var r = await qb\.range\(from, from\+page-1\);\n      if \(r\.error\) return \{ data: out\.length\?out:null/.test(live));
 }
 

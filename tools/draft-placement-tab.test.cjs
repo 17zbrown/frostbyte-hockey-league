@@ -20,11 +20,12 @@ const flat = rec.replace(/\n--\s?/g, " ").replace(/\s+/g, " ");
 
 console.log("\n— the regression that emptied the page");
 {
+  /* v4.12: the office's copy is read by key, CG.sbAll("season_registrations","<columns>", ...): both forms are checked */
   A("the registrations select no longer asks for the dropped note column",
-    !/season_registrations"\)\.select\("[^"]*\bnote\b/.test(live),
-    (live.split("\n").find((l) => /season_registrations"\)\.select\(/.test(l) && /\bnote\b/.test(l)) || "").trim());
+    !/season_registrations"(?:\)\.select\(|,)"[^"]*\bnote\b/.test(live),
+    (live.split("\n").find((l) => /season_registrations"(?:\)\.select\(|,)/.test(l) && /\bnote\b/.test(l)) || "").trim());
   A("...and it does ask for the columns the page uses",
-    /season_registrations"\)\.select\("id,profile_id,season_id,status,position,scout_ovr,created_at/.test(live));
+    /season_registrations"(?:\)\.select\(|,)"id,profile_id,season_id,status,position,scout_ovr,created_at/.test(live));
   A("a failed query is now LOUD instead of an empty pool",
     /CG\.lg\._regLoadError = q\[1\]\.error\.message/.test(live) && /Couldn’t load registrations: /.test(live));
   A("...and it keeps what it already had rather than blanking the board",

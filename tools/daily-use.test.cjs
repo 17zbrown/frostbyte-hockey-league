@@ -21,7 +21,8 @@ const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"}
 
 console.log("— the boot's heaviest load is bounded");
 {
-  A("game_stats is scoped to one season", /return _hintUsed \? qb\.eq\("season_id", _hintUsed\) : qb;/.test(live));
+  /* v4.12: through CG._statsLoad, which reads by key and settles a box score caught mid-rewrite */
+  A("game_stats is scoped to one season", /function\(\)\{ return CG\._statsLoad\(_hintUsed\); \},/.test(live) && /return season \? qb\.eq\("season_id", season\) : qb; \}\)\n    \.then\(function\(r\)\{ return CG\._settleStats\(r, season\); \}\);/.test(live));
   A("...from a hint that survives across visits", /localStorage\.getItem\("cg_season_id"\)/.test(live));
   A("...written back after every boot", /localStorage\.setItem\("cg_season_id", CG\.SEASON\.id\)/.test(live));
   A("...unscoped rather than wrong when there is no hint", /means "no hint": load unscoped/.test(live));
@@ -44,7 +45,8 @@ console.log("— silent truncation can't hide the newest rows");
   /* case messages took a different route: scoped to the loaded cases and paged, so there is no
      cap to work around at all (see "nothing renders a partial record" below) */
   A("case messages are not globally capped", !/action_messages[\s\S]{0,120}limit\(900\)/.test(live));
-  A("application chat too", /application_messages[\s\S]{0,320}ascending:false\}\)\.limit\(900\)/.test(live));
+  /* v4.12: no cap at all now: every message, read by key, newest first (the 900 window lost a long thread's oldest) */
+  A("application chat too", /CG\.sbAll\("application_messages","[^"]*","created_at",false\)/.test(live) && !/application_messages[\s\S]{0,320}\.limit\(900\)/.test(live));
   A("...re-sorted in the grouper", /rows arrive newest-first/.test(live));
 }
 

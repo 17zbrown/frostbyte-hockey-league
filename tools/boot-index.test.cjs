@@ -16,7 +16,8 @@ for (const ch of block){
 }
 const career = +(live.match(/CG\.BOOT_CAREER = (\d+)/) || [])[1], codes = +(live.match(/CG\.BOOT_CODES = (\d+)/) || [])[1];
 A("the boot array has " + n + " entries", n >= 18);
-A("career_games_played is the second-to-last entry and its name says so", /function\(\)\{ return CG\.sb\.rpc\("career_games_played"\); \},\s*(\/\*[^*]*\*\/\s*)?function\(\)\{ return CG\._codesToday\(\); \}\s*\];/.test(live) && career === n - 2);
+/* v4.12: the career rpc is read by key like every list the pulse re-reads */
+A("career_games_played is the second-to-last entry and its name says so", /function\(\)\{ return CG\.sbAllRpc\("career_games_played", null, "profile_id"\); \},\s*(\/\*[^*]*\*\/\s*)?function\(\)\{ return CG\._codesToday\(\); \}\s*\];/.test(live) && career === n - 2);
 A("the codes view is the last entry and its name says so", codes === n - 1);
 A("nothing reads q[17] or q[18] by number any more", !/q\[1[78]\]/.test(live));
 A("the delta writes the codes to the named slot and the builder reads career games from its own", /q\[CG\.BOOT_CODES\] = await CG\._codesToday\(\);/.test(live) && /q\[CG\.BOOT_CAREER\] && !q\[CG\.BOOT_CAREER\]\.error/.test(live) && /q\[CG\.BOOT_CODES\]&&!q\[CG\.BOOT_CODES\]\.error/.test(live));

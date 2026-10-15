@@ -16,7 +16,8 @@ console.log("— private lobby codes (P1-3): the client never asks for game_code
   A("the games boot query names its columns", /CG\.sbAll\("games",CG\.GAME_PUBLIC_COLS,"scheduled_at"\)/.test(live));
   A("...and the column list has no code or server", /CG\.GAME_PUBLIC_COLS = "[^"]*"\+\n\s*"[^"]*"/.test(live) && !/GAME_PUBLIC_COLS = "[^"]*game_code/.test(live));
   A("no select(\"*\") on games anywhere in the client", !/from\("games"\)\.select\("\*"\)/.test(live + hub + pub2) && !/sbAll\("games","\*"/.test(live));
-  A("codes and servers come from the masked view", /from\("games_public"\)\.select\("id,game_code,server"\)/.test(live));
+  /* v4.12: read by key, like every list the league pulse re-reads */
+  A("codes and servers come from the masked view", /CG\.sbAll\("games_public", "id,game_code,server"/.test(live) && !/from\("games"\)\.select\("[^"]*game_code/.test(live));
   A("the schedule reads them from that view", /code:cc\.game_code\|\|null, server:cc\.server\|\|null/.test(live));
   A("the release moment is the night's first game", /CG\.codeReleaseAt = function\(g\)\{ return CG\.nightFirstAt\(g\) - 30\*60000; \}/.test(pub2));
   A("...and the matchup page uses it", /var released = now >= CG\.codeReleaseAt\(g\)( \|\| CG\.role\(\)==="commish")?;/.test(pub2));   /* v3.79: the office reads it at once */
@@ -26,7 +27,8 @@ console.log("— private lobby codes (P1-3): the client never asks for game_code
 console.log("— the herd (P0-3): a games change is a delta rebuild, spread out");
 {
   A("the boot keeps its raw results", /CG\._bootCache = q;/.test(live));
-  A("a delta re-reads games and the changed game's box score only", /q\[6\] = games;[\s\S]{0,400}from\("game_stats"\)\.select\("\*"\)\.in\("game_id", ids\)/.test(live));
+  /* v4.12: the changed games' box scores are read by key, in chunks of 50 games (CG._mergeStats) */
+  A("a delta re-reads games and the changed game's box score only", /q\[6\] = games;[\s\S]{0,400}var merged = await CG\._mergeStats\(q\[12\], ids, hint\);/.test(live) && /qb = qb\.in\("game_id", c\);/.test(live));
   /* v4.05: liveReload also takes the pulse's slots, so its head is longer; the games jitter is unchanged */
   A("liveReload takes the changed game and jitters 1–9 s", /CG\.liveReload = function\(opts\)\{[\s\S]{0,1600}1000 \+ Math\.floor\(Math\.random\(\)\*8000\)/.test(live));
   /* v2.72: a delta (games or roster) skips the manager loads but CARRIES the manager state across the rebuilt lg */
