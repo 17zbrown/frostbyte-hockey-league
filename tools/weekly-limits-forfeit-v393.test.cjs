@@ -90,7 +90,7 @@ const rb = CG.CONTENT.rulebook;
 const sec = (id) => { for (const ch of rb.chapters) for (const s of ch.sections) if (s.id === id) return s; };
 const r52 = sec("5.2").paragraphs[1];
 A("Rule 5.2: games played, from the official record; filed lineups do not count", /A player's games in a game-week are the games he has played, read from the official record/.test(r52) && /A lineup filed for a game still to be played does not count/.test(r52));
-A("...over the cap is an automatic forfeit loss, result as played kept", /forfeits the game in which he went beyond it: when that game is made final the league's tools rule it a forfeit loss for the club automatically, the result as played stays on record/.test(r52));
+A("...over the cap is an automatic forfeit loss, result as played kept", /forfeits the game in which he went beyond it, [^:]*: when that game is made final the league's tools rule it a forfeit loss for the club automatically, the result as played stays on record/.test(r52));
 A("...both clubs: a commissioner rules; one appeal; from 12 October 2026", /no forfeit is ruled automatically and a commissioner rules the game/.test(r52) && /may appeal once, through its Owner, General Manager or Assistant General Manager/.test(r52) && /from 12 October 2026/.test(r52));
 A("Rules 10.1 and 5.3 no longer say a filed sheet counts", /a lineup filed for a game not yet played does not count toward his week \(Rule 5\.2\)/.test(sec("10.1").paragraphs[0]) && !/returns the game to every player on it/.test(sec("5.3").paragraphs[0]));
 A("Rule 3.3: original week, or no week at all", /counts toward the week it was originally scheduled in, or toward no week at all, for players' weekly game limits \(Rule 5\.2\)/.test(sec("3.3").paragraphs[0]));

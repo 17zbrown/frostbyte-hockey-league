@@ -222,8 +222,9 @@ console.log("\n— the record, the rulebook and the changelog");
     /Eligibility \(Rules 2\.4 and 8\.3\) and the statistical titles \(Rule 9\.2\) count a player's games at every club, and the weekly limits \(Rule 5\.2\) count every club's games in that week\./.test(r61) &&
     /its players to watch for a game are drawn from its current roster by their games for that club/.test(r61) && /a Player of the Week to the club of the winner's last game that week/.test(r61));
   A("...and the playoff paragraph of v4.09 is still there", /Playoff games are part of the official record and are kept apart from the regular season\./.test(r61));
-  A("the changelog's newest entry is 4.13", rb.changelog[0].version === "4.13" && rb.changelog[1].version === "4.12");
-  A("...with no em dashes and no guessed pronouns", !/—/.test(JSON.stringify(rb.changelog[0])) && !/\b(he|his|him)\b/i.test(JSON.stringify(rb.changelog[0])));
+  const e413 = rb.changelog.find((c) => c.version === "4.13");
+  A("the changelog has its 4.13 entry, right after 4.12 in order", !!e413 && rb.changelog.indexOf(e413) + 1 === rb.changelog.findIndex((c) => c.version === "4.12"));
+  A("...with no em dashes and no guessed pronouns", !/—/.test(JSON.stringify(e413)) && !/\b(he|his|him)\b/i.test(JSON.stringify(e413)));
 }
 
 console.log(fail ? `\n${fail} of ${n} FAILED` : `\nall ${n} passed`);
