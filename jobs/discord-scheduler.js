@@ -218,7 +218,8 @@ export function buildRulesLink(rb) {
       title: "📖 CGHL Official Rulebook",
       url: "https://chelgamingleague.com/#/rulebook",
       description:
-        "The rulebook lives on the site, where it is always current, searchable, and linkable — " +
+        /* v4.15: no em dash in the rulebook's Discord card either (commissioner, 2026-10-16) */
+        "The rulebook lives on the site, where it is always current, searchable and linkable: " +
         "cite any rule by its number and the link goes straight to it.\n\n" +
         "**→ [Read the rulebook](https://chelgamingleague.com/#/rulebook)**\n\n" + toc,
       color: RULES_BRAND,

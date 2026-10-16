@@ -40,7 +40,7 @@ A("1.3.1 (Q55): the site's rulebook is authoritative; the commissioner decides a
 A("2.3.1 (Q53): no retention", /No salary is retained in a trade/.test(secs["2.3"].paragraphs[0]));
 A("2.5.5 (Q51): salaries public, in both formats", ["paragraphs", "full"].every((k) => /Every player's salary and cap hit is public/.test(secs["2.5"][k][4])));
 A("2.6.2 (Q48): the reset, in both formats", ["paragraphs", "full"].every((k) => /When the Owner's seat changes hands, or falls vacant, the settings return to this default for every seat/.test(secs["2.6"][k][1])));
-A("2.7.3 (Q54): the office holder's conduct duty", /shall not use it for his club's advantage; doing so is a conduct violation under Chapter 7/.test(secs["2.7"].paragraphs[2]));
+A("2.7.3 (Q54): the office holder's conduct duty", /shall not use it for their club's advantage; doing so is a conduct violation under Chapter 7/.test(secs["2.7"].paragraphs[2]));
 A("4.6.1 (Q57): rare, outside the league, recorded by staff", /one outside the league/.test(secs["4.6"].paragraphs[0]) && /statistics staff or a commissioner record the substitution/.test(secs["4.6"].paragraphs[0]));
 A("Q56: no 'settings sheet' left anywhere; the Lobby settings box instead", !/settings sheet/.test(all) && /Lobby settings box of each game's match card/.test(secs["4.1"].paragraphs[0]));
 A("no em dashes or spaced hyphens in the 3.63 entry", !/—| - /.test(JSON.stringify(e)));

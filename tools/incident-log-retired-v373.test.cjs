@@ -30,7 +30,7 @@ A("changelog records 3.73", !!e && e.dateIso === "2026-09-29");
 A("no in-force paragraph mentions the incident log", !/incident log/i.test(inForce) && !/game incident/i.test(inForce));
 A("4.3.10 says who counts disconnections now", /The officiating department counts a club's disconnections in a game from the two clubs' reports and the game's own record of its sittings/.test(secs["4.3"].paragraphs[9]));
 A("7.1.2 no longer lists a game incident", /whether it is a case, a forfeit, a void or the correction of a result\./.test(secs["7.1"].paragraphs[1]));
-A("3.2.4: the office accepts a lateness waiver", /the league office accepts the outcome rather than second-guessing it/.test(secs["3.2"].paragraphs[3]));
+A("3.2.4: the office accepts a lateness waiver", /That decision is for the two clubs to make between themselves before the game starts, and the league office accepts the outcome\./.test(secs["3.2"].paragraphs[3]));
 A("history is left alone (3.52 and 3.53 still mention incidents)", rb.changelog.some((c) => c.version === "3.53"));
 A("no em dashes or spaced hyphens in the 3.73 entry", !/—| - /.test(JSON.stringify(e)));
 console.log("\n" + (fail ? fail + " of " + n + " FAILED" : "all " + n + " passed"));

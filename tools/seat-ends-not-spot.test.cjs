@@ -25,14 +25,14 @@ const sec = (id) => { for (const c of rb.chapters) for (const s of c.sections) i
 console.log("\n— the published rule now says what happens when a seat is vacated");
 {
   const r26 = sec("2.6");
-  A("it keeps the roster spot", /the person keeps his roster spot with that club/.test(r26));
+  A("it keeps the roster spot", /the person keeps their roster spot with that club/.test(r26));
   A("...and says what that rules out", /not waived, not moved to the training camp, and not returned to any pool/.test(r26));
-  A("...including the position and the number", /the same position and the same number he held the moment before/.test(r26));
+  A("...including the position and the number", /the same position and the same number they held the moment before/.test(r26));
   A("the salary rule is stated as the commissioner gave it",
-    /cap hit becomes the league minimum, unless the seat he held carried a higher figure, in which case he retains that figure/.test(r26));
-  A("...with both cases worked", /Assistant General Manager keeps his \$2,000,000/.test(r26) && /Owner or General Manager, whose seats count \$0, takes the league minimum/.test(r26));
-  A("...and the earned-salary case (v3.66: it comes back when the seat ends, if higher)", /a player who earned more before he took his first seat has that salary back when the seat ends, if it is higher than the seat's figure/.test(r26));
-  A("the trade and waiver protection ends with the role", /he may be waived or traded like any other player/.test(r26));
+    /cap hit becomes the league minimum, unless the seat they held carried a higher figure, in which case they retain that figure/.test(r26));
+  A("...with both cases worked", /Assistant General Manager therefore keeps their \$2,000,000/.test(r26) && /Owner or General Manager, whose seats count \$0, takes the league minimum/.test(r26));
+  A("...and the earned-salary case (v3.66: it comes back when the seat ends, if higher)", /a player who earned more before they took their first seat has that salary back when the seat ends, if it is higher than the seat's figure/.test(r26));
+  A("the trade and waiver protection ends with the role", /the player may be waived or traded like any other player/.test(r26));
 }
 
 console.log("\n— the Owner's confirmation says the same thing");

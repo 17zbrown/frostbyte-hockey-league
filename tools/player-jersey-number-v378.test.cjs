@@ -70,13 +70,13 @@ A("last season's spot is not this season's", box.CG.myJersey().wearing === null)
 console.log("— the book");
 const C = (() => { const t = R("src/live/part3_content.js"); return JSON.parse(t.slice(t.indexOf("{"), t.lastIndexOf("}") + 1)); })();
 let s21 = null; C.rulebook.chapters.forEach((ch) => (ch.sections || []).forEach((s) => { if (s.id === "2.1") s21 = s; }));
-const rule = (arr) => (arr || []).some((p) => /A player chooses his own number in his league profile, and the number he chooses is his/.test(p) && /no two players on a club's roster, active or training camp, wear the same one/.test(p) && /that changes the number a player wears for the club, not the number he has chosen/.test(p)
-  && /on a trade the number he was wearing, on a contract rollover the number he wore the season before, and on a reinstatement the number he wore when he was removed/.test(p)
+const rule = (arr) => (arr || []).some((p) => /A player chooses their own number in their league profile, and that number belongs to the player/.test(p) && /no two players on a club's roster, active or training camp, wear the same one/.test(p) && /a renumbering changes the number a player wears for the club but not the number the player has chosen/.test(p)
+  && /on a trade, the number they were wearing; on a contract rollover, the number they wore the season before; and on a reinstatement, the number they wore when they were removed/.test(p)
   && /In a trade the numbers are settled once every player in it has moved/.test(p) && /other than a player on a pre-season loan or one placed on the club as depth under Rule 2\.8/.test(p));
 A("Rule 2.1 states it, in both formats", rule(s21.paragraphs) && rule(s21.full));
 const findCl = (o) => { if (o && typeof o === "object") { if (Array.isArray(o.changelog)) return o.changelog; for (const v of Object.values(o)) { const r = findCl(v); if (r) return r; } } return null; };
 const e = (findCl(C) || []).find((x) => x.version === "3.78");
-A("the changelog records 3.78", !!e && /chooses his own jersey number in his league profile/.test(e.summary) && e.items.length === 5);
+A("the changelog records 3.78", !!e && /chooses their own jersey number in their league profile/.test(e.summary) && e.items.length === 5);
 const text = JSON.stringify(e) + s21.paragraphs[s21.paragraphs.length - 1] + rev.split("\n").filter((l) => /^\s*(--|\/\*|\*)/.test(l)).join(" ");
 A("no em dashes or spaced hyphens in the new text", !/—|–| - /.test(text));
 

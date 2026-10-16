@@ -33,10 +33,10 @@ console.log("\n— the rulebook says it (rendered JSON)");
   /* FULL format: pre-season management flexibility is preserved word for word in Appendix A */
   A("[full] 0.4: management may be dressed at any position in pre-season games, to get players into games", /in pre-season games its Owner, General Manager and Assistant General Manager may be dressed at any position/.test(secFull("0.4")));
   A("[full] 2.1: two exceptions to the groups — camp, and management in the pre-season", /There are two exceptions/.test(secFull("2.1")) && /in pre-season games only the club’s Owner, General Manager and Assistant General Manager may be dressed at any position/.test(secFull("2.1")));
-  A("[full] 5.2: the exception ends with the pre-season and a saved line will not dress into a regular-season game", /the exception ends with the pre-season, and a saved line that carries a manager out of his group will not dress into a regular-season or playoff game/.test(secFull("5.2")));
+  A("[full] 5.2: the exception ends with the pre-season and a saved line will not dress into a regular-season game", /the exception ends with the pre-season, and a saved line that carries a manager out of their group will not dress into a regular-season or playoff game/.test(secFull("5.2")));
   A("5.2: whatever is in force is applied when a lineup is filed, not only when built", /apply whatever is in force when a lineup is filed, not only when it is built/.test(sec("5.2")));
   /* BASIC format has no pre-season, so management gets no dressing exception — camp is the only one */
-  A("[basic] 2.1: while the lock is on, exactly one exception to the groups — training camp", /the sole exception is a training-camp player, who fills any position for as long as he is carried in camp/.test(sec("2.1")));
+  A("[basic] 2.1: while the lock is on, exactly one exception to the groups — training camp", /the sole exception is a training-camp player, who fills any position for as long as they are carried in camp/.test(sec("2.1")));
   const cl239 = rb.changelog.find((c) => c.version === "2.39");
   A("changelog 2.39", !!cl239 && /Pre-season flexibility for management/.test(cl239.summary));
   A("...American spelling", !/practis|colour|centre|organis|defence/i.test((cl239 ? cl239.summary : "") + sec("5.2") + sec("2.1") + secFull("5.2") + secFull("2.1")));

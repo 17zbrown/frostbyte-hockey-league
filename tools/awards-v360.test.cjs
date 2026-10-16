@@ -19,7 +19,7 @@ const rb = CG.CONTENT.rulebook, secs = {};
 rb.chapters.forEach((ch) => ch.sections.forEach((s) => { secs[s.id] = s; }));
 const e = rb.changelog.find((c) => c.version === "3.60");
 A("changelog records 3.60", !!e);
-A("9.1: the slate", /Rookie of the Year, a rookie being a player in his first CGHL season/.test(secs["9.1"].paragraphs[0]) && /the Scoring Title, the Goal-scoring Title, the Playmaking Title and the Goaltending Title/.test(secs["9.1"].paragraphs[0]));
+A("9.1: the slate", /Rookie of the Year, a rookie being a player in their first CGHL season/.test(secs["9.1"].paragraphs[0]) && /the Scoring Title, the Goal-scoring Title, the Playmaking Title and the Goaltending Title/.test(secs["9.1"].paragraphs[0]));
 A("9.2: every rostered player votes; titles by per-game average", /among every rostered player and league staff/.test(secs["9.2"].paragraphs[0]) && /most points per game/.test(secs["9.2"].paragraphs[1]));
 A("9.3: playoff eligible to win", /Only a player who is playoff-eligible under Rule 8\.3 can receive/.test(secs["9.3"].paragraphs[0]));
 A("no em dashes or spaced hyphens in the 3.60 entry or the new 9.x text", !/—| - /.test(JSON.stringify(e) + secs["9.1"].paragraphs[0] + secs["9.2"].paragraphs.join(" ")));

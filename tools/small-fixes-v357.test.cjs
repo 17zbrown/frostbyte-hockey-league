@@ -31,9 +31,9 @@ A("2.3.1: status changes", /An offer is declined only by the club that received 
 A("2.3.3: reversal before or after the deadline", /The transactions department, or a commissioner, may thereafter review any completed trade and reverse it, before or after the movement deadline/.test(secs["2.3"].paragraphs[2]));
 A("3.2.6, 3.3.1, 5.1.2, 5.1.4: reschedules only in special circumstances", /not entitled to a reschedule/.test(secs["3.2"].paragraphs[5]) && /only in special circumstances/.test(secs["3.3"].paragraphs[0]) && /approved only in special circumstances \(Rule 3\.3\)/.test(secs["5.1"].paragraphs[1]) && /approved only in special circumstances \(Rule 3\.3\)/.test(secs["5.1"].paragraphs[3]));
 A("5.1.1: the fixed hour", /Game times do not change, so the deadline is always that fixed hour/.test(secs["5.1"].paragraphs[0]) && !/90 minutes before the first puck drop/.test(secs["5.1"].paragraphs[0]));
-A("5.2.1: positions are preferences", /the positions a player lists are his preferred spots rather than limits/.test(secs["5.2"].paragraphs[0]));
+A("5.2.1: positions are preferences", /the positions a player lists are their preferred spots rather than limits/.test(secs["5.2"].paragraphs[0]));
 A("4.2.6: Away's preferred", /or had its only choice vetoed with no second choice left standing, the Away club's preferred server/.test(secs["4.2"].paragraphs[5]));
-A("6.2.2 and 8.3.2: streaming recommended", /Streaming is not required, in the regular season or the playoffs, but it is recommended/.test(secs["6.2"].paragraphs[1]) && /Streaming a playoff game is recommended, not required/.test(secs["8.3"].paragraphs[1]));
+A("6.2.2 and 8.3.2: streaming recommended", /Streaming is not required in the regular season or the playoffs, but it is recommended/.test(secs["6.2"].paragraphs[1]) && /Streaming a playoff game is recommended but not required/.test(secs["8.3"].paragraphs[1]));
 A("no em dashes or spaced hyphens in the 3.57 entry", !/—| - /.test(JSON.stringify(e)));
 console.log("\n" + (fail ? fail + " of " + n + " FAILED" : "all " + n + " passed"));
 process.exit(fail ? 1 : 0);

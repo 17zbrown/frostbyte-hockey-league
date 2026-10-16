@@ -37,7 +37,7 @@ const e = rb.changelog.find((c) => c.version === "3.67");
 A("changelog records 3.67", !!e);
 A("2.5.1: the office is bound by the cap", /The league office is bound by the cap as the clubs are/.test(secs["2.5"].paragraphs[0]));
 A("6.1.2: no hand edits, the commissioner included", /Ratings are not hand-edited by anyone, the commissioner included/.test(secs["6.1"].paragraphs[1]) && !/the commissioner may correct a single rating/.test(secs["6.1"].paragraphs[1]));
-A("6.2.1 and 4.3.3: statistics staff or a commissioner combine", /by statistics staff or a commissioner \(Rule 4\.3\)\. A club's management may attach the single sitting/.test(secs["6.2"].paragraphs[0]) && /stats import by statistics staff or a commissioner,/.test(secs["4.3"].paragraphs[2]));
+A("6.2.1 and 4.3.3: statistics staff or a commissioner combine", /by statistics staff or a commissioner through the league's stats tools \(Rule 4\.3\)\. A club's management may attach the single sitting/.test(secs["6.2"].paragraphs[0]) && /stats import by statistics staff or a commissioner,/.test(secs["4.3"].paragraphs[2]));
 A("no em dashes or spaced hyphens in the 3.67 entry", !/—| - /.test(JSON.stringify(e)));
 
 console.log("\n" + (fail ? fail + " of " + n + " FAILED" : "all " + n + " passed"));

@@ -42,9 +42,9 @@ const rb = CG.CONTENT.rulebook, secs = {};
 rb.chapters.forEach((ch) => ch.sections.forEach((s) => { secs[s.id] = s; }));
 const e = rb.changelog.find((c) => c.version === "3.61");
 A("changelog records 3.61", !!e);
-A("2.6.1: in season, from his own club; off-season, anyone signed up", ["paragraphs", "full"].every((k) => /the nominee must be on the club's active roster or in its training camp when he is nominated/.test(secs["2.6"][k][0]) && /the Owner may name anyone signed up for the coming season, on his club or not/.test(secs["2.6"][k][0])));
+A("2.6.1: in season, from the Owner's own club; off-season, anyone signed up", /the nominee must be on the club's active roster or in its training camp at the time of the nomination\./.test(secs["2.6"].paragraphs[0]) && /the nominee must be on the club's active roster or in its training camp when they are nominated\./.test(secs["2.6"].full[0]) && ["paragraphs", "full"].every((k) => /the Owner may name anyone signed up for the coming season, whether or not that person is on the Owner's club\./.test(secs["2.6"][k][0])));
 A("2.6.3: never sent to camp, both formats", ["paragraphs", "full"].every((k) => /no one, the league office included, may send a manager to the training camp/.test(secs["2.6"][k][2])));
-A("2.1: the camp rule points to 2.6", /A manager is never sent to the training camp while he holds his seat \(Rule 2\.6\)\./.test(secs["2.1"].paragraphs[3]));
+A("2.1: the camp rule points to 2.6", /A manager is never sent to the training camp while they hold their seat \(Rule 2\.6\)\./.test(secs["2.1"].paragraphs[3]));
 A("no em dashes or spaced hyphens in the 3.61 entry", !/—| - /.test(JSON.stringify(e)));
 
 console.log("\n" + (fail ? fail + " of " + n + " FAILED" : "all " + n + " passed"));

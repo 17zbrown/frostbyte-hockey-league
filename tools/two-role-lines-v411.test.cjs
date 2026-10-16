@@ -181,7 +181,7 @@ const lib = new Function("etFmt", "const etDayUnix = (s) => etFmt.format(new Dat
   const rb = C.CONTENT.rulebook;
   const sec = (id) => { for (const ch of rb.chapters) for (const s2 of (ch.sections || [])) if (s2.id === id) return s2; };
   const r61 = sec("6.1").paragraphs[1];
-  A("Rule 6.1: both lines inside one game, the game counted once in each role", /a player who skates in one sitting of a game restarted under Rule 4\.3 and plays goal in another keeps a skating line and an in-goal line for that game/.test(r61) &&
+  A("Rule 6.1: both lines inside one game, the game counted once in each role", /The same holds within a single game\. A player who skates in one sitting of a game restarted under Rule 4\.3 and plays goal in another keeps a skating line and an in-goal line for that game/.test(r61) &&
     /the game counts once among the player's games skated and once among the games in goal/.test(r61));
   A("...and once as a game played under Rules 2.4, 5.2 and 8.3", /Every game at any position counts once as a game played under Rules 2\.4, 5\.2 and 8\.3, however many lines the player has in it\./.test(r61));
   A("...keeping the v4.08 wording", /two season lines, one from the games skated and one from the games played in goal/.test(r61) && /including a line cut short by a disconnection/.test(r61));

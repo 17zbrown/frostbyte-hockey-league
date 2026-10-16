@@ -17,7 +17,7 @@ const rb = CG.CONTENT.rulebook, secs = {};
 rb.chapters.forEach((ch) => ch.sections.forEach((s) => { secs[s.id] = s; }));
 const e = rb.changelog.find((c) => c.version === "3.56");
 A("changelog records 3.56", !!e);
-A("5.1.4: front office told; second week referred", /tells his club's front office\. A player who has now missed two weeks in a row/.test(secs["5.1"].paragraphs[3]) && /referred to the league office's staff at the same time/.test(secs["5.1"].paragraphs[3]));
+A("5.1.4: front office told; second week referred", /tells the front office of the player's club\. A player who has now missed two weeks in a row/.test(secs["5.1"].paragraphs[3]) && /referred at the same time to the league office's staff/.test(secs["5.1"].paragraphs[3]));
 A("5.1.4: the comma splice is fixed", !/not yet in, Lineups/.test(secs["5.1"].paragraphs[3]));
 A("no em dashes or spaced hyphens in the 3.56 entry", !/—| - /.test(JSON.stringify(e)));
 console.log("\n" + (fail ? fail + " of " + n + " FAILED" : "all " + n + " passed"));

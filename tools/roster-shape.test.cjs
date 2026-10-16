@@ -42,7 +42,7 @@ console.log("— the rulebook is the authority, and it says 'beyond'");
   A("camp is carried outside the active roster, in addition to it, up to ten (v3.58)",
     /A club may carry up to ten \(10\) training-camp players in addition to its active roster/.test(r21) &&
     !/camp is unlimited/.test(r21) &&
-    /camp is carried outside the active roster, not outside the payroll/.test(r21));
+    /in addition to its active roster, and no player joins a camp that already holds ten, by any route\. A training-camp player's salary counts against the club's salary cap exactly as an active player's does \(Rule 2\.5\)\./.test(r21));
   /* v3.26: the shape is still a published season setting; what changed is that 2.1 now states the
      IN-FORCE form (complete lines plus flex players) instead of leading with the full format's
      per-group quota and offering lines-plus-flex as an alternative. */
@@ -131,10 +131,10 @@ console.log("\n— training-camp salaries COUNT against the cap (Rule 2.5, commi
       `${ctx.CG.teamPayroll(lg, "X")}`);
   }
   A("Rule 2.5 says a camp salary IS part of the payroll",
-    /salary forms part of that payroll/.test(sec("2.5")) && /but not outside the cap/.test(sec("2.5")));
+    /A training-camp player's salary forms part of that payroll, even though camp is carried outside the active roster\. A club that carries a player in camp bears that player's full salary against the cap from the moment they are placed there/.test(sec("2.5")));
   A("Rule 2.1 agrees", /salary counts against the club's salary cap exactly as an active/.test(sec("2.1")));
   A("...and camp still does not consume an active roster spot",
-    /carried outside the active roster, not outside the payroll/.test(sec("2.1")));
+    /training-camp players in addition to its active roster/.test(sec("2.1")) && /Camp is not counted against the published composition\./.test(sec("2.1")));
 }
 
 console.log("\n— the rulebook carries the cap ruling, and the reversal is on the record");
@@ -144,8 +144,8 @@ console.log("\n— the rulebook carries the cap ruling, and the reversal is on t
   A("Rule 2.5 says a camp salary IS part of the payroll",
     /training-camp player's salary forms part of that payroll/.test(sec("2.5")));
   A("...and that it counts from placement, not from call-up",
-    /from the moment he is placed there/.test(sec("2.5")) &&
-    /recalling him to the active roster changes nothing about his cost/.test(sec("2.5")));
+    /from the moment they are placed there/.test(sec("2.5")) &&
+    /recalling the player to the active roster changes nothing about their cost/.test(sec("2.5")));
   A("Rule 2.1 repeats it where camp is defined",
     /salary counts against the club's salary cap exactly as an active player's does/.test(sec("2.1")));
   A("no paragraph anywhere still claims the exemption",
@@ -156,7 +156,7 @@ console.log("\n— the rulebook carries the cap ruling, and the reversal is on t
   A("the changelog records the v2.24 exemption it replaced",
     rb.changelog.some((c) => c.version === "2.24" && /does not count against the salary cap/.test(c.summary)));
   A("...and v2.29 reversing it",
-    rb.changelog.some((c) => c.version === "2.29" && /now counts against his club's salary cap/.test(c.summary)));
+    rb.changelog.some((c) => c.version === "2.29" && /now counts against their club's salary cap/.test(c.summary)));
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

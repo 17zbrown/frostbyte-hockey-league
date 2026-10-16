@@ -38,7 +38,7 @@ const rb = global.CG.CONTENT.rulebook, secs = {};
 rb.chapters.forEach((ch) => ch.sections.forEach((s) => { secs[s.id] = s; }));
 const e = rb.changelog.find((c) => c.version === "3.71");
 A("changelog records 3.71", !!e);
-A("6.1.2: per-position season lines", /for each position group he has played, center, wing, defense and goal/.test(secs["6.1"].paragraphs[1]));
+A("6.1.2: per-position season lines", /for each position group they have played \(center, wing, defense and goal\)/.test(secs["6.1"].paragraphs[1]));
 A("2.6.4 (Q46): an award may admit a new club", /the award admits it as a new club/.test(secs["2.6"].paragraphs[3]));
 A("no em dashes or spaced hyphens in the 3.71 entry", !/—| - /.test(JSON.stringify(e)));
 console.log("\n" + (fail ? fail + " of " + n + " FAILED" : "all " + n + " passed"));

@@ -93,11 +93,11 @@ console.log("\n— the published rule");
   const r11 = obj.rulebook.chapters.find((c) => c.num === 1).sections.find((s) => s.id === "1.1");
   const body = r11.paragraphs.join(" ");
   A("Rule 1.1 says CGHL is played on console", /CGHL is played on console\./.test(body));
-  A("...and names the three required things", /three things: his EA ID, the console he plays on \(Xbox or PlayStation\), and the gamertag or PSN name that console shows/.test(body));
-  A("...says what each is FOR", /the name the league's box scores are matched on/.test(body) && /how a club adds him and gets him into a party/.test(body));
+  A("...and names the three required things", /three things: their EA ID, the console they play on \(Xbox or PlayStation\), and the gamertag or PSN name that console shows/.test(body));
+  A("...says what each is FOR", /the name the league's box scores are matched on/.test(body) && /how a club adds the player and gets them into a party/.test(body));
   A("...draws the privacy line between them",
     /shown on the player's public profile and in the player directory/.test(body)
-    && /shown to his club's management and to league staff rather than publicly/.test(body));
+    && /shown to the management of the player's club and to league staff rather than publicly/.test(body));
   A("...and that a correction does not rewrite history", /a correction after the fact does not undo a game already recorded/.test(body));
   A("the changelog records it", obj.rulebook.changelog.some((e) => e.version === "3.21"));
 }

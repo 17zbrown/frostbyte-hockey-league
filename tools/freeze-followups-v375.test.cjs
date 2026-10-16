@@ -29,7 +29,7 @@ global.window = {}; global.CG = {}; eval(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook, secs = {};
 rb.chapters.forEach((ch) => ch.sections.forEach((s) => { secs[s.id] = s; }));
 const p3 = secs["2.1"].paragraphs[3], e = rb.changelog.find((c) => c.version === "3.75");
-A("2.1.4: a player released and signed back in the freeze returns to the squad he left", /A player a club releases during the freeze and signs back before it lifts returns to the squad he left\./.test(p3));
+A("2.1.4: a player released and signed back in the freeze returns to the squad they left", /A player a club releases during the freeze and signs back before it lifts returns to the squad they left\./.test(p3));
 A("...a management seat is a freeze exception", /a player named to a management seat from the training camp comes up to the active roster with the seat even in the window \(Rule 2\.6\)/.test(p3));
 A("...no overclaim; a series arranged to dodge the freeze may be reversed", !/a trade never serves as a call-up/.test(p3) && /may be voided or reversed \(Rule 2\.3\)/.test(p3));
 A("Appendix A carries the weekly freeze", /The roster freezes each week from Wednesday at 7:30 PM Eastern until midnight at the end of Friday/.test(secs["2.1"].full[2]) && /outside the weekly roster freeze/.test(secs["2.1"].full[2]));

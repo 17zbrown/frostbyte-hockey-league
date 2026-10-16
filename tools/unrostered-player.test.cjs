@@ -133,9 +133,9 @@ function finish() {
   A("...and that it is referred, not ruled automatically", /referred to the department that owns it/.test(body));
   A("...and points at Chapter 7 for the consequence", /Chapter 7/.test(body));
   /* v3.53 (audit F-4-5): the position check applies only where the lock is in force (lifted v3.40) */
-  A("4.2 says positions are checked where the position lock is in force", /Where the position lock is in force \(Rule 2\.1\), a player on a club's active roster who appears in a box score at a position outside his position group/.test(body));
+  A("4.2 says positions are checked where the position lock is in force", /Where the position lock is in force \(Rule 2\.1\), a player on a club's active roster who appears in a box score at a position outside their position group/.test(body));
   A("...naming the camp exemption", /training-camp player fills any position/.test(body));
-  A("...and why the check is by group", /without saying which side he played/.test(body));
+  A("...and why the check is by group", /without saying which side they played/.test(body));
   /* pin that the release EXISTS, not that it is newest: "newest" breaks on every later release,
      which teaches people to re-point pins without reading them */
   A("the changelog records 3.00", obj.rulebook.changelog.some((c) => c.version === "3.00"),

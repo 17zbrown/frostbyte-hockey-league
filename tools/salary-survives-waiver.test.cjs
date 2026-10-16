@@ -53,16 +53,16 @@ console.log("\n— the interpretation is on the record");
 
 console.log("\n— the rules");
 {
-  A("2.2 signs at his own salary", /at the salary he was already earning/.test(sec("2.2")));
-  A("...states the principle", /A player keeps his salary for the whole season: being waived does not reduce it/.test(sec("2.2")));
-  A("...and the cap consequence", /the club that signs him takes on the figure his former club carried, against its own cap/.test(sec("2.2")));
+  A("2.2 signs at the player's own salary", /at the salary the player was already earning/.test(sec("2.2")));
+  A("...states the principle", /A player keeps their salary for the whole season: being waived does not reduce it/.test(sec("2.2")));
+  A("...and the cap consequence", /the club that signs the player takes on the figure the former club carried, against its own cap/.test(sec("2.2")));
   A("...keeping the minimum only as a floor", /Where a player has no salary on record for the season, the league minimum applies as a floor/.test(sec("2.2")));
   A("...and the old forced minimum is gone", !/may sign a waived player at the league minimum salary/.test(sec("2.2")));
   A("2.5 separates a depth placement from a waived player",
-    /a depth placement's contract carries the league minimum salary\. A waived player carries the salary he already had/.test(sec("2.5")));
+    /a depth placement's contract carries the league minimum salary\. A waived player carries the salary they already had/.test(sec("2.5")));
   /* v3.55 (Q1): 2.5.4 no longer describes a claim window; the salary still travels */
-  A("2.5's waiver line follows", /any club may sign him at the salary he carried until the movement deadline/.test(sec("2.5")));
-  A("a drafted player is still paid by round", /A drafted player's contract carries the salary fixed for his round by Rule 2\.8/.test(sec("2.5")));
+  A("2.5's waiver line follows", /any club may sign them at the salary they carried until the movement deadline/.test(sec("2.5")));
+  A("a drafted player is still paid by round", /A drafted player's contract carries the salary that Rule 2\.8 fixes for the round in which the player was drafted/.test(sec("2.5")));
   A("depth placement is still at the minimum", /placed on a club by the league office as depth at the league minimum salary/.test(sec("2.2")));
   A("the increment rule is untouched", /every salary in the league is a multiple of \$250,000 above it/.test(sec("2.5")));
   A("the changelog records it", rb.changelog.some((e) => e.version === "3.46"));

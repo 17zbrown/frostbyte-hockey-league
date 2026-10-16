@@ -10,7 +10,7 @@ const rb = CG.CONTENT.rulebook, ch5 = rb.chapters.find((c) => c.num === 5), s = 
 A("Rule 5.4 sits in Chapter 5, after the lineup lock", !!s && ch5.sections.map((x) => x.id).join(",") === "5.1,5.2,5.3,5.4" && s.title === "Scheduling by management");
 const t = s ? s.paragraphs.join(" ") : "";
 A("management is expected to schedule fairly and with reasonable care", /expected to do so fairly and with reasonable care/.test(t));
-A("a player may file a complaint for negligent scheduling, through Rule 7.1", /A player who believes his club's management has scheduled players negligently may file a complaint with the league office \(Rule 7\.1\)/.test(t));
+A("a player may file a complaint for negligent scheduling, through Rule 7.1", /A player who believes their club's management has scheduled players negligently may file a complaint with the league office \(Rule 7\.1\)/.test(t));
 A("the league office reviews it and may act under Chapter 7", /reviews every such complaint and may act on it under Chapter 7/.test(t));
 A("it does not say how a complaint is weighed", !/case by case|case-by-case|discretion/i.test(t));
 A("no em dash, and the same text in both formats (no shelved full-format version)", !/—/.test(t) && !s.full);

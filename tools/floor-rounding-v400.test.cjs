@@ -36,7 +36,7 @@ A("the page's helper is the database's rule", /CG\.roundFloorShare = function\(x
 console.log("— the rulebook and changelog");
 global.CG = {}; vm.runInThisContext(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook, r83 = rb.chapters.flatMap((c) => c.sections || []).find((x) => x.id === "8.3").paragraphs[3];
-A("Rule 8.3 states the rounding with both examples", /rounded to the nearest game, a fraction of four tenths or less down and anything above it up/.test(r83) &&
+A("Rule 8.3 states the rounding with both examples", /The result is rounded to the nearest game, with a fraction of four tenths or less rounded down and anything above it rounded up\./.test(r83) &&
   /needs thirteen \(13\), since the share is 13\.33/.test(r83) && /needs fifteen \(15\), since 14\.81 rounds up/.test(r83) && !/rounded up:/.test(r83));
 const cl = rb.changelog.find((c) => c.version === "4.00");
 A("changelog 4.00 is in the book", !!cl);

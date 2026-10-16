@@ -97,15 +97,15 @@ const rb = JSON.parse((function(){ const c = R("src/live/part3_content.js"); ret
 const sec = (id) => rb.chapters.flatMap((c) => c.sections).find((s) => s.id === id);
 const s72 = sec("7.2").paragraphs.join("\n");
 A("7.2 ladder", /in steps of three \(3\), from three \(3\) to eighteen \(18\) games/.test(s72));
-A("7.2 lock", /locked where he stands on his club's roster/.test(s72));
+A("7.2 lock", /locked in place on their club's roster/.test(s72));
 A("7.2 carries over and ends 11:59 PM", /carries into the next season/.test(s72) && /ends at 11:59 PM Eastern Time on its last day/.test(s72));
 A("7.2 one at a time + second in season", /A member is under one suspension at a time/.test(s72) && /suspended a second time in the same season is suspended for the remainder of that season/.test(s72));
-A("7.2 appearing while suspended", /recorded as a forfeit loss for his club/.test(s72) && /each receive a written warning/.test(s72));
+A("7.2 appearing while suspended", /recorded as a forfeit loss for the player's club/.test(s72) && /each receive a written warning/.test(s72));
 A("7.2 public record", /public record of a suspension shows its length, its headings/.test(s72));
 A("7.6 once, routed, issuer barred", /Each sanction may be appealed once/.test(sec("7.6").paragraphs[0]) && /never decides its appeal/.test(sec("7.6").paragraphs[1]) && !/decided by a panel/.test(sec("7.6").paragraphs[1]));
 A("7.7 new scale + timeout", /three \(3\) to eighteen \(18\) games in steps of three/.test(sec("7.7").paragraphs[1]) && /timeout in the league Discord/.test(sec("7.7").paragraphs[1]));
 A("7.7 bans entered on the site", /entered on the site by a commissioner/.test(sec("7.7").paragraphs.join(" ")));
-A("2.1.4 names the lock", /A suspended player is locked where he stands/.test(sec("2.1").paragraphs[3]));
+A("2.1.4 names the lock", /A suspended player is locked where they stand/.test(sec("2.1").paragraphs[3]));
 /* by version, never by position: a later release takes changelog[0] */
 const e351 = rb.changelog.find((c) => c.version === "3.51");
 A("v3.51 recorded", !!e351);

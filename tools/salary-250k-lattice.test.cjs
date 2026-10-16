@@ -121,7 +121,7 @@ console.log("— the rulebook says the same thing");
   A("...and still states the $750,000 minimum", /league minimum salary is \$750,000/.test(sec("2.5")));
   A("...and says an off-lattice figure is refused, not rounded",
     /refused where it is entered rather than rounded/.test(sec("2.5")));
-  A("Rule 2.8 pays by round, not by pick", /A drafted player is paid according to the round of his selection and not his position within it/.test(sec("2.8")));
+  A("Rule 2.8 pays by round, not by pick", /A drafted player is paid according to the round of their selection and not their position within it/.test(sec("2.8")));
   {
     /* basic: the round count is a season setting (v2.50), so the pay table is stated as a
        formula on the minimum and increment rather than fifteen figures spelled out by hand.
@@ -154,7 +154,7 @@ console.log("— the rulebook says the same thing");
   A("...and prices the full class (basic: derived from the formula, not a fixed pin)",
     Array.from({ length: 15 }, (_, i) => CG.draftRoundSalary(i + 1, 15)).reduce((a, v) => a + v, 0) === 37500000);
   A("...and prices the full class (full: $33,250,000)", /\$33,250,000/.test(secFull("2.8")));
-  A("Chapter 0.5 tells new members the draft pays by round", /The salary of a drafted player is fixed by the round of his selection rather than negotiated/.test(sec("0.5")));
+  A("Chapter 0.5 tells new members the draft pays by round", /A drafted player's salary is not negotiated but fixed by the round in which the player is selected/.test(sec("0.5")));
   A("Rule 2.2 no longer describes a rookie auction (v2.33)", !/rookie bidding|live auction/i.test(sec("2.2")));
   A("no rulebook section still promises the old $100,000 step",
     !/\$100,000 increments/.test(rb.chapters.map((c) => c.sections.map((s) => s.paragraphs.join(" ")).join(" ")).join(" ")));

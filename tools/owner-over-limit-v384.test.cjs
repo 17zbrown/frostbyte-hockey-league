@@ -15,7 +15,7 @@ A("the ruling is on the record", /'owner_appointed', 'team'/.test(sql) && /set a
 global.CG = {}; vm.runInThisContext(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook, s = rb.chapters.flatMap((c) => c.sections || []).find((x) => x.id === "2.6");
 A("Rule 2.6 records the power, in both formats", /A commissioner appointing an Owner may set that requirement aside/.test(s.paragraphs.join(" ")) && /A commissioner appointing an Owner may set that requirement aside/.test(s.full.join(" ")));
-A("...and the office's no-clock paragraph names the exception", /save that an Owner may be appointed to a club with no room in his group \(paragraph 3 of this rule\)/.test(s.paragraphs[6]));
+A("...and the office's no-clock paragraph names the exception", /The one exception is that an Owner may be appointed to a club with no room in the Owner's position group \(paragraph 3 of this rule\)/.test(s.paragraphs[6]));
 A("changelog 3.84", !!rb.changelog.find((c) => c.version === "3.84"));
 console.log(fail ? "\n" + fail + " of " + n + " FAILED" : "\nall " + n + " passed");
 process.exit(fail ? 1 : 0);

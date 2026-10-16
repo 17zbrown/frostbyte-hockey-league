@@ -84,15 +84,15 @@ console.log("\n— the published rule says where he goes");
   const content = R("src/live/part3_content.js");
   const rb = JSON.parse(content.slice(content.indexOf("{"), content.lastIndexOf("}") + 1)).rulebook;
   const r22 = rb.chapters.find((c) => c.num === 2).sections.find((s) => s.id === "2.2").paragraphs;
-  A("it says a waiver makes him a free agent at that moment",
-    /A player who is waived becomes a free agent at the moment he is waived/.test(r22[2]));
-  A("...and that he enters a pool every club can see",
-    /enters the league's pool of free agents, where every club can see him and any club may sign him/.test(r22[2]));
-  A("...and what does NOT happen to him",
-    /He is not returned to the draft, he is not placed on a club by the league office, and nothing happens to him automatically/.test(r22[2]));
-  A("...and that he stays there until signed", /he stays a free agent until a club signs him or the season ends/.test(r22[2]));
+  A("it says a waiver makes them a free agent at that moment",
+    /A player becomes a free agent at the moment they are waived\./.test(r22[2]));
+  A("...and that they enter a pool every club can see",
+    /they enter the league's pool of free agents, where every club can see them and any club may sign them/.test(r22[2]));
+  A("...and what does NOT happen to them",
+    /The player is not returned to the draft or placed on a club by the league office, and nothing happens to them automatically/.test(r22[2]));
+  A("...and that they stay there until signed", /they remain a free agent until a club signs them or the season ends/.test(r22[2]));
   A("the 'no free-agency period' line no longer reads as 'no free agents'",
-    /It does have free agents, and the next paragraph but one says who they are/.test(r22[0]));
+    /It does, however, have free agents; the paragraph after next defines them/.test(r22[0]));
   A("...while still ruling out a window and a bidding market",
     /no window in the calendar during which contracts are negotiated, and no open market/.test(r22[0]));
   A("the changelog records it", rb.changelog.some((e) => e.version === "3.33"));

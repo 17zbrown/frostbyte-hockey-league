@@ -83,9 +83,9 @@ console.log("\n— the published rulebook carries the new obligation");
   A("...it says the club is told first", /A notice goes to the club's room naming the player and the deadline/.test(all));
   A("...and why the league cannot tell him itself",
     /Discord does not deliver a message from the league to a member who has left the server/.test(all));
-  A("...names the window", /twenty four \(24\) hours from that notice/.test(all));
-  A("...says the clock starts at the notice", /runs from the notice, not from the moment the league saw him go/.test(all));
-  A("...says a rejoin cancels it", /If he rejoins, nothing happens/.test(all));
+  A("...names the window", /twenty-four \(24\) hours from that notice/.test(all));
+  A("...says the clock starts at the notice", /runs from the notice, not from the moment the league saw the player go/.test(all));
+  A("...says a rejoin cancels it", /If the player rejoins, nothing happens/.test(all));
   A("...and protects a front office seat",
     /Owner, General Manager or Assistant General Manager\) is never removed automatically/.test(all));
   A("the changelog records 3.11", obj.rulebook.changelog.some((c) => c.version === "3.11"));

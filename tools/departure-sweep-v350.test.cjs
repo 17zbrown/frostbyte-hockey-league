@@ -34,7 +34,7 @@ A("error rows are pushed to sum.errors", /const bad = acted\.filter\(\(a\) => a\
 console.log("\n— the book");
 const rb = JSON.parse((function(){ const c = R("src/live/part3_content.js"); return c.slice(c.indexOf("{"), c.lastIndexOf("}") + 1); })()).rulebook;
 const p115 = rb.chapters.flatMap((c) => c.sections).find((s) => s.id === "1.1").paragraphs[4];
-A("1.1.5 says each departure starts its own window", /Each departure starts its own window: a player who rejoins and later leaves again is noticed again/.test(p115));
+A("1.1.5 says each departure starts its own window", /Each departure starts its own window: a player who rejoins and later leaves again prompts a new notice/.test(p115));
 A("v3.50 is in the changelog", rb.changelog.some((e) => e.version === "3.50"));
 A("no dash as punctuation in the new prose", !/—| - /.test(JSON.stringify(rb.changelog.find((e) => e.version === "3.50"))));
 console.log(`\n${n - fail}/${n} passed`);

@@ -20,9 +20,9 @@ console.log("\n— 1. position locks are lifted, as a setting");
   A("...and flex() is everybody when it is off", /function flex\(p\)\{ return !locksOn \|\|/.test(hub));
   A("the line creator reads it too", /if \(\(!CG\.posLocksOn \|\| CG\.posLocksOn\(\)\) && p\.squad!=="tc"/.test(hub));
   A("2.1 makes the lock a season setting",
-    /Whether that assignment governs where he may be dressed is a season setting, the position lock/.test(sec("2.1")));
+    /Whether that assignment governs where the player may be dressed is a season setting, the position lock/.test(sec("2.1")));
   A("...records that it is off for Season 1, with the date",
-    /The lock is not in force for Season 1; it was lifted by announcement of the league office on 26 September 2026/.test(sec("2.1")));
+    /The lock is not in force for Season 1; it was lifted by announcement of the league office on September 26, 2026/.test(sec("2.1")));
   A("...and that the appearance limits survived it",
     /the appearance limits of Rule 5\.2 were not touched by that decision/.test(sec("2.1")));
   A("composition is now a separate question from dressing",
@@ -30,9 +30,9 @@ console.log("\n— 1. position locks are lifted, as a setting");
   A("5.2 conditions the group rule on the lock",
     /Where the position lock is in force \(Rule 2\.1\) position assignment operates by group/.test(sec("5.2")));
   A("...and says the caps apply unchanged when it is off",
-    /the appearance limits of this rule apply to him unchanged/.test(sec("5.2")));
+    /the appearance limits of this rule apply to that player unchanged/.test(sec("5.2")));
   A("5.3 only reports an out-of-group box score while the lock is on",
-    /where the position lock is in force, appearing outside his position group, is reported automatically/.test(sec("5.3")));
+    /who, where the position lock is in force, appears outside their position group, is reported automatically/.test(sec("5.3")));
   A("10.1 defines the position lock", /“Position lock” means the season setting/.test(sec("10.1")));
   A("...and lists it among the season settings", /and whether the position lock is in force/.test(sec("10.1")));
   A("the record says why it is a setting rather than a deletion", /"\(for now\)" is doing work in that sentence/.test(flat));
@@ -49,7 +49,7 @@ console.log("\n— 2. a trade no longer waits on three games; a waiver still doe
   /* v3.98: the Trade button now closes at the movement deadline, which is not the service gate; it still sits outside it */
   A("...and the Trade button is outside that gate",
     /: '<button class="btn btn-ghost btn-sm" data-trade="'\+p\.id\+'">Trade<\/button>'\)\+\s*\n\s*\(function\(\)\{ if \(CG\.movesClosedForMe && CG\.movesClosedForMe\(\)\) return [^\n]*\n\s*var mv = \(CG\.role\(\)!=="commish" && CG\.canMovePlayer\)/.test(hub));
-  A("2.3 drops the proviso", /A traded player needs no minimum service: a club may trade a player on the day it acquires him/.test(sec("2.3")));
+  A("2.3 drops the proviso", /A traded player needs no minimum service: a club may trade a player on the day it acquires them/.test(sec("2.3")));
   A("...and the old proviso is gone", !/provided every player in the trade has appeared in three/.test(sec("2.3")));
   /* v3.41, hours later: the commissioner lifted the WAIVE minimum too, so 2.4 now restricts neither
      and survives only as a season setting sitting at zero. The trade half of this change stands. */

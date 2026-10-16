@@ -100,22 +100,22 @@ console.log("\n— the rulebook states all of it (v2.27)");
   const r28 = sec("2.8"), r28f = secFull("2.8");
 
   console.log("  (basic — the league standard: a random snake with no relation to the previous season)");
-  A("Rule 2.8 (basic): a snake order that reverses each round", /in a snake order — the drawn order is followed in the first round, reversed in the second and alternated thereafter/.test(r28));
+  A("Rule 2.8 (basic): a snake order that reverses each round", /in a snake order: the drawn order is followed in the first round, reversed in the second and alternated thereafter/.test(r28));
   A("...drawn fresh at random each season, no relation to the previous season's standings", /Each season's order is drawn afresh and bears no relation to the previous season's standings, playoffs or champion/.test(r28));
   A("...draft picks are not club assets and may not be traded", /Draft picks are not club assets under the basic format and may not be traded \(Rule 2\.3\)/.test(r28));
   A("...and states the expansion-club treatment", /an expansion club enters the draw on equal terms with every other/.test(r28));
   A("Chapter 0.5 (basic) describes a random snake, not the NHL lottery", /The order is drawn at random for each season and bears no relation to the previous season's standings, playoffs or champion/.test(sec("0.5")) && !/NHL-style lottery/.test(sec("0.5")));
 
   console.log("  (full — shelved: the NHL lottery / linear order / tradeable picks)");
-  A("Rule 2.8 (full): the same order in every round, never reversing", /same order in every round — the order never reverses/.test(r28f));
+  A("Rule 2.8 (full): the same order in every round, never reversing", /same order in every round; the order never reverses/.test(r28f));
   A("...five order methods including the NHL lottery", /one of five ways: by an NHL-style draft lottery drawn from the previous season/.test(r28f));
   A("...weighted odds for the top two, champion last", /weighted odds for the top two selections/.test(r28f) && /the champion last/.test(r28f));
   A("...a first season uses a random shuffle", /A first season, having no previous season to draw on, uses a pure random shuffle/.test(r28f));
-  A("...picks are tradeable before and during the draft", /may be traded under the ordinary trade rules of Rule 2\.3, within the cap of Rule 2\.5 — before the draft and during it/.test(r28f));
+  A("...picks are tradeable before and during the draft", /may be traded under the ordinary trade rules of Rule 2\.3, within the cap of Rule 2\.5, both before the draft and during it/.test(r28f));
   A("...a traded on-the-clock pick keeps its timer", /including a pick currently on the clock, whose timer continues unchanged/.test(r28f));
   A("...and a used pick refuses as stale", /A pick that has already been used cannot be traded/.test(r28f));
   A("...and 2.8 states the expansion-club treatment",
-    /an expansion club — enters the lottery as if it had finished last/.test(r28f));
+    /\(an expansion club\) enters the lottery as if it had finished last/.test(r28f));
   A("Chapter 0.5 (full) narrative no longer describes a snake", !/snake/.test(secFull("0.5")));
   A("0.5 (full) names the NHL-style lottery as the default",
     /by default through an NHL-style lottery/.test(secFull("0.5")));

@@ -10,7 +10,10 @@
       long after the league moved to eight and seventy-two — the rendered page was right, the
       document behind it was not, and only the rewrite was hiding it.
    2. It mutates the shared CG.CONTENT.rulebook in place, so a non-idempotent rewrite grows a
-      duplicate sentence on every render. That has happened before. */
+      duplicate sentence on every render. That has happened before.
+   v4.15: the commissioner had every dash removed from the rulebook (2026-10-16), so the clause is now the paragraph's first
+   sentence, ending at "games per club.", and the rewrite writes it without dashes. The checks below pin the same two
+   traps at the new boundary: the rewrite stops at the end of that sentence, and it is idempotent. */
 import fs from "node:fs";
 import vm from "node:vm";
 
@@ -96,23 +99,26 @@ console.log("\n— the numbers come from the season, not the text");
   A("six weeks reads six and 54", /six \(6\) game-weeks/.test(shapeFor({ weeks: 6 })) &&
     /for 54 games per club/.test(shapeFor({ weeks: 6 })));
   A("four nights reads four, names Saturday, and gives 96",
-    /four nights a week, Wednesday, Thursday, Friday and Saturday/.test(shapeFor({ weeks: 8, nights_per_week: 4 })) &&
+    /four nights each \(Wednesday, Thursday, Friday and Saturday\)/.test(shapeFor({ weeks: 8, nights_per_week: 4 })) &&
     /for 96 games per club/.test(shapeFor({ weeks: 8, nights_per_week: 4 })));
   A("two slots a night halves the count",
     /two games a night/.test(shapeFor({ weeks: 8, night_slots: "21:00,21:35" })) &&
     /for 48 games per club/.test(shapeFor({ weeks: 8, night_slots: "21:00,21:35" })));
 }
 
-console.log("\n— the rewrite stops at the SECOND dash (v2.14 put a third in this paragraph)");
+console.log("\n— the rewrite stops at the end of the first sentence (v4.15; it once stopped at the second of three dashes)");
 {
   CG.SEASON = { ...LIVE, weeks: 8, id: "s" };          // force an actual rewrite (stored text is now six weeks)
   const out = clauseOf(CG.rulebookShapeSync(fresh()));
   A("the rewrite did happen", /eight \(8\) game-weeks/.test(out));
   A("the binding sentence after the clause survives", /binding on all clubs/.test(out));
   A("...the holiday sentence survives", /does not shorten the season/.test(out));
-  A("...and the playoff sentence, which carries the third dash", /playoffs open the game week/.test(out));
-  A("the paragraph still holds all three dashes", (out.match(/—/g) || []).length === 3,
-    String((out.match(/—/g) || []).length));
+  A("...and the playoff sentence", /playoffs open the game week/.test(out));
+  const stored = clauseOf(CG.CONTENT.rulebook), sentences = (x) => (x.match(/\.(\s|$)/g) || []).length;
+  A("the rewrite replaced exactly one sentence (the paragraph keeps its sentence count)", sentences(out) === sentences(stored),
+    sentences(stored) + " -> " + sentences(out));
+  A("...and only that sentence changed", out.slice(out.indexOf("games per club.")) === stored.slice(stored.indexOf("games per club.")));
+  A("the rewritten sentence carries no dash", !/[\u2014\u2013]/.test(out));
 }
 
 console.log("\n— rewriting in place is idempotent (it once grew a duplicate per render)");

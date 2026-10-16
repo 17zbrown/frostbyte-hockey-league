@@ -62,7 +62,7 @@ console.log("\n— the rule");
   A("...with the reasoning in the book too",
     /it is one club's statement that it will hear offers on its own player/.test(r23[4]));
   A("...and what an acquiring club must do instead",
-    /A club that wants a player it has acquired on the block lists him itself/.test(r23[4]));
+    /A club that wants a player it has acquired on the block lists the player itself/.test(r23[4]));
   A("the rest of the trade-block paragraph survived", /A club may list any of its players on the league's trade block/.test(r23[4]));
   A("the changelog records it", rb.changelog.some((e) => e.version === "3.43"));
 }

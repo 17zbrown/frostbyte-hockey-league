@@ -32,7 +32,7 @@ console.log("— the note and the book");
 A("the statistics desk is told, on every filing path", (src.match(/await noteUnattributed\(/g) || []).length === 3 && /A goal no player holds/.test(src));
 global.CG = {}; vm.runInThisContext(fs.readFileSync(path.join(__dirname, "..", "src/live/part3_content.js"), "utf8"));
 const rb = CG.CONTENT.rulebook, s62 = rb.chapters.flatMap((c) => c.sections || []).find((x) => x.id === "6.2");
-A("Rule 6.2: the score is EA's official result; the players' goals only on a disconnect", /A game's score is EA's official result for it/.test(s62.paragraphs[0]) && /only where a disconnection leaves EA's score a placeholder/.test(s62.paragraphs[0]));
+A("Rule 6.2: the score is EA's official result; the players' goals only on a disconnect", /A game's score is EA's official result for it/.test(s62.paragraphs[0]) && /Only where a disconnection leaves EA's score a placeholder is the score taken from EA's raw count of the goals/.test(s62.paragraphs[0]));
 A("changelog 3.83", !!rb.changelog.find((c) => c.version === "3.83"));
 A("the correction is recorded", /6a71983a-2f6a-462a-9def-311f09d6baf5/.test(fs.readFileSync(path.join(__dirname, "..", "sql/2026-10-02-official-score-v383.sql"), "utf8")));
 

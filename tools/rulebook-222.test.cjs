@@ -77,7 +77,7 @@ console.log("— the rulebook says what the announcement says");
   A("Rule 4.5 carries the NHL 27 list (v2.53): six abilities banned at every tier, two at Red tier only",
     /written against NHL 27 and apply as written/.test(sec("4.5")) &&
     /banned at every tier the game offers them: Truculence, Spark Plug, Hipster, Pressure\+, Unstoppable Force and Big Rig/.test(sec("4.5")) &&
-    /banned at the Red tier only — Stick ’Em Up and Big Tipper/.test(sec("4.5")));
+    /banned at the Red tier only: Stick ’Em Up and Big Tipper, both of which may be equipped below that tier/.test(sec("4.5")));
   A("...and bans every pre-built loadout and every special-character cosmetic",
     /Every pre-built loadout the game offers is banned/.test(sec("4.5")) && /every special-character cosmetic is banned/.test(sec("4.5")));
   A("...with Wheels and the Elite-tier blanket gone from the binding text",

@@ -111,13 +111,13 @@ console.log("— the bot's notice and the rulebook");
 A("a schedule notice has its own style and links the schedule desk", /schedule: \{ colour: 0x1C7ED6, icon: "🖥️" \}/.test(bot) && /row\.kind === "schedule" \? "schedule"/.test(bot));
 global.CG = {}; vm.runInThisContext(content);
 const rb = CG.CONTENT.rulebook, sec = (id) => rb.chapters.flatMap((c) => c.sections || []).find((s) => s.id === id);
-A("Rule 2.6: no clock binds the office; structure still does", /No clock binds the league office in a club's Team HQ\./.test(sec("2.6").paragraphs[6]) && /What a roster may hold is not a clock/.test(sec("2.6").paragraphs[6]));
+A("Rule 2.6: no clock binds the office; structure still does", /No clock binds the league office in a club's Team HQ\./.test(sec("2.6").paragraphs[6]) && /The limits on what a roster may hold are not clocks, and they bind the office as they bind the club/.test(sec("2.6").paragraphs[6]));
 A("...the extension clause only where extensions exist (full format)", !/extension window/.test(sec("2.6").paragraphs[6]) && /extension window opens/.test(sec("2.6").full[6]));
 A("...and the office's nomination takes effect at once", /one the league office makes takes effect at once/.test(sec("2.6").paragraphs[0]));
 A("Rules 2.4, 4.2, 5.3 and 7.2 say the office's exemption", /may waive or trade a player short of it/.test(sec("2.4").paragraphs.join(" "))
   && /The league office may still change a club's picks after it/.test(sec("4.2").paragraphs.join(" "))
   && /The league office may still file or change a club's sheet after that/.test(sec("5.3").paragraphs.join(" "))
-  && /The lock binds the club; the league office may move him/.test(sec("7.2").paragraphs.join(" ")));
+  && /The lock binds the club; the league office may move the player/.test(sec("7.2").paragraphs.join(" ")));
 const i79 = rb.changelog.findIndex((c) => c.version === "3.79"), e79 = rb.changelog[i79];
 A("changelog records 3.79, right after 3.78", i79 >= 0 && rb.changelog[i79 + 1].version === "3.78");
 const newText = [sec("2.6").paragraphs[6], sec("2.6").full[6]].concat(e79.items, [e79.summary]).join(" ");

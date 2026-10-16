@@ -80,7 +80,7 @@ rb.chapters.forEach((ch) => ch.sections.forEach((s) => { secs[s.id] = s; }));
 const e = rb.changelog.find((c) => c.version === "3.54");
 A("changelog records 3.54", !!e);
 A("5.2.2: hard, with the rare exception", /The limit is hard\. Very rarely, the league office may except one named player from it for one named game/.test(secs["5.2"].paragraphs[1]));
-A("5.2.2: the line builder outlines instead of refusing", /outlines him in yellow where his lines may take him past his limit, and in red/.test(secs["5.2"].paragraphs[1]));
+A("5.2.2: the line builder outlines instead of refusing", /outlines the player in yellow where their lines may take them past their limit, and in red/.test(secs["5.2"].paragraphs[1]));
 A("5.2.2: the em dashes are gone from the sentence it touched", !/active-roster player —/.test(secs["5.2"].paragraphs[1]));
 A("5.2.3 and 8.3.3 carry the exception", /exception included/.test(secs["5.2"].paragraphs[2]) && /exception under Rule 5\.2 applies to this cap/.test(secs["8.3"].paragraphs[2]));
 A("no em dashes or spaced hyphens in the 3.54 entry", !/—| - /.test(JSON.stringify(e)));

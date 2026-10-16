@@ -83,8 +83,8 @@ console.log("\n— the rulebook says what the site does (v2.28)");
   /* FULL format: the open-market negotiation, preserved word for word in Appendix A */
   A("[full] 2.2: acceptance is the signing", /the signing takes effect the moment the player accepts/.test(secFull("2.2")));
   A("[full] 2.2: the league office confirms nothing", /league office confirms nothing and has no say/.test(secFull("2.2")));
-  A("[full] 2.2: the counter loop is described", /counter with his own number/.test(secFull("2.2")));
-  A("[full] 2.2: accepting one offer withdraws the rest", /accepting one offer withdraws every other offer he holds/.test(secFull("2.2")));
+  A("[full] 2.2: the counter loop is described", /counter with their own number/.test(secFull("2.2")));
+  A("[full] 2.2: accepting one offer withdraws the rest", /accepting one offer withdraws every other offer they hold/.test(secFull("2.2")));
   A("[full] 2.2 no longer promises a league-office confirmation", !/only once the league office confirms it/.test(secFull("2.2")));
   A("[full] 2.3: the department may send a trade back", /transactions department may review any completed trade/.test(secFull("2.3")));
   A("[full] 2.3: ...and cannot once a piece has moved on", /cannot be reversed once a player or pick in it has moved on/.test(secFull("2.3")));
@@ -93,13 +93,13 @@ console.log("\n— the rulebook says what the site does (v2.28)");
   A("[full] 5.2: ...and explicitly not the pre-season", /cap does not apply in the pre-season/.test(secFull("5.2")));
   /* BASIC format is now the live standard: waived-player signing, players-only trades */
   A("[basic] 2.2: no free-agency period and no open market", /The basic format has no free-agency period: no window in the calendar during which contracts are negotiated, and no open market in which a club bids for a player who is not on a roster/.test(sec("2.2")));
-  A("[basic] 2.2: ...but it does not claim the league has no free agents", /It does have free agents, and the next paragraph but one says who they are/.test(sec("2.2")));
+  A("[basic] 2.2: ...but it does not claim the league has no free agents", /It does, however, have free agents; the paragraph after next defines them/.test(sec("2.2")));
   A("[basic] 2.2: the league office confirms nothing about a waiver signing either", /the league office confirms nothing and has no part in the move/.test(sec("2.2")));
-  A("[basic] 2.2: waived players are signable from the draft's conclusion until the deadline", /From the conclusion of the draft until the movement deadline \(Rule 2\.4\), any club may sign a waived player on a contract running to the end of the season/.test(sec("2.2")) && /he joins its training camp, which must have room under Rule 2\.1/.test(sec("2.2")));   /* v3.55: a full active roster signs him into camp */
+  A("[basic] 2.2: waived players are signable from the draft's conclusion until the deadline", /From the conclusion of the draft until the movement deadline \(Rule 2\.4\), any club may sign a waived player on a contract running to the end of the season/.test(sec("2.2")) && /the player joins its training camp, which must have room under Rule 2\.1/.test(sec("2.2")));   /* v3.55: a full active roster signs him into camp */
   /* v3.46: the signing is at HIS salary now, not the league minimum. */
-  A("[basic] 2.2: ...at the salary he was already earning", /at the salary he was already earning/.test(sec("2.2")));
-  A("[basic] 2.2: ...and a waiver does not reduce it", /A player keeps his salary for the whole season: being waived does not reduce it/.test(sec("2.2")));
-  A("[basic] 2.2: ...with the cap consequence spelled out", /the club that signs him takes on the figure his former club carried, against its own cap/.test(sec("2.2")));
+  A("[basic] 2.2: ...at the salary the player was already earning", /at the salary the player was already earning/.test(sec("2.2")));
+  A("[basic] 2.2: ...and a waiver does not reduce it", /A player keeps their salary for the whole season: being waived does not reduce it/.test(sec("2.2")));
+  A("[basic] 2.2: ...with the cap consequence spelled out", /the club that signs the player takes on the figure the former club carried, against its own cap/.test(sec("2.2")));
   A("[basic] 2.2: ...and the minimum kept only as a floor", /Where a player has no salary on record for the season, the league minimum applies as a floor/.test(sec("2.2")));
   A("[basic] 2.3: trades are players only — no pick is a trade asset", /Draft picks are not tradeable assets in the basic format: a trade consists of players for players, and an offer that includes a draft pick is refused at the point of entry/.test(sec("2.3")));
   /* by version, not by position: pinning changelog[0] made every LATER rulebook change fail this

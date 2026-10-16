@@ -28,10 +28,10 @@ console.log("— the rulebook defines the classes, because this is a rule before
   const r22 = sec("2.2");
   const r22full = secFull("2.2");
   A("Rule 2.2 basic says there are no rights classes", /The basic format recognizes no classes of player rights/.test(r22));
-  A("...and that no club holds a player's rights once his season ends", /no club holds a player's rights once his season ends, and no player is restricted/.test(r22));
+  A("...and that no club holds a player's rights once the player's season ends", /no club holds a player's rights once the player's season ends, and no player is restricted/.test(r22));
   A("...(full format) names the unrestricted class", /never completed a season on a club's roster is an UNRESTRICTED free agent/.test(r22full));
-  A("...(full) and the restricted one", /RESTRICTED free agent until he has accrued four \(4\) off-seasons of service/.test(r22full));
-  A("...(full) with the former club's rights acknowledged and the match mechanism left to the office (v2.35)", /his rights stay with that club when his contract ends/.test(r22full) && /exercises those rights when another club makes him an offer is set by the league office/.test(r22full));
+  A("...(full) and the restricted one", /RESTRICTED free agent until they have accrued four \(4\) off-seasons of service/.test(r22full));
+  A("...(full) with the former club's rights acknowledged and the match mechanism left to the office (v2.35)", /their rights stay with that club when their contract ends/.test(r22full) && /exercises those rights when another club makes the player an offer is set by the league office/.test(r22full));
   A("...(full) and says why Season 1 has none", /every registered player begins unrestricted/.test(r22full));
   A("...(full) and that the count is a setting, published before signings", /is a league-office setting/.test(r22full));
   A("the changelog records v2.25", rb.changelog.some((c) => c.version === "2.25" && /restricted free agent/i.test(c.summary)));

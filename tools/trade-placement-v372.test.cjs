@@ -87,13 +87,13 @@ const rb = CG.CONTENT.rulebook, secs = {};
 rb.chapters.forEach((ch) => ch.sections.forEach((s) => { secs[s.id] = s; }));
 const e = rb.changelog.find((c) => c.version === "3.72");   /* pinned by version, never by index */
 A("changelog records 3.72, dated 2026-09-29", !!e && e.dateIso === "2026-09-29");
-A("2.1.4: an active place for an active place, a camp place for a camp place", /takes the place of a player his new club sent away in the same trade: an active-roster place for an active-roster place, and a training-camp place for a training-camp place/.test(secs["2.1"].paragraphs[3]));
-A("...extras by room, never past the composition, same rule in the freeze", /each additional player joins the active roster where the roster and his position group have room for him/.test(secs["2.1"].paragraphs[3]) && /The rule is the same whether or not the roster is frozen\./.test(secs["2.1"].paragraphs[3]));
+A("2.1.4: an active place for an active place, a camp place for a camp place", /takes the place of a player their new club sent away in the same trade: an active-roster place for an active-roster place, and a training-camp place for a training-camp place/.test(secs["2.1"].paragraphs[3]));
+A("...extras by room, never past the composition, same rule in the freeze", /each additional player joins the active roster where the roster and the player's position group have room/.test(secs["2.1"].paragraphs[3]) && /The rule is the same whether or not the roster is frozen\./.test(secs["2.1"].paragraphs[3]));
 A("...trades stay open in the freeze, and the old 'roster held at first puck' sentence is gone", /Trades and the signing of waived players stay open during the freeze/.test(secs["2.1"].paragraphs[3]) && !/played against the roster a club held when the week's first puck dropped/.test(secs["2.1"].paragraphs[3]));
 A("2.3.1 and 2.3.3 agree", /Trades stay open during the weekly roster freeze \(Rule 2\.1\)/.test(secs["2.3"].paragraphs[0]) && /each player acquired takes the place of one the club sent/.test(secs["2.3"].paragraphs[2]));
 A("0.7 mentions the weekly freeze", /the roster freezes: no player is called up from training camp or sent down to it, though trades stay open/.test(secs["0.7"].paragraphs[0]));
-A("2.5.4 garbled splice repaired", /free agent at once under Rule 2\.2, and any club may sign him/.test(secs["2.5"].paragraphs[3]) && !/club\.2, and/.test(secs["2.5"].paragraphs[3]));
-A("Appendix A's trade sentence matches the placement rule", /takes the place of a player his new club sent away, an active place for an active place/.test(secs["2.1"].full[2]));
+A("2.5.4 garbled splice repaired", /free agent at once under Rule 2\.2, and any club may sign them/.test(secs["2.5"].paragraphs[3]) && !/club\.2, and/.test(secs["2.5"].paragraphs[3]));
+A("Appendix A's trade sentence matches the placement rule", /takes the place of a player their new club sent away, an active place for an active place/.test(secs["2.1"].full[2]));
 A("no em dashes or spaced hyphens in the 3.72 entry", !/—| - /.test(JSON.stringify(e)));
 console.log("\n" + (fail ? fail + " of " + n + " FAILED" : "all " + n + " passed"));
 process.exit(fail ? 1 : 0);

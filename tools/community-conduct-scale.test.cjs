@@ -85,8 +85,8 @@ console.log("\n— Rule 7.7");
   A("...sets the scale at 3 to 18 in steps of three (v3.51)", !!s77 && /runs three \(3\) to eighteen \(18\) games in steps of three \(3\)/.test(s77[1]));
   A("...and reserves longer, expulsion and staff to a commissioner",
     !!s77 && /longer than eighteen \(18\) games, an expulsion from the league, and any sanction against a commissioner or a member of league staff are imposed only by a commissioner/.test(s77[1]));
-  A("...tells the member the headings", !!s77 && /told the headings recorded against him/.test(s77[2]));
-  A("...and settles the two-department case", !!s77 && /whichever rule fits the conduct he is ruling on/.test(s77[2]));
+  A("...tells the member the headings", !!s77 && /told the headings recorded against them/.test(s77[2]));
+  A("...and settles the two-department case", !!s77 && /whichever rule fits the conduct they are ruling on/.test(s77[2]));
   A("7.1 points at the ceilings of 7.2 (v3.51)", /within the ceilings of Rule 7\.2/.test(ch7.sections.find((x) => x.id === "7.1").paragraphs[1]));
   A("7.2 carries one staff ceiling for both departments (v3.51)",
     /from three \(3\) to eighteen \(18\) games/.test(ch7.sections.find((x) => x.id === "7.2").paragraphs[0]));

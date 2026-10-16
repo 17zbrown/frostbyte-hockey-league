@@ -174,24 +174,24 @@ console.log("— the rulebook says the same thing");
   A("the changelog head is now v2.48 or later, the season-format switch", rb.changelog.some(function(c){ return c.version === "2.48" && /season format/i.test(c.summary); }) && rb.changelog[0].version >= "2.48");
   /* FULL format: extensions, rights, and multi-season deals still live word for word in Appendix A */
   A("[full] Rule 2.5 describes the extension", /A club re-signs its own player through an extension/.test(secFull("2.5")));
-  A("[full] ...opening with the final season's free agency, for the whole season", /at any point in the final season of his deal — from the day that season's free agency opens/.test(secFull("2.5")));
+  A("[full] ...opening with the final season's free agency, for the whole season", /At any point in the final season of the player's deal, from the day that season's free agency opens/.test(secFull("2.5")));
   A("[full] ...defining the cap year as free agency to free agency", /The cap year runs from one free-agency opening to the next/.test(secFull("2.5")));
   A("[full] ...checking a future deal against the future season's space, front office included", /counting every deal already signed for that season and the three front-office seats/.test(secFull("2.5")));
   A("[full] ...with a hard stop and no exception", /refuses any signing, now or for a future season, that would not fit inside the cap it is checked against; there is no exception/.test(secFull("2.5")));
   A("[full] ...and promising the three-season outlook", /cap space for the current season and the three that follow/.test(secFull("2.5")));
   A("[full] ...as a signed deal for the following season that changes nothing now", /An extension accepted during the final season is a signed deal for the following season, and comes into force with that season's cap year: nothing about the current season changes/.test(secFull("2.5")));
-  A("[full] ...that travels on a trade and dies on a waiver", /travels with the player if he is traded and is voided if he is waived/.test(secFull("2.5")));
+  A("[full] ...that travels on a trade and dies on a waiver", /travels with the player if they are traded and is voided if they are waived/.test(secFull("2.5")));
   A("[full] ...one at a time", /A player may hold one signed extension at a time/.test(secFull("2.5")));
-  A("[full] Rule 2.2 says either side may open the conversation, any point in the season", /either side may open the conversation — at any point in that season, from the day its free agency opens/.test(secFull("2.2")));
+  A("[full] Rule 2.2 says either side may open the conversation, any point in the season", /may negotiate only with the club that holds it, at any point in that season, from the day that season's free agency opens until the free-agency period that FOLLOWS the contract's final season opens\. Either side may open the conversation\./.test(secFull("2.2")));
   A("[full] Rule 2.5 P1 no longer says a first deal is 'renegotiated only when it ends'", !/renegotiated only when it ends/.test(secFull("2.5")) && /through the extension window below or through free agency/.test(secFull("2.5")));
-  A("[full] ...and says an expired deal's club alone may re-sign him until free agency", /until that free agency opens, the club that held the deal alone may re-sign him/.test(secFull("2.5")));
+  A("[full] ...and says an expired deal's club alone may re-sign the player until free agency", /Until that free agency opens, only the club that held the deal may re-sign the player/.test(secFull("2.5")));
   A("[full] Rule 2.4 carves extensions out of the movement freeze", /except a contract extension under Rule 2\.5, which changes no roster this season/.test(secFull("2.4")));
   A("[full] Chapter 0.2 no longer says 'from scratch'", !/rebuilt from scratch every season/.test(secFull("0.2")) && /the contracts that carry over/.test(secFull("0.2")));
-  A("[full] Chapter 0.6 no longer opens the window at the movement deadline", !/movement deadline until/.test(secFull("0.6")) && /at any point in that season, and on until the free agency that follows it opens/.test(secFull("0.6")));
+  A("[full] Chapter 0.6 no longer opens the window at the movement deadline", !/movement deadline until/.test(secFull("0.6")) && /at any point in that season and until the free agency that follows it opens/.test(secFull("0.6")));
   A("[full] Rule 2.5 states the post-rollover re-sign takes effect at once", /A player re-signed after the rollover, before that season's free agency opens, is signed for the season now under way/.test(secFull("2.5")));
   A("[full] ...and that the exclusive right survives the rollover until free agency", /the club's exclusive right to re-sign the player survives until the free agency that follows that season opens/.test(secFull("2.5")));
   A("[full] ...without claiming the money 'comes off the books' at a moment the system does not honour", !/comes off the club's books/.test(secFull("2.5")));
-  A("[full] ...and outside clubs wait for free agency", /No club other than the one that holds his current deal may offer him anything until that deal has ended and free agency has opened/.test(secFull("2.5")));
+  A("[full] ...and outside clubs wait for free agency", /No club other than the one that holds the player's current deal may offer them anything until that deal has ended and free agency has opened/.test(secFull("2.5")));
   for (const f of ["CGHL-Season1-Owners-Briefing.md", "CGHL-Season1-Owners-Briefing-DISCORD.txt"]) {
     const b = R(f);
     /* v2.48: Season 1 runs the basic format — the current briefing says every deal is one season; the
@@ -201,9 +201,9 @@ console.log("— the rulebook says the same thing");
   }
   /* BASIC format is now the live standard: one-season deals, no extensions, no held rights */
   A("[basic] Rule 2.5 says no extensions, no re-signings and no held rights", /The basic format provides for no contract extension, no re-signing and no retained player rights/.test(sec("2.5")));
-  A("[basic] ...and every contract runs a term of exactly one season", /a term of one \(1\) season — the season in which it is signed/.test(sec("2.5")));
+  A("[basic] ...and every contract runs a term of exactly one season", /a term of one \(1\) season: the season in which it is signed/.test(sec("2.5")));
   A("[basic] ...so a club cannot claim a player for a future season", /A club may not offer a player terms for a future season, and nothing a club does in a season confers any claim on a player for the next/.test(sec("2.5")));
   A("[basic] Rule 2.2 has no free-agency period and no open market", /The basic format has no free-agency period: no window in the calendar during which contracts are negotiated, and no open market in which a club bids for a player who is not on a roster/.test(sec("2.2")));
-  A("[basic] ...and there are no rights classes", /The basic format recognizes no classes of player rights: no club holds a player's rights once his season ends, and no player is restricted/.test(sec("2.2")));
+  A("[basic] ...and there are no rights classes", /The basic format recognizes no classes of player rights: no club holds a player's rights once the player's season ends, and no player is restricted/.test(sec("2.2")));
 }
 console.log(ok ? "\nPASS" : "\nFAIL"); process.exit(ok ? 0 : 1);

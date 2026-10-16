@@ -168,7 +168,7 @@ function finish(){
     A("...the three modes, with full as the default", /full, in which case the manager acts freely/.test(r26) && /subject to the Owner’s approval/.test(r26) && /withheld, in which case the page is hidden/.test(r26) && /The default for every seat and page is full access, with one exception/.test(r26));
     A("...except the Management page, which is the Owner's unless opened", /is the Owner’s alone and is withheld from the General Manager and the Assistant General Manager unless the Owner opens it to them/.test(r26));
     A("...a stale approved move fails loudly, and both are told", /fails rather than half-applies, and both the Owner and the manager are told why/.test(r26));
-    A("...every manager has the same Team HQ", /Every member of the management group — Owner, General Manager and Assistant General Manager alike — has the same Team HQ/.test(r26));
+    A("...every manager has the same Team HQ", /Every member of the management group, whether Owner, General Manager or Assistant General Manager, has the same Team HQ/.test(r26));
     A("...and the league office is untouched", /none of this limits the league office/.test(r26));
     A("...the Owner approves a league-built description, and a newer request supersedes", /never text the manager wrote/.test(r26) && /replaces the older one still waiting/.test(r26));
     A("Team HQ says all three seats before the draft (Rule 2.8), not 'before the first game' with an optional AGM", !/first regular-season game/.test(live) && !/AGM is optional/.test(live) && /row\("agm","Assistant GM",true\)/.test(live));

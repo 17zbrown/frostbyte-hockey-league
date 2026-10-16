@@ -98,7 +98,7 @@ console.log("\n— the rulebook");
   A("...and the heavier sanctions are still the commissioner's",
     /are imposed only by a commissioner/.test(s7["7.2"][0]));
   A("7.2 says the member is told when it is imposed (now paragraph 6)",
-    /A member is told of a sanction at the moment it is imposed, on the site and, where he has linked his Discord account, by direct message/.test(s7["7.2"][5]));
+    /A member is told of a sanction at the moment it is imposed, on the site and, where the member has linked their Discord account, by direct message/.test(s7["7.2"][5]));
   A("...and that the appeal clock runs from that notice",
     /The appeal window of Rule 7\.6 runs from that notice/.test(s7["7.2"][5]));
   A("7.6 still gives 48 hours", /forty-eight \(48\) hours/.test(s7["7.6"][0]));
