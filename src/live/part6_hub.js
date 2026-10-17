@@ -2229,13 +2229,17 @@ CG.hubRoster = function(qs){
       '. '+(function(){
         /* v3.75: the advice depends on the week: in the freeze a send-down waits, after the deadline a trade does */
         var fzOv = CG.rosterFreeze ? CG.rosterFreeze() : { on:false }, lockedOv = !!(CG.movesLockedNow && CG.movesLockedNow());
+        /* v4.17: waivers may close with signings before trades do (Season 1: the original deadline, Rule 2.4) */
+        var waiveShutOv = !lockedOv && !!(CG.faMovesClosedNow && CG.faMovesClosedNow());
         /* v3.79: the freeze binds the club's management, not the league office (v3.76) */
         if (fzOv.on && CG.role()==="commish") return 'The weekly roster freeze binds the club’s own management until '+esc(fzOv.reopens)+'; as a commissioner you can send players to training camp now.';
         if (fzOv.on) return 'Send-downs are locked by the weekly roster freeze until '+esc(fzOv.reopens)+'. '+
           (lockedOv ? 'Trades and waivers closed at the movement deadline (Rule 2.4), so send players to training camp once the freeze lifts.'
+                    : waiveShutOv ? 'Waivers have closed for the season (Rule 2.4), so until then a trade is the way to comply.'
                     : 'Until then, a waiver or a trade is the way to comply.');
         return lockedOv
           ? 'Send players to training camp before the roster freezes on Wednesday at 7:30 PM Eastern. Trades and waivers closed at the movement deadline (Rule 2.4).'
+          : waiveShutOv ? 'Send players to training camp before the roster freezes on Wednesday at 7:30 PM Eastern, or trade them: trades stay open until the movement deadline, but waivers have closed for the season (Rule 2.4).'
           : 'Send players to training camp before the roster freezes on Wednesday at 7:30 PM Eastern, when call-ups and send-downs stop until Saturday. Waivers and trades stay open through the freeze.';
       })()+' You can’t add to a group you’re over in'+
       /* v3.79: and while the active roster is at its total, a call-up in any group needs a send-down from that group */
@@ -2336,7 +2340,7 @@ CG.hubRoster = function(qs){
             : '<button class="btn btn-ghost btn-sm" data-block="'+p.id+'">'+(onBlk?"Off block":"To block")+'</button>')+
           ((CG.movesClosedForMe && CG.movesClosedForMe()) ? '<button class="btn btn-ghost btn-sm" disabled title="'+esc(CG.MOVES_CLOSED)+'">Trade</button>'
             : '<button class="btn btn-ghost btn-sm" data-trade="'+p.id+'">Trade</button>')+
-          (function(){ if (CG.movesClosedForMe && CG.movesClosedForMe()) return '<button class="btn btn-ghost btn-sm" disabled title="'+esc(CG.MOVES_CLOSED)+'">Waive</button>';
+          (function(){ if (CG.faMovesClosedForMe && CG.faMovesClosedForMe()) return '<button class="btn btn-ghost btn-sm" disabled title="'+esc(CG.FA_MOVES_CLOSED)+'">Waive</button>';
             var mv = (CG.role()!=="commish" && CG.canMovePlayer) ? CG.canMovePlayer(p) : null;
             /* Rule 2.4 minimum service: only the WAIVE waits for his games now (v3.40). A club may
                trade a player the day he signs. v3.79: it binds the club's management, never the
@@ -2489,7 +2493,7 @@ CG.hubRoster = function(qs){
         var oo = (CG._clubOffers||[]).filter(function(o){ return o.player_id===r.id && !o.immediate; })[0];
         return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1"><b>'+esc(r.tag)+'</b> <span class="caption">was '+CG.fmtMoney(r.salary)+' through Season '+r.end+'</span>'+(oo?' <span class="chip chip-live">'+(CG.offerAwaitsClub(oo)?'His ask':'Offer out')+'</span>':'')+'</span>'+
           '<button class="btn btn-chrome btn-sm" data-extend="'+esc(r.id)+'">Re-sign</button></div>'; }).join("")+'</div></div>' : '')+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+(CG.playoffMinGp() ? 'A player needs '+CG.playoffMinGp()+' regular-season games to be dressed in the playoffs, prorated for a player placed after opening night — the Road to '+CG.playoffMinGp()+' card tracks it (Rule 8.3). ' : 'Every rostered player is playoff-eligible — there is no games-played floor (Rule 8.3). ')+'Owner, GM, and AGM carry management contracts (Rule 2.6) and are protected from waivers and trades. Waiving a player releases him immediately and clears his cap hit; '+(CG.isBasic() ? 'he becomes a free agent at once, with no waiver period or claim, and any club may sign him outright at the salary he was already earning, to the end of the season, until the movement deadline. A club whose active roster is full signs him into its training camp (Rule 2.2).' : 'any club may then sign him under the free-agency rules (Rule 2.2).')+'</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+(CG.playoffMinGp() ? 'A player needs '+CG.playoffMinGp()+' regular-season games to be dressed in the playoffs, prorated for a player placed after opening night — the Road to '+CG.playoffMinGp()+' card tracks it (Rule 8.3). ' : 'Every rostered player is playoff-eligible — there is no games-played floor (Rule 8.3). ')+'Owner, GM, and AGM carry management contracts (Rule 2.6) and are protected from waivers and trades. Waiving a player releases them immediately and clears their cap hit; '+(CG.isBasic() ? 'they become a free agent at once, with no waiver period or claim, and any club may sign them outright at the salary they were already earning, to the end of the season, '+((CG.faMovesCloseTs && CG.faMovesCloseTs()) ? 'until signings close ('+esc(CG.fmtFull(CG.faMovesCloseTs()))+')' : 'until signings close at the movement deadline')+'. A club whose active roster is full signs them into its training camp (Rule 2.2). Waivers close with signings (Rule 2.4).' : 'any club may then sign them under the free-agency rules (Rule 2.2).')+'</span></div></div>';
   h += tail;
   return h;
 };
@@ -2621,12 +2625,12 @@ CG.AFTER._roster = function(){
     if (CG.LIVE_MODE){
       var sx = CG.signedExtensionOf ? CG.signedExtensionOf(pid) : null;
       CG.confirm("Waive "+p.tag+"?",
-        "They come off your roster immediately, their "+CG.fmtMoney(p.salary)+" cap hit clears, and "+(CG.isBasic() ? "they become a free agent at once: any club can sign them outright, at the "+CG.fmtMoney(p.salary)+" they were already earning, until the movement deadline (Rule 2.2)." : "they return to the free-agent pool where any club can sign them (Rule 2.5).")+(sx?" His signed extension through Season "+sx.end_season+" is voided with the waiver.":"")+" The move is logged for the whole league.",
+        "They come off your roster immediately, their "+CG.fmtMoney(p.salary)+" cap hit clears, and "+((CG.faMovesClosedNow && CG.faMovesClosedNow()) ? "they become a free agent, but signings have closed for the season, so no club may sign them this season except as a replacement signing (Rule 2.4)." : CG.isBasic() ? "they become a free agent at once: any club can sign them outright, at the "+CG.fmtMoney(p.salary)+" they were already earning, until signings close (Rule 2.2)." : "they return to the free-agent pool where any club can sign them (Rule 2.5).")+(sx?" Their signed extension through Season "+sx.end_season+" is voided with the waiver.":"")+" The move is logged for the whole league.",
         "Waive player", function(){
         CG.mgmtQueue("waive_player", { p_profile:pid }, "waive "+p.tag).then(function(q){ if (q) return;
         CG.sb.rpc("waive_player",{ p_profile:pid }).then(function(r){
           if (r.error){ CG.toast("Couldn’t waive: "+r.error.message,"err"); return; }
-          CG.toast(String(r.data||p.tag)+(CG.isBasic() ? " waived — any club may sign him now" : " waived — back in the free-agent pool"),"ok");
+          CG.toast(String(r.data||p.tag)+((CG.faMovesClosedNow && CG.faMovesClosedNow()) ? " waived. Signings have closed, so they stay a free agent this season." : CG.isBasic() ? " waived: any club may sign them now" : " waived: back in the free-agent pool"),"ok");
           CG.reloadLeague();
         });
         });

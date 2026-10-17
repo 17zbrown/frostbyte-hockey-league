@@ -32,7 +32,7 @@ A("the client mirror carries the camp limit (10 since v3.58)", /basic: \{ format
 A("Sign stays open with a full active roster while camp has room", /var full = activeFull && campN >= \(CG\.CAMP_MAX\|\|10\);/.test(live) && /he would join your training camp \(Rule 2\.1\)/.test(live));
 A("the sign dialog says he joins camp", /"He joins your "\+\(toCamp \? "training camp, because your active roster is full, " : "roster "\)/.test(live));
 A("no 'league minimum' left in the waive dialog or the roster footer", !/sign them at the league minimum/.test(hub) && !/sign him at the league minimum/.test(hub));
-A("...they say the salary travels", /at the "\+CG\.fmtMoney\(p\.salary\)\+" they were already earning/.test(hub) && /at the salary he was already earning, to the end of the season/.test(hub));
+A("...they say the salary travels", /at the "\+CG\.fmtMoney\(p\.salary\)\+" they were already earning/.test(hub) && /at the salary they were already earning, to the end of the season/.test(hub));
 
 console.log("\n— the book");
 global.window = {}; global.CG = {}; eval(R("src/live/part3_content.js"));

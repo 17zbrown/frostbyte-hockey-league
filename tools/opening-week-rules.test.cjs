@@ -48,7 +48,7 @@ console.log("\n— 2. a trade no longer waits on three games; a waiver still doe
   A("the roster page still gates the WAIVE button", /only the WAIVE waits for his games now/.test(hub));
   /* v3.98: the Trade button now closes at the movement deadline, which is not the service gate; it still sits outside it */
   A("...and the Trade button is outside that gate",
-    /: '<button class="btn btn-ghost btn-sm" data-trade="'\+p\.id\+'">Trade<\/button>'\)\+\s*\n\s*\(function\(\)\{ if \(CG\.movesClosedForMe && CG\.movesClosedForMe\(\)\) return [^\n]*\n\s*var mv = \(CG\.role\(\)!=="commish" && CG\.canMovePlayer\)/.test(hub));
+    /: '<button class="btn btn-ghost btn-sm" data-trade="'\+p\.id\+'">Trade<\/button>'\)\+\s*\n\s*\(function\(\)\{ if \(CG\.faMovesClosedForMe && CG\.faMovesClosedForMe\(\)\) return [^\n]*\n\s*var mv = \(CG\.role\(\)!=="commish" && CG\.canMovePlayer\)/.test(hub));
   A("2.3 drops the proviso", /A traded player needs no minimum service: a club may trade a player on the day it acquires them/.test(sec("2.3")));
   A("...and the old proviso is gone", !/provided every player in the trade has appeared in three/.test(sec("2.3")));
   /* v3.41, hours later: the commissioner lifted the WAIVE minimum too, so 2.4 now restricts neither

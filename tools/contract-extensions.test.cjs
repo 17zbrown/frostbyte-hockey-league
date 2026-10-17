@@ -115,7 +115,7 @@ console.log("— Team HQ");
   A("the Re-sign modal says a rights-held deal is for THIS season and checked against this season's space", /A deal for Season '\+sn\+' — the season now under way/.test(hub) && /r\.season===target/.test(hub));
   A("an open negotiation shows on the row", /'His ask':'Offer out'/.test(hub));
   A("the roster page lists rights-held players with a Re-sign action", /Rights held until free agency opens/.test(hub) && /data-extend="'\+esc\(r\.id\)\+'">Re-sign/.test(hub));
-  A("the waive confirm names the extension it voids", /His signed extension through Season "\+sx\.end_season\+" is voided with the waiver/.test(hub));
+  A("the waive confirm names the extension it voids", /Their signed extension through Season "\+sx\.end_season\+" is voided with the waiver/.test(hub));
   A("...and calls the one RPC", /CG\.sb\.rpc\("offer_extension",\{ p_profile:pid, p_salary:Math\.round\(v\*1e6\), p_years:y, p_note:note \}\)/.test(hub));
   A("...validating the lattice first", /bad=CG\.salaryProblem\(Math\.round\(v\*1e6\)\)/.test(hub.slice(hub.indexOf("data-extend"))));
   A("...with a term capped by the format's max contract years", /id="exYrs">'\+\[1,2,3\]\.slice\(0, CG\.fmt\("max_contract_years"\)\)\.map/.test(hub));

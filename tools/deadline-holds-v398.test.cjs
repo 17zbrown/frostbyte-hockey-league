@@ -55,7 +55,8 @@ A("Sign opens after the deadline only with a replacement signing",
   /from\("replacement_signings"\)\.select\("id"\)\.eq\("team_id", myTid\)/.test(live) && /if \(dlClosed && !dlRepl\) canSign = false;/.test(live));
 A("the roster's To block, Trade and Waive close; Off block stays",
   /\(\(CG\.movesClosedForMe && CG\.movesClosedForMe\(\)\) && !onBlk\) \? '<button class="btn btn-ghost btn-sm" disabled/.test(hub) &&
-  /if \(CG\.movesClosedForMe && CG\.movesClosedForMe\(\)\) return '<button class="btn btn-ghost btn-sm" disabled title="'\+esc\(CG\.MOVES_CLOSED\)\+'">Waive<\/button>';/.test(hub));
+  /* v4.17: Waive closes with releases, at the free-agent close (commissioner, 2026-10-17), which is never later than the deadline */
+  /if \(CG\.faMovesClosedForMe && CG\.faMovesClosedForMe\(\)\) return '<button class="btn btn-ghost btn-sm" disabled title="'\+esc\(CG\.FA_MOVES_CLOSED\)\+'">Waive<\/button>';/.test(hub));
 A("a Season 2 sign-up is told it joins the training camp pool, never a club",
   /\(upChR\n\s+\? \(\(reg\.created_at/.test(live) && /If you’re not drafted you join the league-wide training camp pool \(Chapter S2\)/.test(live));
 

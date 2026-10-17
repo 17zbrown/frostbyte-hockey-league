@@ -1351,6 +1351,13 @@ CG.movementDeadlineTs = function(){
   /* the ET calendar day of that game, plus one day, at 00:00 ET */
   return Date.parse(CG.etISO(CG.dayAdd(CG.etYMD(new Date(last).toISOString()), 1), "00:00"));
 };
+/* v4.17: signings and releases may close before the movement deadline (seasons.fa_moves_closed_at); this mirrors
+   public.fa_moves_close_at(), the earlier of that close and the deadline. Season 1's closed at the original deadline
+   while trades ran to the extended one (commissioner, 2026-10-17: "No new signings after the original deadline."). */
+CG.faMovesCloseTs = function(){
+  var dl = CG.movementDeadlineTs(), s = CG.SEASON || {}, fc = s.fa_moves_closed_at ? Date.parse(s.fa_moves_closed_at) : null;
+  return (fc && (!dl || fc < dl)) ? fc : dl;
+};
 
 /* v4.16: the close reads the deadline's own time. The commissioner extended Season 1's to 11:59 PM ET on Sunday
    (2026-10-17: "extend the trade deadline to 11:59PM on Sunday"), so a fixed "midnight" would have been wrong.
@@ -1391,9 +1398,17 @@ CG.deadlineBand = function(){
     inner = '<b style="font-family:var(--f-disp);font-size:17px">Rosters are frozen.</b>'+
       '<p class="caption" style="margin-top:6px">The movement deadline has passed — signings, trades and releases are closed through the playoffs (Rule 2.4).</p>';
   } else {
+    /* v4.17: signings and releases may close before trades (CG.faMovesCloseTs; Season 1's closed at the original
+       deadline). The clock counts down to the trade deadline; the caption says when the free-agent side closes or closed.
+       shortcut: nothing repaints the band at a free-agent close that is still ahead; it corrects on the next render.
+       Revisit if a free-agent close is ever set in the future. */
+    var faTs = CG.faMovesCloseTs ? CG.faMovesCloseTs() : ts, faEarly = !!(faTs && faTs < ts);
+    var cap = !faEarly ? 'Signings, trades and releases close '+CG.deadlineWhen(ts)+' (Rule 2.4).'
+      : now >= faTs ? 'Trades close '+CG.deadlineWhen(ts)+'. Signings and releases closed '+CG.fmtFull(faTs)+' (Rule 2.4).'
+      : 'Signings and releases close '+CG.deadlineWhen(faTs)+', and trades '+CG.deadlineWhen(ts)+' (Rule 2.4).';
     inner = '<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">'+
       '<div><b style="font-family:var(--f-disp);font-size:17px">'+(CG.deadlineIsToday(ts)?"Deadline day.":"The trade deadline is coming.")+'</b>'+
-      '<p class="caption" style="margin-top:4px">Signings, trades and releases close '+CG.deadlineWhen(ts)+' (Rule 2.4).</p></div>'+
+      '<p class="caption" style="margin-top:4px">'+cap+'</p></div>'+
       '<b id="dlClock" data-dl-ends="'+ts+'" class="num" style="margin-left:auto;font-family:var(--f-mono);font-size:clamp(22px,3vw,30px);font-weight:800">--:--:--</b></div>';
   }
   var wire = (finalDay || frozen) && txToday.length

@@ -100,7 +100,9 @@ console.log("\n4. Rule 2.4 and the changelog");
 global.window = global; global.CG = {}; eval(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook, sec = [].concat(...rb.chapters.map((c) => c.sections || [])).find((x) => x.id === "2.4");
 const p3 = sec.paragraphs[3] || "";
-A("Rule 2.4 records the Season 1 extension to 11:59 PM ET Sunday, 18 October 2026", /extended the movement deadline for Season 1 to 11:59 PM Eastern Time on Sunday, 18 October 2026, for club-initiated signings, trades and releases and for the trade block\./.test(p3));
+/* v4.17 (commissioner, 2026-10-17: "No new signings after the original deadline."): the extension covers trades and the
+   trade block only; tools/fa-moves-close-v417.test.cjs pins the rest of the new paragraph */
+A("Rule 2.4 records the Season 1 extension to 11:59 PM ET Sunday, 18 October 2026", /extended the movement deadline for Season 1 to 11:59 PM Eastern Time on Sunday, 18 October 2026, for trades and the trade block only\./.test(p3));
 A("...that placement was not extended and closed at the original deadline", /Automatic placement was not extended: it closed at the original deadline, midnight Eastern Time at the end of Friday, 16 October 2026, and the league office places no newly registered player for Season 1 after that moment\./.test(p3));
 A("...and that Season 2 registration and owner applications remain open", /Registration and owner applications for Season 2 opened at the original deadline and remain open \(Rule 1\.1\)\./.test(p3));
 A("...with no em dash or gendered pronoun", !/[—–]/.test(p3) && !/\b(he|his|him|she|her)\b/i.test(p3));
@@ -108,7 +110,7 @@ const e = rb.changelog.find((c) => c.version === "4.16") || {};   /* by version:
 A("the changelog has its 4.16 entry, right after 4.15", e.version === "4.16" && (rb.changelog[rb.changelog.indexOf(e) + 1] || {}).version === "4.15");
 A("...naming the new deadline and the placement lock", /11:59 PM ET on Sunday, October 18/.test(e.summary || "") && (e.items || []).some((i) => /placement/.test(i)));
 A("...and the Trade Hub countdown", (e.items || []).some((i) => /Trade Hub shows a live countdown/.test(i)));
-A("Rule 2.4 says an allowance granted between the two deadlines lapses at the extended one", /A replacement signing granted to a club between the original deadline and the extended deadline lapses at the extended deadline, because the club may sign freely until then; a replacement signing counts only when the sign-up it replaces was removed after the deadline in force\./.test(p3));
+A("Rule 2.4 no longer says an allowance lapses at the extended deadline (v4.17: replacements count from the original one)", !/lapses at the extended deadline/.test(p3) && /may sign one free agent to replace that player under this Rule, before or after the extended deadline\./.test(p3));
 A("...and the changelog says so in plain words", (e.items || []).some((i) => /replacement signing a club received after the original deadline ends at the new deadline/.test(i)));
 
 console.log("\n" + (n - fail) + "/" + n + " passed");

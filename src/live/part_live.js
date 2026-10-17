@@ -178,6 +178,16 @@ CG.movesLockedNow = function(){
    database (v3.79), so the office keeps its buttons; everyone else sees them closed with the reason. */
 CG.movesClosedForMe = function(){ return !!(CG.movesLockedNow && CG.movesLockedNow()) && CG.role() !== "commish"; };
 CG.MOVES_CLOSED = "Closed at the movement deadline (Rule 2.4).";
+/* v4.17: signings and releases, mirroring public.fa_moves_closed(): closed once moves lock, or once the season's own
+   free-agent close (seasons.fa_moves_closed_at) has passed (Rule 2.4). Trades, the trade block and their buttons keep
+   CG.movesClosedForMe; the office is exempt from both, as in the database (v3.79). */
+CG.faMovesClosedNow = function(){
+  if (CG.movesLockedNow && CG.movesLockedNow()) return true;
+  var s = CG.SEASON || {};
+  return !!(s.fa_moves_closed_at && (CG.now ? CG.now() : Date.now()) >= Date.parse(s.fa_moves_closed_at));
+};
+CG.faMovesClosedForMe = function(){ return CG.faMovesClosedNow() && CG.role() !== "commish"; };
+CG.FA_MOVES_CLOSED = "Signings and releases have closed for the season (Rule 2.4).";
 
 CG.posLocksOn = function(s){ var sn = s || CG.SEASON; return !!(sn && sn.position_locks); };
 
@@ -1879,8 +1889,9 @@ CG.loadManagerData = async function(){
          one signing per removal (Rule 2.4); the Sign button opens only while the club holds one */
       CG.lg._replacements = 0;
       /* v4.16b: the same test as sign_free_agent: an allowance granted before the deadline in force (one that a later
-         extension overtook) has lapsed, except during an office lock (override 'locked') */
-      var replDl = CG.movementDeadlineTs ? CG.movementDeadlineTs() : null;
+         extension overtook) has lapsed, except during an office lock (override 'locked').
+         v4.17: the deadline in force for signings is the free-agent close (public.fa_moves_close_at) */
+      var replDl = CG.faMovesCloseTs ? CG.faMovesCloseTs() : null;
       var replFrom = (CG.SEASON || {}).moves_lock_override !== "locked" && replDl ? replDl : 0;
       if (CG.SEASON && CG.SEASON.id) jobs.push(CG.sbCapped(CG.sb.from("replacement_signings").select("id").eq("team_id", myTid).eq("season_id", CG.SEASON.id).is("used_at", null).gte("created_at", new Date(replFrom).toISOString()), "replacement_signings")
         .then(function(rr){ CG.lg._replacements = (rr && !rr.error && rr.data) ? rr.data.length : 0; }, function(){ CG.lg._replacements = 0; }));
@@ -6768,11 +6779,15 @@ CG.removeFromRoster = function(profileId, club, name, isMgmt){
   if (isMgmt){ CG.toast((name||"This player")+" holds a front-office seat, so the seat is vacated under Teams first (Rule 2.6)","err"); return; }
   /* v3.66 (commissioner, 2026-09-28, Q12): a player the league office removes "Becomes a free agent." */
   CG.confirm("Remove "+(name||"this player")+(club?" from "+club:"")+"?",
-    "He becomes a free agent: his roster spot and cap hit clear, any club may sign him at the salary he was earning (Rule 2.2), and the move is logged on the transaction wire. The automatic placement never hands a free agent back to a club, so he stays free until someone signs him.",
+    /* v4.17: once signings have closed, nobody may sign the player except as a replacement, and a roster removal earns
+       the club none (Rule 1.1 covers removed sign-ups; admin_remove_from_roster says the same to the player, v4.17b) */
+    (CG.faMovesClosedNow && CG.faMovesClosedNow())
+      ? "They become a free agent: their roster spot and cap hit clear, but signings have closed for the season, so no club may sign them this season except as a replacement signing (Rule 2.4). The club receives no replacement signing for a roster removal; withdrawing the player's sign-up instead would give it one (Rule 1.1). The move is logged on the transaction wire."
+      : "They become a free agent: their roster spot and cap hit clear, any club may sign them at the salary they were earning (Rule 2.2), and the move is logged on the transaction wire. The automatic placement never hands a free agent back to a club, so they stay free until someone signs them.",
     "Remove from roster", function(){
     CG.sb.rpc("admin_remove_from_roster",{ p_profile:profileId, p_season_id:(CG.SEASON&&CG.SEASON.id)||null }).then(function(r){
       if(r.error){ CG.toast("Couldn’t remove: "+r.error.message,"err"); return; }
-      CG.toast((r.data||name||"Player")+" removed. He is a free agent.","ok");
+      CG.toast((r.data||name||"Player")+" removed. They are a free agent.","ok");
       CG.reloadLeague();
     });
   });
@@ -12690,6 +12705,8 @@ CG.admSeasonsLive = function(){
          ["Roster max", s.roster_max||"—"],
          /* v4.16: once fixed (or extended by the office) the deadline shows its exact time, and an earlier placement close shows too */
          ["Trade deadline", s.movement_deadline_fixed?(CG.fmtDay(Date.parse(s.movement_deadline_fixed))+", "+CG.fmtTime(Date.parse(s.movement_deadline_fixed))):(s.trade_deadline_week?("Week "+s.trade_deadline_week):"—")],
+         /* v4.17: signings and releases may close before trades (seasons.fa_moves_closed_at); the tense follows the clock */
+         ["Signings and releases", s.fa_moves_closed_at?((CG.now()>=Date.parse(s.fa_moves_closed_at)?"Closed ":"Close ")+CG.fmtDay(Date.parse(s.fa_moves_closed_at))+", "+CG.fmtTime(Date.parse(s.fa_moves_closed_at))):"With the trade deadline"],
          /* v4.16: placement may close before trades (seasons.placement_closed_at); the tense follows the clock */
          ["Late sign-up placement", s.placement_closed_at?((CG.now()>=Date.parse(s.placement_closed_at)?"Closed ":"Closes ")+CG.fmtDay(Date.parse(s.placement_closed_at))+", "+CG.fmtTime(Date.parse(s.placement_closed_at))):"With the trade deadline"],
          ["Off-season begins", s.offseason_starts_at?CG.fmtDay(Date.parse(s.offseason_starts_at)):"—"],
@@ -14242,11 +14259,15 @@ CG.hubFreeAgents = function(){
   var basicFA = CG.isBasic(), draftDoneFA = !!(lg.draftState && String(lg.draftState.status)==="complete");
   var canSign = basicFA ? (draftDoneFA || !!(s.starts_at && nowMs >= Date.parse(s.starts_at)))
                         : !!(faO && nowMs >= faO);   /* full: signable during the window and after it, never before */
-  /* v3.98: past the movement deadline a club signs only with a replacement signing (Rule 2.4); the office is exempt */
-  var dlClosed = (CG.movesClosedForMe && CG.movesClosedForMe()), dlRepl = lg._replacements || 0;
+  /* v3.98: past the deadline a club signs only with a replacement signing (Rule 2.4); the office is exempt.
+     v4.17: the deadline here is the free-agent close (CG.faMovesClosedForMe), which may come before the movement
+     deadline: Season 1's signings closed at the original deadline while trades ran to the extended one. */
+  var dlClosed = (CG.faMovesClosedForMe && CG.faMovesClosedForMe()), dlRepl = lg._replacements || 0;
   if (dlClosed && !dlRepl) canSign = false;
-  var winChip = dlClosed ? (dlRepl ? '<span class="chip chip-warn">Deadline passed: '+dlRepl+' replacement signing'+(dlRepl===1?'':'s')+' available (Rule 2.4)</span>' : '<span class="chip">Signings closed at the movement deadline (Rule 2.4)</span>')
-    : basicFA ? (canSign ? '<span class="chip chip-win">Waived players signable until the movement deadline</span>' : '<span class="chip chip-warn">Opens the moment the draft concludes</span>')
+  var faCloseTs = CG.faMovesCloseTs ? CG.faMovesCloseTs() : null;
+  var faClosedTxt = 'Signings closed '+(faCloseTs ? CG.fmtFull(faCloseTs) : 'at the deadline')+' (Rule 2.4)';
+  var winChip = dlClosed ? (dlRepl ? '<span class="chip chip-warn">Signings closed: '+dlRepl+' replacement signing'+(dlRepl===1?'':'s')+' available (Rule 2.4)</span>' : '<span class="chip">'+esc(faClosedTxt)+'</span>')
+    : basicFA ? (canSign ? '<span class="chip chip-win">Waived players signable until '+(faCloseTs ? esc(CG.fmtFull(faCloseTs)) : 'the movement deadline')+'</span>' : '<span class="chip chip-warn">Opens the moment the draft concludes</span>')
     : !faO ? '<span class="chip chip-warn">No free-agency dates set yet</span>'
     : nowMs < faO ? '<span class="chip chip-warn">Opens '+CG.fmtFull(faO)+'</span>'
     : (faC && nowMs < faC) ? '<span class="chip chip-live"><span class="live-dot"></span>Window open — closes '+CG.fmtFull(faC)+'</span>'
@@ -14312,7 +14333,7 @@ CG.hubFreeAgents = function(){
           '<td class="tright"><span class="row-actions" style="display:inline-flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end">'+
             '<button class="btn btn-ghost btn-sm" data-fa-dm="'+r.profile_id+'"'+(held?' disabled title="Exclusive to '+esc(rhCode)+' until free agency opens — approaching him is tampering (Rule 2.2)"':'')+'>Approach</button>'+
             '<button class="btn btn-chrome btn-sm" data-fa-sign="'+r.id+'" data-name="'+esc(prof.gamertag||"this player")+'"'+((canSign&&!full&&!held)?"":" disabled")+
-              (held?' title="Exclusive to '+esc(rhCode)+' until free agency opens (Rule 2.2)"':(!canSign)?' title="'+(dlClosed?'Signings closed at the movement deadline (Rule 2.4)':basicFA?'Signings open when the draft concludes':'Offers open with free agency')+'"':full?' title="Your active roster and training camp are both full (Rule 2.1)"':activeFull?' title="Your active roster is full, so he would join your training camp (Rule 2.1)"':'')+'>'+(basicFA?'Sign':'Offer')+'</button>'+
+              (held?' title="Exclusive to '+esc(rhCode)+' until free agency opens (Rule 2.2)"':(!canSign)?' title="'+(dlClosed?esc(faClosedTxt):basicFA?'Signings open when the draft concludes':'Offers open with free agency')+'"':full?' title="Your active roster and training camp are both full (Rule 2.1)"':activeFull?' title="Your active roster is full, so he would join your training camp (Rule 2.1)"':'')+'>'+(basicFA?'Sign':'Offer')+'</button>'+
           '</span></td></tr>';
       }).join("")+'</tbody></table></div>'+
       '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+(basicFA
@@ -14370,7 +14391,9 @@ CG.AFTER._hubFreeAgents = function(){
       var toCamp = !!t && (proRows.length >= (CG.ROSTER_MAX||CG.fmt("roster_max")) ||
         (grpCap != null && proRows.filter(function(p){ return CG.posGroup(p.pos)===grp; }).length >= grpCap));
       CG.confirm("Sign "+esc(name)+"?",
-        "He joins your "+(toCamp ? "training camp, because your active roster is full, " : "roster ")+"the moment you confirm, at "+salTxt+" to the end of the season: the salary he was already earning, which a waiver does not reduce (Rule 2.2). That is "+salTxt+" against your cap, and you have "+CG.fmtMoney(space)+" of room."+(toCamp ? " Call him up from Team HQ when you have room." : "")+" He is not asked and the league office confirms nothing; the signing is logged for the whole league.",
+        "He joins your "+(toCamp ? "training camp, because your active roster is full, " : "roster ")+"the moment you confirm, at "+salTxt+" to the end of the season: the salary he was already earning, which a waiver does not reduce (Rule 2.2). That is "+salTxt+" against your cap, and you have "+CG.fmtMoney(space)+" of room."+(toCamp ? " Call him up from Team HQ when you have room." : "")+" He is not asked and the league office confirms nothing; the signing is logged for the whole league."+
+          /* v4.17: past the free-agent close this signing spends the club's replacement signing (Rule 2.4) */
+          ((CG.faMovesClosedForMe && CG.faMovesClosedForMe() && (CG.lg._replacements||0)) ? " Signings have closed, so this uses your club's replacement signing (Rule 2.4)." : ""),
         "Sign player", function(){
         var btn=b; btn.disabled=true;
         CG.mgmtQueue("sign_free_agent", { p_registration:regId, p_salary:null }, "sign "+name+" at "+salTxt+" to the end of the season").then(function(q){ if (q){ btn.disabled=false; return; }
@@ -14521,8 +14544,15 @@ CG.tradeHubDeadlineNote = function(){
     return '<div id="thDeadline" class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+'<span><b style="font-family:var(--f-disp)">Trades are closed.</b> The movement deadline has passed, so no trade can be proposed or accepted until next season (Rule 2.4). An offer still open can be declined or withdrawn.</span></div>';
   var s = CG.SEASON || {}, ts = CG.movementDeadlineTs ? CG.movementDeadlineTs() : null, left = ts ? ts - CG.now() : 0;
   if (!ts || left <= 0 || s.moves_lock_override === "open") return "";
+  /* v4.17: when signings and releases closed before trades (Season 1), the note says so, with what it means for a trade:
+     no club can waive to make room, so an arrival with no active place joins training camp, and a trade that would take
+     a club past its camp limit is refused (commissioner, 2026-10-17: "Dont allow a team to complete a trade if the trade
+     will result in the team going over their roster and camp limits."; enforced by _place_trade_arrivals, Rule 2.1) */
+  var faTs = CG.faMovesCloseTs ? CG.faMovesCloseTs() : null;
+  var faNote = (faTs && faTs < ts && CG.now() >= faTs)
+    ? ' Signings and releases closed '+CG.fmtFull(faTs)+', so a player a trade brings you joins training camp when your active roster has no place for them, and a trade that would take either club past its training-camp limit cannot be completed (Rule 2.1).' : '';
   return '<div id="thDeadline" class="note chr" style="margin-bottom:18px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">'+CG.ic("clock",16)+
-    '<span style="flex:1;min-width:200px"><b style="font-family:var(--f-disp)">'+(CG.deadlineIsToday(ts)?"Deadline day.":"Trade deadline.")+'</b> Proposals and acceptances close '+CG.deadlineWhen(ts)+' (Rule 2.4). An offer still open then closes.</span>'+
+    '<span style="flex:1;min-width:200px"><b style="font-family:var(--f-disp)">'+(CG.deadlineIsToday(ts)?"Deadline day.":"Trade deadline.")+'</b> Proposals and acceptances close '+CG.deadlineWhen(ts)+' (Rule 2.4). An offer still open then closes.'+faNote+'</span>'+
     '<b class="num" role="timer" aria-label="Time left until the trade deadline" data-dl-ends="'+ts+'" style="font-family:var(--f-mono);font-size:20px;font-weight:800">--:--:--</b></div>';
 };
 CG.hubTradeHubLive = function(qs){

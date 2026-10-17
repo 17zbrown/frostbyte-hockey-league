@@ -21,7 +21,7 @@ A("the drafted manager is backfilled from the draft scale", /pre_seat_salary = p
 A("the rehearsal is recorded", /Seat\s+emptied: salary 3,500,000, pre_seat_salary cleared/.test(sql));
 
 console.log("\n— the site");
-A("the removal dialog says free agent", /He becomes a free agent: his roster spot and cap hit clear, any club may sign him at the salary he was earning \(Rule 2\.2\)/.test(live));
+A("the removal dialog says free agent", /They become a free agent: their roster spot and cap hit clear, any club may sign them at the salary they were earning \(Rule 2\.2\)/.test(live));
 A("...and refuses a seat holder before the call", /holds a front-office seat, so the seat is vacated under Teams first \(Rule 2\.6\)/.test(live));
 
 console.log("\n— the book");

@@ -33,7 +33,7 @@ vm.createContext(ctx);
   vm.runInContext(fmtBlock, ctx);
 }
 for (const [src, fns] of [[live, ["roadToFive", "setupChecklist", "boardCoverage", "mapDraftData", "dayAdd", "etISO", "etYMD"]],
-                          [pub, ["movementDeadlineTs", "deadlineIsToday", "deadlineWhen", "deadlineBand", "teamMoves", "txText"]]]) {
+                          [pub, ["movementDeadlineTs", "faMovesCloseTs", "deadlineIsToday", "deadlineWhen", "deadlineBand", "teamMoves", "txText"]]]) {
   for (const fn of fns) {
     const m = src.match(new RegExp("CG\\." + fn + " = function[\\s\\S]*?\\n\\};"));
     if (!m) { A("located CG." + fn, false); process.exit(1); }
