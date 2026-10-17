@@ -33,11 +33,19 @@ vm.createContext(ctx);
   vm.runInContext(fmtBlock, ctx);
 }
 for (const [src, fns] of [[live, ["roadToFive", "setupChecklist", "boardCoverage", "mapDraftData", "dayAdd", "etISO", "etYMD"]],
-                          [pub, ["movementDeadlineTs", "deadlineBand", "teamMoves", "txText"]]]) {
+                          [pub, ["movementDeadlineTs", "deadlineIsToday", "deadlineWhen", "deadlineBand", "teamMoves", "txText"]]]) {
   for (const fn of fns) {
     const m = src.match(new RegExp("CG\\." + fn + " = function[\\s\\S]*?\\n\\};"));
     if (!m) { A("located CG." + fn, false); process.exit(1); }
     vm.runInContext(m[0], ctx);
+  }
+}
+{
+  /* v4.16: the band's caption reads CG.deadlineWhen, which formats with CG.fmtTime and CG.fmtDay (part4_ui.js, one line each) */
+  for (const re of [/CG\.fmtTime = function\(ts\)\{[^\n]*\};/, /CG\.fmtDay *= function\(ts\)\{[^\n]*\};/]) {
+    const ft = ui.match(re);
+    if (!ft) { A("located " + re, false); process.exit(1); }
+    vm.runInContext(ft[0], ctx);
   }
 }
 const CG = ctx.CG;

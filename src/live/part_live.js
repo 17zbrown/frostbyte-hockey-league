@@ -1878,7 +1878,11 @@ CG.loadManagerData = async function(){
       /* v3.98: past the movement deadline a club signs only to replace a player whose sign-up was removed after it,
          one signing per removal (Rule 2.4); the Sign button opens only while the club holds one */
       CG.lg._replacements = 0;
-      if (CG.SEASON && CG.SEASON.id) jobs.push(CG.sbCapped(CG.sb.from("replacement_signings").select("id").eq("team_id", myTid).eq("season_id", CG.SEASON.id).is("used_at", null), "replacement_signings")
+      /* v4.16b: the same test as sign_free_agent: an allowance granted before the deadline in force (one that a later
+         extension overtook) has lapsed, except during an office lock (override 'locked') */
+      var replDl = CG.movementDeadlineTs ? CG.movementDeadlineTs() : null;
+      var replFrom = (CG.SEASON || {}).moves_lock_override !== "locked" && replDl ? replDl : 0;
+      if (CG.SEASON && CG.SEASON.id) jobs.push(CG.sbCapped(CG.sb.from("replacement_signings").select("id").eq("team_id", myTid).eq("season_id", CG.SEASON.id).is("used_at", null).gte("created_at", new Date(replFrom).toISOString()), "replacement_signings")
         .then(function(rr){ CG.lg._replacements = (rr && !rr.error && rr.data) ? rr.data.length : 0; }, function(){ CG.lg._replacements = 0; }));
       /* server vetoes + resolved servers for my club's upcoming games */
       if (upIds.length){
@@ -12684,7 +12688,10 @@ CG.admSeasonsLive = function(){
          ["Playoffs", s.playoffs_start_at?CG.fmtDay(Date.parse(s.playoffs_start_at)):"—"],
          ["Salary cap", s.salary_cap?("$"+(s.salary_cap/1e6)+"M"):"—"],
          ["Roster max", s.roster_max||"—"],
-         ["Trade deadline", s.trade_deadline_week?("Week "+s.trade_deadline_week):"—"],
+         /* v4.16: once fixed (or extended by the office) the deadline shows its exact time, and an earlier placement close shows too */
+         ["Trade deadline", s.movement_deadline_fixed?(CG.fmtDay(Date.parse(s.movement_deadline_fixed))+", "+CG.fmtTime(Date.parse(s.movement_deadline_fixed))):(s.trade_deadline_week?("Week "+s.trade_deadline_week):"—")],
+         /* v4.16: placement may close before trades (seasons.placement_closed_at); the tense follows the clock */
+         ["Late sign-up placement", s.placement_closed_at?((CG.now()>=Date.parse(s.placement_closed_at)?"Closed ":"Closes ")+CG.fmtDay(Date.parse(s.placement_closed_at))+", "+CG.fmtTime(Date.parse(s.placement_closed_at))):"With the trade deadline"],
          ["Off-season begins", s.offseason_starts_at?CG.fmtDay(Date.parse(s.offseason_starts_at)):"—"],
          ["Sign-up deadline", s.registration_deadline?CG.fmtDay(Date.parse(s.registration_deadline)):"—"],
          ["Owner apps close", s.owner_app_deadline?CG.fmtDay(Date.parse(s.owner_app_deadline)):"—"],
@@ -14505,6 +14512,19 @@ CG.tradeBlockCard = function(club){
   }
   return head + yours + body + '</div>';
 };
+/* v4.16 (commissioner, 2026-10-17: "Add a countdown in the trade hub"): the hub says when trades close, on the same
+   ticking clock as the home band (CG.armDeadlineClock), and at zero the note repaints in place as the closed notice.
+   Nothing shows before the deadline is known, after it for a commissioner (who is exempt), or when the office has
+   reopened movement by override. */
+CG.tradeHubDeadlineNote = function(){
+  if (CG.movesClosedForMe && CG.movesClosedForMe())
+    return '<div id="thDeadline" class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+'<span><b style="font-family:var(--f-disp)">Trades are closed.</b> The movement deadline has passed, so no trade can be proposed or accepted until next season (Rule 2.4). An offer still open can be declined or withdrawn.</span></div>';
+  var s = CG.SEASON || {}, ts = CG.movementDeadlineTs ? CG.movementDeadlineTs() : null, left = ts ? ts - CG.now() : 0;
+  if (!ts || left <= 0 || s.moves_lock_override === "open") return "";
+  return '<div id="thDeadline" class="note chr" style="margin-bottom:18px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">'+CG.ic("clock",16)+
+    '<span style="flex:1;min-width:200px"><b style="font-family:var(--f-disp)">'+(CG.deadlineIsToday(ts)?"Deadline day.":"Trade deadline.")+'</b> Proposals and acceptances close '+CG.deadlineWhen(ts)+' (Rule 2.4). An offer still open then closes.</span>'+
+    '<b class="num" role="timer" aria-label="Time left until the trade deadline" data-dl-ends="'+ts+'" style="font-family:var(--f-mono);font-size:20px;font-weight:800">--:--:--</b></div>';
+};
 CG.hubTradeHubLive = function(qs){
   var lg=CG.lg, club=CG.myClub(), t=CG.TEAM[club], d=CG.liveTrade();
   var myTid=(lg._codeToId||{})[club], trades=lg._myTrades||[];
@@ -14525,7 +14545,8 @@ CG.hubTradeHubLive = function(qs){
   if (fzT.on && !(CG.movesLockedNow && CG.movesLockedNow())) h+='<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+'<span><b style="font-family:var(--f-disp)">Roster freeze, trades open.</b> Call-ups and send-downs are locked until '+esc(fzT.reopens)+', but you can still propose and accept trades. Each player you receive takes the place of one you send, an active place for an active place and a camp place for a camp place, unless his position group or the active roster is full, when he joins training camp instead; an extra player joins your active roster only where both have room (Rule 2.1).</span></div>';
   /* v3.98: after the movement deadline the hub keeps only what moves nobody: declining or withdrawing an open offer */
   var dlShut = (CG.movesClosedForMe && CG.movesClosedForMe());
-  if (dlShut) h+='<div class="note chr" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start">'+CG.ic("lock",16)+'<span><b style="font-family:var(--f-disp)">Trades are closed.</b> The movement deadline has passed, so no trade can be proposed or accepted until next season (Rule 2.4). An offer still open can be declined or withdrawn.</span></div>';
+  /* v4.16: the deadline note, a live countdown while trades are open and the closed notice after (CG.tradeHubDeadlineNote) */
+  h+=CG.tradeHubDeadlineNote();
   var inc='<div class="card"><div class="card-h"><h3>Incoming offers</h3><span class="chip '+(incoming.length?"chip-warn":"chip-win")+'">'+(incoming.length?incoming.length+" awaiting you":"None pending")+'</span></div>';
   if(incoming.length){
     inc+=incoming.map(function(tr){ var fromCode=lg._idToCode[tr.from_team_id];
@@ -14780,6 +14801,7 @@ CG.counterTrade = function(id){
   CG.toast("Loaded their offer to counter — adjust and propose","ok"); CG.router();
 };
 CG.AFTER._tradehubLive = function(qs){
+  CG.armDeadlineClock();   /* v4.16: the deadline countdown */
   if(qs && qs.add){ var dd=CG.liveTrade(); if(dd.offP.indexOf(qs.add)<0) dd.offP.push(qs.add); location.hash="#/hub/tradehub"; return; }
   var ps=document.getElementById("tradePartner"); if(ps) ps.addEventListener("change", function(){ var d=CG.liveTrade(); if(d.partner!==this.value){ d.reqP=[]; d.reqK=[]; CG._counteringId=null; } d.partner=this.value||null; CG.router(); });
   var ao=document.getElementById("tradeAddOff"); if(ao) ao.addEventListener("click", function(){ CG.tradePicker("off"); });

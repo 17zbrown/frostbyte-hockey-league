@@ -1088,7 +1088,7 @@ CG.ROUTES.home = function(){
   if (regOpen && !faLive){
     var draftEligible = !!(regDl && Date.now() < regDl);
     html += '<section style="background:var(--bc);border-bottom:2px solid var(--chrome)"><div class="shell" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:13px 0">'+
-      '<span class="chip chip-chrome">'+esc(CG.seasonTag())+' registration is open</span>'+
+      '<span class="chip chip-chrome">'+esc(CG.seasonTag(sR))+' registration is open</span>'+
       '<span style="color:var(--on-ink-dim);font-size:13px">'+(draftEligible
         ? 'Register by '+CG.fmtFull(regDl)+' to be draft-eligible'
         : 'The draft-eligibility deadline has passed — sign up now and you’re placed on a club automatically after the draft')+'</span>'+
@@ -1352,6 +1352,26 @@ CG.movementDeadlineTs = function(){
   return Date.parse(CG.etISO(CG.dayAdd(CG.etYMD(new Date(last).toISOString()), 1), "00:00"));
 };
 
+/* v4.16: the close reads the deadline's own time. The commissioner extended Season 1's to 11:59 PM ET on Sunday
+   (2026-10-17: "extend the trade deadline to 11:59PM on Sunday"), so a fixed "midnight" would have been wrong.
+   A deadline at 12:00 AM ET still reads "at midnight ET". */
+/* v4.16: "deadline day" and "tonight" mean the deadline falls on today's Eastern calendar day, not merely within 24
+   hours: at 11:59:30 PM Saturday a Sunday 11:59 PM deadline is tomorrow night. A midnight deadline belongs to the day
+   it ends (midnight at the end of Friday is Friday's). */
+CG.deadlineIsToday = function(ts){
+  var base = /^12:00\s?AM ET$/.test(CG.fmtTime(ts)) ? ts - 1 : ts;
+  return CG.etYMD(new Date(base).toISOString()) === CG.etYMD(new Date(CG.now()).toISOString());
+};
+/* v4.16: the closing time in words, from the deadline itself instead of an assumed midnight. More than six days out
+   the date is named, since a weekday alone would be ambiguous. */
+CG.deadlineWhen = function(ts){
+  var t = CG.fmtTime(ts), mid = /^12:00\s?AM ET$/.test(t), base = mid ? ts - 1 : ts;
+  if (CG.deadlineIsToday(ts)) return (mid ? "at midnight ET" : "at " + t) + " tonight";
+  var day = base - CG.now() > 6*86400000 ? CG.fmtDay(base)
+    : new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "long" }).format(base);
+  return mid ? "at midnight ET at the end of " + day : "at " + t + " on " + day;
+};
+
 /* The deadline-day module: quiet until a week out, a live countdown after that, and on the final
    day the transaction wire runs right under it. Manufactured drama from a rule the league already
    has — and honest silence when the schedule doesn't exist yet. */
@@ -1372,9 +1392,9 @@ CG.deadlineBand = function(){
       '<p class="caption" style="margin-top:6px">The movement deadline has passed — signings, trades and releases are closed through the playoffs (Rule 2.4).</p>';
   } else {
     inner = '<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">'+
-      '<div><b style="font-family:var(--f-disp);font-size:17px">'+(finalDay?"Deadline day.":"The trade deadline is coming.")+'</b>'+
-      '<p class="caption" style="margin-top:4px">Signings, trades and releases close at midnight ET'+(finalDay?" tonight":"")+' (Rule 2.4).</p></div>'+
-      '<b id="dlClock" data-ends="'+ts+'" class="num" style="margin-left:auto;font-family:var(--f-mono);font-size:clamp(22px,3vw,30px);font-weight:800">--:--:--</b></div>';
+      '<div><b style="font-family:var(--f-disp);font-size:17px">'+(CG.deadlineIsToday(ts)?"Deadline day.":"The trade deadline is coming.")+'</b>'+
+      '<p class="caption" style="margin-top:4px">Signings, trades and releases close '+CG.deadlineWhen(ts)+' (Rule 2.4).</p></div>'+
+      '<b id="dlClock" data-dl-ends="'+ts+'" class="num" style="margin-left:auto;font-family:var(--f-mono);font-size:clamp(22px,3vw,30px);font-weight:800">--:--:--</b></div>';
   }
   var wire = (finalDay || frozen) && txToday.length
     ? '<div style="border-top:1px solid var(--line);margin-top:14px;padding-top:12px">'+
@@ -1382,6 +1402,35 @@ CG.deadlineBand = function(){
       txToday.map(function(tx){ return '<p class="small" style="color:var(--steel);margin:4px 0">'+CG.txText(tx.text)+'</p>'; }).join("")+'</div>'
     : "";
   return '<section class="sec-tight" id="dlBand"><div class="shell"><div class="card" data-rv="up"><div class="card-b">'+inner+wire+'</div></div></div></section>';
+};
+
+/* v4.16: one ticking clock for every deadline surface (the home band and, at the commissioner's request on 2026-10-17,
+   "Add a countdown in the trade hub"). It writes every element carrying data-dl-ends, textContent only, so the tick
+   never repaints the page (seamless rule). Its own attribute: the draft room's pick clock uses data-ends. Every clock shares the season's one deadline, so when it passes the timer
+   stops and each surface repaints in place to its closed state. */
+CG.armDeadlineClock = function(){
+  if (CG._dlTimer || !document.querySelector("[data-dl-ends]")) return;
+  var tick = function(){
+    var els = document.querySelectorAll("[data-dl-ends]");
+    if (!els.length){ clearInterval(CG._dlTimer); CG._dlTimer = null; return; }
+    var left = (+els[0].getAttribute("data-dl-ends")) - CG.now();
+    if (left <= 0){
+      /* the deadline just passed under an open page: repaint each surface instead of pinning 00:00:00 under copy that
+         still claims moves are open */
+      clearInterval(CG._dlTimer); CG._dlTimer = null;
+      var band = document.getElementById("dlBand");
+      if (band) band.outerHTML = CG.deadlineBand();
+      var hub = document.getElementById("thDeadline");
+      if (hub && CG.tradeHubDeadlineNote) hub.outerHTML = CG.tradeHubDeadlineNote();
+      return;
+    }
+    var d = Math.floor(left/86400000), hh = Math.floor(left%86400000/3600000),
+        mm = Math.floor(left%3600000/60000), ss = Math.floor(left%60000/1000);
+    var p2 = function(n){ return (n<10?"0":"")+n; };
+    Array.prototype.forEach.call(els, function(el){ el.textContent = (d? d+"d " : "") + p2(hh)+":"+p2(mm)+":"+p2(ss); });
+  };
+  tick();
+  CG._dlTimer = setInterval(tick, 1000);
 };
 
 CG.AFTER.home = function(){
@@ -1402,30 +1451,8 @@ CG.AFTER.home = function(){
       });
     }, 60000);
   }
-  /* deadline countdown — textContent only, so the tick never repaints the page (seamless rule) */
-  var dl = document.getElementById("dlClock");
-  if (dl && !CG._dlTimer){
-    var tick = function(){
-      var el = document.getElementById("dlClock");
-      if (!el){ clearInterval(CG._dlTimer); CG._dlTimer = null; return; }
-      var left = (+el.getAttribute("data-ends")) - CG.now();
-      if (left <= 0){
-        /* the deadline just passed under an open page: stop the timer and repaint the band in
-           place — deadlineBand() now renders its frozen state — instead of pinning 00:00:00
-           under copy that still claims moves are open */
-        clearInterval(CG._dlTimer); CG._dlTimer = null;
-        var band = document.getElementById("dlBand");
-        if (band) band.outerHTML = CG.deadlineBand();
-        return;
-      }
-      var d = Math.floor(left/86400000), hh = Math.floor(left%86400000/3600000),
-          mm = Math.floor(left%3600000/60000), ss = Math.floor(left%60000/1000);
-      var p2 = function(n){ return (n<10?"0":"")+n; };
-      el.textContent = (d? d+"d " : "") + p2(hh)+":"+p2(mm)+":"+p2(ss);
-    };
-    tick();
-    CG._dlTimer = setInterval(tick, 1000);
-  }
+  /* deadline countdown: the one shared clock (CG.armDeadlineClock, v4.16) */
+  CG.armDeadlineClock();
   /* the map frames itself from its container, so it has to be laid out once the hero has a real
      size — and again whenever that size changes, which moves both the window and the pixel gap
      between cities. Run it straight off the event rather than deferring into rAF: the whole pass is

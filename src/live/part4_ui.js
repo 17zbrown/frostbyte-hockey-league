@@ -214,7 +214,9 @@ CG.audit = function(action, detail){
 /* ---------- crest ---------- */
 CG.crestSeq = 0;
 /* current-season naming, derived from the live season row so labels never go stale */
-CG.seasonTag = function(){ var s=CG.SEASON||{}; return s.name || s.label || ("Season "+(s.number||1)); };
+/* v4.16: a season row may be passed in; the registration strip names the season taking sign-ups, which is not the
+   season being played once the next one opens (it read "Season 1 registration is open" over Season 2's deadline) */
+CG.seasonTag = function(season){ var s=season||CG.SEASON||{}; return s.name || s.label || ("Season "+(s.number||1)); };
 CG.seasonYear = function(){
   var s=CG.SEASON||{};
   if (s.starts_at) return new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",year:"numeric"}).format(new Date(s.starts_at));
