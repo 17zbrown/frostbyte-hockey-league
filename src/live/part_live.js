@@ -14690,6 +14690,13 @@ CG.tradeSide = function(pids){
   out.avgOvr = (out.n - out.missing) ? Math.round(out.ovrSum / (out.n - out.missing)) : 0;
   return out;
 };
+/* v4.18 (commissioner, 2026-10-18: "Allow teams to be able to trade and trade for suspended players."): a suspended
+   player can be traded (the database never refused it; Rule 7.2 now says so), so the Trade Hub marks one, and the club
+   trading for them sees what they are taking on: the suspension goes with the player. */
+CG.tradeSuspChip = function(pid){
+  var s = CG.suspensionOf ? CG.suspensionOf(pid) : null;
+  return s ? ' <span class="chip chip-loss chip-xs" title="'+esc(CG.suspensionText(s))+'">Suspended</span>' : '';
+};
 CG.tradePlayerRow = function(pid, opts){
   opts = opts || {};
   var p = CG.tPlayer(pid), lg = CG.lg, name = p ? p.tag : ((lg._profName||{})[pid] || "a player");
@@ -14699,7 +14706,7 @@ CG.tradePlayerRow = function(pid, opts){
     '<span class="playercell" style="min-width:0">'+(p?CG.crest(p.team,20):'')+'<span style="min-width:0">'+
       (p ? '<a class="nm" href="'+CG.playerRoute(p)+'" style="font-weight:700">'+esc(name)+'</a>' : '<b class="nm">'+esc(name)+'</b>')+
       '<small style="display:block;color:var(--steel)">'+(p ? esc(CG.POS_NAME[p.pos]||p.pos)+' · '+CG.fmtMoney(p.salary)+(p.mgmt?' · management':'') : 'not on a roster')+'</small></span></span>'+
-    '<span class="tr-chips">'+(p&&CG.isCamp(p)?CG.campChip("xs"):'')+(p&&p.origin==="depth_random"?'<span class="chip chip-ink chip-xs">Depth</span>':'')+
+    '<span class="tr-chips">'+(p&&CG.isCamp(p)?CG.campChip("xs"):'')+(p&&p.origin==="depth_random"?'<span class="chip chip-ink chip-xs">Depth</span>':'')+(p?CG.tradeSuspChip(pid):'')+
 
       (sx?'<span class="chip chip-chrome chip-xs">signed S'+esc(String(sx.start_season))+'–S'+esc(String(sx.end_season))+'</span>':'')+'</span>'+
     '<span class="tr-stats mono">'+(st ? esc(st.line) : '—')+'</span>'+
@@ -14766,7 +14773,7 @@ CG.tradePicker = function(side){
   var players=CG.tRoster(code).filter(function(p){ return alreadyP.indexOf(p.id)<0; })
     .sort(function(a,b){ return (CG.isCamp(a)?1:0)-(CG.isCamp(b)?1:0) || (b.overall||0)-(a.overall||0); });
   var picks=CG.tPicks(code).filter(function(k){ return alreadyK.indexOf(k.id)<0; });
-  var pHtml=players.map(function(p){ var sx=CG.signedExtensionOf?CG.signedExtensionOf(p.id):null; return '<button class="gamecard" data-tpick-p="'+p.id+'" style="grid-template-columns:auto 1fr auto;text-align:left;cursor:pointer;width:100%"><span class="nf-ic">'+CG.crest(p.team,20)+'</span><span style="min-width:0"><b>'+esc(p.tag)+'</b>'+(CG.isCamp(p)?' '+CG.campChip("xs"):'')+'<span class="caption" style="display:block">'+p.pos+' · OVR '+(p.overall||70)+' · '+esc(CG.tradeStats(p.id).line)+(sx?' · signed S'+esc(String(sx.start_season))+'–S'+esc(String(sx.end_season))+' at '+CG.fmtMoney(sx.salary):'')+'</span></span><span><b>'+CG.fmtMoney(p.salary)+'</b></span></button>'; }).join("");
+  var pHtml=players.map(function(p){ var sx=CG.signedExtensionOf?CG.signedExtensionOf(p.id):null; return '<button class="gamecard" data-tpick-p="'+p.id+'" style="grid-template-columns:auto 1fr auto;text-align:left;cursor:pointer;width:100%"><span class="nf-ic">'+CG.crest(p.team,20)+'</span><span style="min-width:0"><b>'+esc(p.tag)+'</b>'+(CG.isCamp(p)?' '+CG.campChip("xs"):'')+CG.tradeSuspChip(p.id)+'<span class="caption" style="display:block">'+p.pos+' · OVR '+(p.overall||70)+' · '+esc(CG.tradeStats(p.id).line)+(sx?' · signed S'+esc(String(sx.start_season))+'–S'+esc(String(sx.end_season))+' at '+CG.fmtMoney(sx.salary):'')+'</span></span><span><b>'+CG.fmtMoney(p.salary)+'</b></span></button>'; }).join("");
   var kHtml=picks.map(function(k){ return '<button class="gamecard" data-tpick-k="'+k.id+'" style="grid-template-columns:auto 1fr;text-align:left;cursor:pointer;width:100%"><span class="nf-ic">'+CG.ic("db",16)+'</span><span><b>'+esc(CG.pickLabel(k))+' pick</b><span class="caption" style="display:block">round '+k.round+'</span></span></button>'; }).join("");
   CG.modal("Add from "+esc(CG.TEAM[code].name),'<div class="stack" style="gap:6px;max-height:360px;overflow:auto"><span class="caption">Players'+(CG.minServiceGp()?' · a player needs '+CG.minServiceGp()+' regular-season games this season before he can be traded (Rule 2.4)':'')+'</span>'+(pHtml||'<span class="caption">none available</span>')+
     (CG.fmt("pick_trades") ? '<span class="caption" style="margin-top:8px">Draft picks</span>'+(kHtml||'<span class="caption">no tradeable picks</span>') : '<span class="caption" style="margin-top:8px">Players only — draft picks are not traded in the basic format (Rule 2.3).</span>')+'</div>','<button class="btn btn-ghost" data-close>Done</button>');

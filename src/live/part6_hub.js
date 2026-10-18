@@ -2132,7 +2132,9 @@ CG.suspensionText = function(s){
   var len = s.mode==="games" ? (s.gamesServed||0)+" of "+s.games+" games served"
     : s.mode==="seasons" ? "for the rest of Season "+(s.untilSeason||"")
     : "through "+(s.endsAt ? CG.fmtDay(Date.parse(s.endsAt)) : "further notice")+" at 11:59 PM ET";
-  return "Suspended, "+len+". He is locked where he is: he cannot be scheduled, called up or sent down until it is served (Rule 7.2).";
+  /* v4.18 (commissioner, 2026-10-18: "Allow teams to be able to trade and trade for suspended players."): the lock is
+     on the club's squad moves, never on a trade; the suspension travels with the player */
+  return "Suspended, "+len+". They are locked where they are: they cannot be scheduled, called up or sent down until it is served, but they may be traded, and the suspension goes with them (Rule 7.2).";
 };
 /* v3.79 (commissioner, 2026-10-02: "it's asking me to swap ... when the team ... is below the maximum"): say WHY a
    one-way move is not possible. Rule 2.1 caps each position GROUP, so a roster under its total can still be full at
