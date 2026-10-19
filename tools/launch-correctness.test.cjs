@@ -100,7 +100,10 @@ console.log("\n— the owner-application deadline is enforced, not just displaye
     /_s\.owner_app_deadline && Date\.parse\(_s\.owner_app_deadline\) <= CG\.now\(\)\)\{ CG\.toast\("Owner applications closed/.test(live));
   /* the REAL gate is the DB trigger guard_owner_app_deadline (BEFORE INSERT/UPDATE), verified by a
      rolled-back rehearsal: a member is refused after the deadline, allowed before, may still
-     withdraw, and the commissioner decision path bypasses. The client checks above are courtesy. */
+     withdraw, and the commissioner decision path bypasses. The client checks above are courtesy.
+     v4.21 correction: "may still withdraw" only ever meant no error was raised; guard_app_decision put the status back.
+     An applicant withdraws through withdraw_owner_application now, and the guard's 'withdrawn' carve-out is gone
+     (tools/owner-app-withdraw-v421.test.cjs). */
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

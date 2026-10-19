@@ -2635,7 +2635,7 @@ CG._wrapHubDashboard = function(){
     /* 3 · applications */
     var oa = CG.auth.ownerApp, sa = CG.auth.staffApp;
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Applications</h3></div><div class="card-b" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">'+
-      (oa?'<span class="chip '+(oa.status==="approved"?"chip-win":oa.status==="denied"?"chip-loss":"chip-warn")+'">Own a club — '+esc(oa.status)+'</span>':'<a class="chip" href="#/owner" style="cursor:pointer">Apply — own a club</a>')+
+      (oa?'<a class="chip '+(oa.status==="approved"?"chip-win":oa.status==="denied"?"chip-loss":oa.status==="withdrawn"?"":"chip-warn")+'" href="#/owner" style="cursor:pointer">Own a club: '+esc(oa.status)+'</a>':'<a class="chip" href="#/owner" style="cursor:pointer">Apply to own a club</a>')+
       (sa?'<span class="chip '+(sa.status==="approved"?"chip-win":sa.status==="denied"?"chip-loss":"chip-warn")+'">Join the staff — '+esc(sa.status)+'</span>':'<a class="chip" href="#/staffapply" style="cursor:pointer">Apply — join the staff</a>')+
       '<span class="caption" style="flex-basis:100%">Owner applications are reviewed in the off-season window; staff applications any time.</span></div></div>';
     return h;
@@ -3544,14 +3544,20 @@ CG.AFTER.register = function(){
   var sub=document.getElementById("regSubmit"); if(sub) sub.addEventListener("click", function(){ CG.registerForSeason(sel); });
   var wd=document.getElementById("regWithdraw"); if(wd) wd.addEventListener("click", function(){
     var sReg = CG.regSeason() || {};
+    /* v4.21: a pending owner application goes with the sign-up (owner_app_follows_signup), so the dialog says so */
+    var oaGoes = !!(CG.auth.ownerApp && CG.auth.ownerApp.status === "pending" && CG.auth.ownerApp.season_id === sReg.id);
+    var oaShut = !!(sReg.owner_app_deadline && Date.parse(sReg.owner_app_deadline) <= CG.now());
     CG.confirm("Withdraw your Season "+(sReg.number||"")+" sign-up?",
-      "You come off the sign-up board and out of the draft pool. You can register again any time while registration is open — your spot in line is simply gone, not banked.",
+      "You come off the sign-up board and out of the draft pool. You can register again any time while registration is open, but your spot in line is simply gone, not banked."+
+      (oaGoes ? " Your pending owner application is withdrawn with it"+(oaShut ? ", and applications have closed, so it cannot be filed again this season." : ".") : ""),
       "Withdraw", function(){
         wd.disabled = true;
         CG.sb.rpc("withdraw_registration", { p_season: sReg.id }).then(function(r){
           wd.disabled = false;
           if (r.error){ CG.toast(r.error.message||"Couldn’t withdraw","err"); return; }
           CG.auth.registration = null;
+          /* v4.21: owner_app_follows_signup withdrew a pending owner application for this season in the same write */
+          if (CG.auth.ownerApp && CG.auth.ownerApp.status === "pending" && CG.auth.ownerApp.season_id === sReg.id) CG.auth.ownerApp.status = "withdrawn";
           CG.pingDiscordSync();   /* their Player/Free Agent roles come off without waiting for the cron */
           CG.toast("Sign-up withdrawn — register again any time while the window is open","ok");
           /* the pool labels and draft views are built from the league snapshot — reload it so
@@ -4171,10 +4177,16 @@ CG.ROUTES.owner = function(){
      applicant who already has one in can still withdraw, but not edit, after the close. */
   var s = (CG.regSeason && CG.regSeason()) || CG.SEASON || {};   /* owner applications are for the season taking sign-ups */
   var deadlineClosed = !!(s.owner_app_deadline && Date.parse(s.owner_app_deadline) <= CG.now());
+  /* v4.21 (commissioner, 2026-10-18): "add a withdraw application button". The applicant's own pending or waitlisted
+     application, before or after the close (withdraw_owner_application); an approved one is given up through the office. */
+  var ownWithdrawable = !!(CG.auth.ownerApp && a.id && (a.status === "pending" || a.status === "waitlisted"));
   var closedNote = (deadlineClosed && !lockedFromOwning)
     ? '<div class="note red" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("flag",15)+
       '<span style="flex:1">Owner applications closed on <b>'+CG.fmtFull(Date.parse(s.owner_app_deadline))+'</b>. '+
-      (CG.auth.ownerApp ? 'Your application stays with the commissioners for review — you can still withdraw it below.' : 'The window to apply to own a club has passed for this season.')+'</span></div>'
+      (!CG.auth.ownerApp ? 'The window to apply to own a club has passed for this season.'
+        : ownWithdrawable ? 'Your application stays with the review board. You can still withdraw it below, but a withdrawn application cannot be filed again this season.'
+        : a.status === "withdrawn" ? 'You withdrew your application, and it cannot be filed again this season.'
+        : 'Your application stays on file with the league office.')+'</span></div>'
     : "";
   var conflictNote = lockedFromOwning
     ? '<div class="note" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("shield",15)+
@@ -4195,16 +4207,20 @@ CG.ROUTES.owner = function(){
   var editNote = !CG.auth.ownerApp ? ""
     : editUsed ? 'You used your one edit on '+esc(CG.fmtFull(Date.parse(a.edited_at)))+'. To change anything else, message the league office below.'
     : 'You may edit it once before applications close. The review board reviews every application.';
+  /* v4.21: a withdrawn application says so, and whether it can still be filed again (the close makes it final) */
+  var withdrawnNote = deadlineClosed ? 'You withdrew it, and applications have closed, so it cannot be filed again this season.'
+    : 'You withdrew it. You may file it again until applications close'+(s.owner_app_deadline ? ' on '+esc(CG.fmtFull(Date.parse(s.owner_app_deadline))) : '')+', as long as you are signed up to play.';
   var statusCard = CG.auth.ownerApp ? '<div class="note '+(a.status==="approved"?"grn":a.status==="denied"?"red":"chr")+'" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your application is '+esc((a.status||"pending").toUpperCase())+'.</b> '+
     (heldMine ? 'The '+esc(heldMine)+' would be a new club for the league: they are added, and you are seated as Owner, once a commissioner gives the go-ahead.'
-              : editNote)+'</div>' : "";
+              : a.status === "withdrawn" ? withdrawnNote : editNote)+'</div>' : "";
   /* v3.99 (commissioner, 2026-10-13): only a member signed up to play in the season may apply to own a club. The
      database refuses it too (guard_owner_app_signed_up), and withdrawing the sign-up withdraws a pending application. */
   var needSignup = !lockedFromOwning && !deadlineClosed && !(CG.isRegisteredNow && CG.isRegisteredNow());
   var signupNote = needSignup
     ? '<div class="note red" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("flag",15)+
       '<span style="flex:1"><b>Sign up to play first.</b> Only a player signed up for '+esc(s.name||("Season "+(s.number||1)))+' can apply to own a club'+
-      (CG.auth.ownerApp && CG.auth.ownerApp.status==="withdrawn" ? ', and your application was withdrawn when your sign-up was' : '')+'.</span>'+
+      /* v4.21: the Withdraw button is a second way to withdraw, so the note no longer says the sign-up did it */
+      (CG.auth.ownerApp && CG.auth.ownerApp.status==="withdrawn" ? ', and your owner application is withdrawn' : '')+'.</span>'+
       '<a class="btn btn-chrome btn-sm" href="#/register">Sign up to play</a></div>'
     : "";
   statusCard = conflictNote + closedNote + signupNote + statusCard;
@@ -4227,19 +4243,65 @@ CG.ROUTES.owner = function(){
       '</div></div>'+
     '<label class="fld"><span>Why you? (pitch) *</span><textarea id="ow-pitch" rows="4" placeholder="Tell the commissioners why you’d make a great owner…">'+esc(a.pitch||"")+'</textarea></label>'+
     '<button class="btn btn-chrome" id="ow-submit"'+((lockedFromOwning||deadlineClosed||needSignup)?" disabled":(editUsed&&!refileOnly)?" disabled":"")+'>'+
-      (!CG.auth.ownerApp ? "Submit application" : refileOnly ? "Resubmit application" : editUsed ? "Edit used" : "Update application (your one edit)")+'</button>'+
+      (!CG.auth.ownerApp ? "Submit application" : (refileOnly || a.status === "withdrawn") ? "Resubmit application" : editUsed ? "Edit used" : "Update application (your one edit)")+'</button>'+
+    (ownWithdrawable ? '<button class="btn btn-ghost btn-sm" id="ow-withdraw" style="color:var(--red-ink);margin-left:8px">Withdraw application</button>' : '')+
   '</div></div>';
   /* once they've applied, a chat with the league office sits between the status and the form */
   var chat = CG.auth.ownerApp && CG.auth.ownerApp.id ? CG.appChatSection("owner", CG.auth.ownerApp.id, {office:false}) : "";
-  return head + '<div class="shell" style="max-width:720px;padding-bottom:48px">'+statusCard+chat+body+'</div>';
+  return head + '<div class="shell" style="max-width:720px;padding-bottom:48px"><div id="ow-status">'+statusCard+'</div>'+chat+'<div id="ow-form">'+body+'</div></div>';
 };
 CG.AFTER.owner = function(){
   var dc=document.getElementById("dcSignIn"); if(dc) dc.addEventListener("click", function(){ CG.signIn(); });
+  CG.wireOwnerForm();
+  CG.wireAppChat();
+};
+/* v4.21: the status and form wiring, run again after an in-place repaint (the chat keeps its own wiring) */
+CG.wireOwnerForm = function(){
   var sub=document.getElementById("ow-submit"); if(sub) sub.addEventListener("click", CG.submitOwnerApp);
+  var wd=document.getElementById("ow-withdraw"); if(wd) wd.addEventListener("click", CG.withdrawOwnerApp);
   /* v4.20: once the one edit is used, the answers are shown but cannot be changed */
   var lk=document.querySelector("[data-ow-locked]");
   if(lk) lk.querySelectorAll("input,select,textarea").forEach(function(el){ el.disabled = true; });
-  CG.wireAppChat();
+};
+/* v4.21: repaint the status card and the form in place (seamless rule), never the whole page */
+CG.repaintOwnerParts = function(){
+  var t = document.createElement("div"); t.innerHTML = CG.ROUTES.owner();
+  /* typed-but-unsaved answers survive the repaint (the render fills the fields from the saved row) */
+  var typed = {}, form = document.getElementById("ow-form");
+  if (form) form.querySelectorAll("input[id],select[id],textarea[id]").forEach(function(el){ typed[el.id] = el.value; });
+  ["ow-status","ow-form"].forEach(function(id){
+    var cur = document.getElementById(id), nx = t.querySelector("#"+id);
+    if (cur && nx) cur.outerHTML = nx.outerHTML;
+  });
+  Object.keys(typed).forEach(function(id){ var el = document.getElementById(id); if (el) el.value = typed[id]; });
+  CG.wireOwnerForm();
+};
+/* v4.21 (commissioner, 2026-10-18): "add a withdraw application button". One door, withdraw_owner_application: the
+   decision guard quietly put a direct status write back (it returned the row and changed nothing), so success is the
+   RPC's own confirmed status, never the absence of an error. */
+CG.withdrawOwnerApp = function(){
+  var a = CG.auth.ownerApp;
+  if(!CG.sb||!CG.auth.user||!a||!a.id){ CG.toast("Sign in first","err"); return; }
+  var s = (CG.regSeason && CG.regSeason()) || CG.SEASON || {};
+  var closed = !!(s.owner_app_deadline && Date.parse(s.owner_app_deadline) <= CG.now());
+  CG.confirm("Withdraw your owner application?",
+    closed ? "The review board stops reviewing it. Applications have closed, so a withdrawn application cannot be filed again this season."
+           : "The review board stops reviewing it. You may file it again until applications close"+(s.owner_app_deadline ? " on "+CG.fmtFull(Date.parse(s.owner_app_deadline)) : "")+", as long as you are signed up to play.",
+    "Withdraw", async function(){
+      var btn = document.getElementById("ow-withdraw"); if(btn) btn.disabled = true;
+      var r = await CG.sb.rpc("withdraw_owner_application", { p_app: a.id });
+      if (r.error || !r.data || !r.data.ok || r.data.status !== "withdrawn"){
+        if(btn) btn.disabled = false;
+        var em = r.error ? (r.error.message||"") : "the league did not confirm it. Refresh the page and check your application.";
+        CG.toast(/WITHDRAW:/.test(em) ? em.replace(/^.*WITHDRAW:\s*/,"") : "Couldn’t withdraw: "+em, "err");
+        return;
+      }
+      CG.auth.ownerApp = Object.assign({}, a, { status:"withdrawn", updated_at:new Date().toISOString() });
+      ((CG.lg && CG.lg._ownerApps) || []).forEach(function(x){ if (x.id === a.id) x.status = "withdrawn"; });
+      CG.toast(r.data.final ? "Application withdrawn. Applications have closed, so it cannot be filed again this season."
+                            : "Application withdrawn. You may file it again until applications close.", "ok");
+      CG.repaintOwnerParts();
+    });
 };
 CG.submitOwnerApp = async function(){
   if(!CG.sb||!CG.auth.user){ CG.toast("Sign in first","err"); return; }
@@ -7159,12 +7221,6 @@ CG.assignRegistration = async function(regId, profileId, position, playerName, c
   if(CG.lg.byTeam[code]) CG.lg.byTeam[code].push({ id:profileId, tag:playerName, team:code, pos:position, jersey:num, mgmt:null, salary:0, depth:9 });
   CG.toast(playerName+" signed to "+CG.TEAM[code].name+" · #"+num,"ok");
   CG.router();
-};
-CG.setOwnerAppStatus = async function(id, status){
-  var r = await CG.sb.from("owner_applications").update({ status:status, updated_at:new Date().toISOString() }).eq("id", id);
-  if(r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
-  var app=(CG.lg._ownerApps||[]).find(function(x){ return x.id===id; }); if(app) app.status=status;
-  CG.toast("Application "+status,"ok"); CG.router();
 };
 /* ================================================================
    LIVE ADMIN: USERS & ROLES (set_member_role / set_team_manager / ban)
@@ -10466,7 +10522,7 @@ CG.appBallotSection = function(type, a, decided){
   var mine = voteBy[uid], isReviewer = CG.isAppReviewer(), isCommish = CG.role()==="commish";
 
   var head = decided
-    ? '<span class="chip '+(a.status==="approved"?"chip-win":"chip-loss")+'">'+esc((a.status||"").charAt(0).toUpperCase()+(a.status||"").slice(1))+'</span>'
+    ? '<span class="chip '+(a.status==="approved"?"chip-win":a.status==="withdrawn"?"":"chip-loss")+'">'+esc((a.status||"").charAt(0).toUpperCase()+(a.status||"").slice(1))+'</span>'
     : '<span class="chip chip-xs">'+cast+' of '+N+' voted</span>';
   var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Reviewer vote</h3>'+head+'</div><div class="card-b">';
 
@@ -10508,7 +10564,10 @@ CG.appBallotSection = function(type, a, decided){
         '</div></div>';
   }
 
-  h += '<p class="caption" style="margin-top:12px">'+(decided
+  h += '<p class="caption" style="margin-top:12px">'+(a.status === "withdrawn"
+    /* v4.21: an applicant may withdraw; that is not a decision, and nobody was told an outcome */
+    ? "Withdrawn by the applicant, so it was not decided. The votes cast before the withdrawal stay on the record."
+    : decided
     ? "Decided by the reviewer vote (or a commissioner override). The applicant was notified of the outcome."
     : N===0
       ? "There’s no reviewer vote yet — no staff are assigned to Applications review. A commissioner can add reviewers or decide with the override above."

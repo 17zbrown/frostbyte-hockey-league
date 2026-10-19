@@ -156,8 +156,9 @@ CG.deskReviewBoard = function(){
     [pending, "awaiting the vote", pending>0, null],
     [mine, "need your ballot", mine>0, null],
     [reviewers.length, "reviewers on the board", !reviewers.length, null],
-    [owner.filter(function(a){ return a.status!=="pending"; }).length +
-     staff.filter(function(a){ return a.status!=="pending"; }).length, "decided all-time", false, null]
+    /* v4.21: an application the applicant withdrew was never decided */
+    [owner.filter(function(a){ return a.status!=="pending" && a.status!=="withdrawn"; }).length +
+     staff.filter(function(a){ return a.status!=="pending" && a.status!=="withdrawn"; }).length, "decided all-time", false, null]
   ]);
 
   function row(a, type){
@@ -317,9 +318,11 @@ CG.deskReviewBoard = function(){
     .slice(0,10);
   h += '<div class="card"><div class="card-h"><h3>Recently decided</h3><a class="sec-link" href="#/hub/archive">Full archive</a></div>';
   h += decided.length ? decided.map(function(pair){
-      var a = pair[0], ok = a.status==="approved";
+      /* v4.21: every status names itself (a withdrawn or waitlisted application used to read DENIED) */
+      var a = pair[0], st = a.status==="approved" ? ["chip-win","APPROVED"] : a.status==="withdrawn" ? ["","WITHDRAWN"]
+            : a.status==="waitlisted" ? ["chip-warn","WAITLISTED"] : ["chip-loss","DENIED"];
       return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
-        '<span class="chip '+(ok?"chip-win":"chip-loss")+' chip-xs">'+(ok?"APPROVED":"DENIED")+'</span>'+
+        '<span class="chip '+st[0]+' chip-xs">'+st[1]+'</span>'+
         '<b style="font-family:var(--f-disp);flex:1;min-width:140px">'+esc(((a.profiles||{}).gamertag)||"Applicant")+'</b>'+
         '<span class="caption">'+esc(pair[1]==="owner"?"Owner application":"Staff application")+'</span>'+
         '<span class="caption">'+(a.decided_at||a.updated_at?CG.fmtDay(Date.parse(a.decided_at||a.updated_at)):"")+'</span></div>';
