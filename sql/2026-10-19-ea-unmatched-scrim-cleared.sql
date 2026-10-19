@@ -32,3 +32,24 @@ begin
     raise exception 'self-check: the scrim is not cleared';
   end if;
 end $c$;
+
+-- Part 2, same day. Commissioner: "you can delete that warmup game since it was not a league game."
+-- The row is deleted from ea_ingest_log. Nothing references it (no games.ea_match_id, no game_stats: it was never
+-- imported). Undo: the whole row, payload included (about 3 KB), is copied into admin_audit
+-- (action 'ea_ingest_deleted', target_id = the EA match id) in the same transaction, so it can be re-inserted from
+-- detail->'row' if it is ever needed. If NYI's recent-match list on EA still holds the scrim when the poller next asks,
+-- the importer archives it again as 'ignored' (its end time is in no fixture's window), never as unmatched.
+-- REHEARSAL on production, 2026-10-19, in one transaction ending in an uncaught raise: deleted=1, rows left=0,
+-- audit rows=1, payload kept in the audit row=true. Run through execute_sql the same day: rows left 0, one backup row in
+-- admin_audit, unmatched queue 0.
+do $d$
+declare v_row jsonb; v_n int;
+begin
+  select to_jsonb(l) into v_row from public.ea_ingest_log l where l.ea_match_id = '2418135570484' and l.status = 'ignored';
+  if v_row is null then raise exception 'the scrim row is not there (or no longer ignored); nothing deleted'; end if;
+  perform public.log_admin_action('ea_ingest_deleted', 'ea_match', '2418135570484',
+    jsonb_build_object('reason', 'warm-up scrim against an outside club, not a league game; deleted at the commissioner''s request', 'row', v_row));
+  delete from public.ea_ingest_log where ea_match_id = '2418135570484' and status = 'ignored';
+  get diagnostics v_n = row_count;
+  if v_n <> 1 then raise exception 'expected to delete 1 row, deleted %', v_n; end if;
+end $d$;
