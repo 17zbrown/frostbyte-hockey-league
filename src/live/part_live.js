@@ -4188,9 +4188,16 @@ CG.ROUTES.owner = function(){
       : "");
   /* v4.19: an approval for a new club waits on the commissioner's go-ahead, and the applicant is told so */
   var heldMine = CG.auth.ownerApp ? CG.ownerAppHeldClub(a) : null;
+  /* v4.20 (commissioner, 2026-10-18): "allow applicants to edit their application one time." The database stamps
+     edited_at on the first change and refuses a second (guard_owner_app_one_edit); a withdrawn application may still
+     be refiled unchanged. */
+  var editUsed = !!(CG.auth.ownerApp && a.edited_at), refileOnly = editUsed && a.status === "withdrawn";
+  var editNote = !CG.auth.ownerApp ? ""
+    : editUsed ? 'You used your one edit on '+esc(CG.fmtFull(Date.parse(a.edited_at)))+'. To change anything else, message the league office below.'
+    : 'You may edit it once before applications close. The review board reviews every application.';
   var statusCard = CG.auth.ownerApp ? '<div class="note '+(a.status==="approved"?"grn":a.status==="denied"?"red":"chr")+'" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your application is '+esc((a.status||"pending").toUpperCase())+'.</b> '+
     (heldMine ? 'The '+esc(heldMine)+' would be a new club for the league: they are added, and you are seated as Owner, once a commissioner gives the go-ahead.'
-              : 'Resubmit below to update it. The review board reviews every application.')+'</div>' : "";
+              : editNote)+'</div>' : "";
   /* v3.99 (commissioner, 2026-10-13): only a member signed up to play in the season may apply to own a club. The
      database refuses it too (guard_owner_app_signed_up), and withdrawing the sign-up withdraws a pending application. */
   var needSignup = !lockedFromOwning && !deadlineClosed && !(CG.isRegisteredNow && CG.isRegisteredNow());
@@ -4206,7 +4213,9 @@ CG.ROUTES.owner = function(){
   if (upCh && !deadlineClosed) statusCard = '<div class="note chr" style="margin-bottom:18px">Every club is decided again for '+esc(s.name||("Season "+s.number))+', so current Owners apply too. '+
     (s.owner_app_deadline ? 'Applications close <b>'+CG.fmtFull(Date.parse(s.owner_app_deadline))+'</b>, and the league office decides them the week after. ' : '')+
     '<a href="#/rulebook?rule='+esc(upCh.sections[0].id)+'" style="font-weight:700;border-bottom:2px solid var(--chrome)">What changes in '+esc(s.name||("Season "+s.number))+'</a></div>' + statusCard;
-  var body = '<div class="card"><div class="card-h"><h3>'+(CG.auth.ownerApp?"Update application":"Owner application")+'</h3><span class="chip chip-chrome">'+esc(s.name||"Season")+'</span></div><div class="card-b">'+
+  var body = '<div class="card"><div class="card-h"><h3>'+(CG.auth.ownerApp?"Update application":"Owner application")+'</h3>'+
+    (CG.auth.ownerApp ? (editUsed ? '<span class="chip chip-xs">Edit used</span> ' : '<span class="chip chip-chrome chip-xs">One edit left</span> ') : '')+
+    '<span class="chip chip-chrome">'+esc(s.name||"Season")+'</span></div><div class="card-b"'+(editUsed?' data-ow-locked="1"':'')+'>'+
     '<label class="fld"><span>EA ID *</span><input id="ow-ea" placeholder="Your EA account name" value="'+esc(a.ea_id||p.ea_id||"")+'"></label>'+
     '<label class="fld"><span>Typical availability</span><input id="ow-avail" placeholder="e.g. Weeknights after 9 PM ET" value="'+esc(a.availability||"")+'"></label>'+
     '<label class="fld"><span>League / management experience</span><textarea id="ow-exp" rows="2" placeholder="Leagues you’ve played or managed in…">'+esc(a.experience||"")+'</textarea></label>'+
@@ -4217,7 +4226,8 @@ CG.ROUTES.owner = function(){
         '<label class="fld"><span style="font-size:11px">3rd choice</span><select id="ow-fr3">'+CG.franchiseOptions(a.franchise_3)+'</select></label>'+
       '</div></div>'+
     '<label class="fld"><span>Why you? (pitch) *</span><textarea id="ow-pitch" rows="4" placeholder="Tell the commissioners why you’d make a great owner…">'+esc(a.pitch||"")+'</textarea></label>'+
-    '<button class="btn btn-chrome" id="ow-submit"'+((lockedFromOwning||deadlineClosed||needSignup)?" disabled":"")+'>'+(CG.auth.ownerApp?"Update application":"Submit application")+'</button>'+
+    '<button class="btn btn-chrome" id="ow-submit"'+((lockedFromOwning||deadlineClosed||needSignup)?" disabled":(editUsed&&!refileOnly)?" disabled":"")+'>'+
+      (!CG.auth.ownerApp ? "Submit application" : refileOnly ? "Resubmit application" : editUsed ? "Edit used" : "Update application (your one edit)")+'</button>'+
   '</div></div>';
   /* once they've applied, a chat with the league office sits between the status and the form */
   var chat = CG.auth.ownerApp && CG.auth.ownerApp.id ? CG.appChatSection("owner", CG.auth.ownerApp.id, {office:false}) : "";
@@ -4226,6 +4236,9 @@ CG.ROUTES.owner = function(){
 CG.AFTER.owner = function(){
   var dc=document.getElementById("dcSignIn"); if(dc) dc.addEventListener("click", function(){ CG.signIn(); });
   var sub=document.getElementById("ow-submit"); if(sub) sub.addEventListener("click", CG.submitOwnerApp);
+  /* v4.20: once the one edit is used, the answers are shown but cannot be changed */
+  var lk=document.querySelector("[data-ow-locked]");
+  if(lk) lk.querySelectorAll("input,select,textarea").forEach(function(el){ el.disabled = true; });
   CG.wireAppChat();
 };
 CG.submitOwnerApp = async function(){
@@ -4250,13 +4263,29 @@ CG.submitOwnerApp = async function(){
     availability:v("ow-avail")||null, experience:v("ow-exp")||null,
     preferred_club:fr1, franchise_2:fr2, franchise_3:fr3,
     pitch:pitch, status:"pending", updated_at:new Date().toISOString() };
-  var r=await CG.sb.from("owner_applications").upsert(payload,{onConflict:"profile_id,season_id"}).select().maybeSingle();
-  if(r.error){
-    var em=String(r.error.message||"");
-    CG.toast(/SIGN_UP_FIRST:/.test(em) ? em.replace(/^.*SIGN_UP_FIRST:\s*/,"") : "Couldn’t submit: "+em,"err"); return;
+  /* v4.20: a change to a submitted application is the applicant's one edit; ask before spending it */
+  var prev=CG.auth.ownerApp, isEdit=false;
+  if(prev){
+    var same=function(x,y){ return (x||null)===(y||null); };
+    isEdit = !(same(prev.ea_id,payload.ea_id) && same(prev.availability,payload.availability) && same(prev.experience,payload.experience) &&
+               same(prev.preferred_club,payload.preferred_club) && same(prev.franchise_2,payload.franchise_2) &&
+               same(prev.franchise_3,payload.franchise_3) && same(prev.pitch,payload.pitch));
   }
-  CG.auth.ownerApp=r.data||payload; /* keep the row (with its id) so the office chat appears at once */
-  CG.toast("Application submitted — the commissioners will review it","ok"); CG.router();
+  var send=async function(){
+    var r=await CG.sb.from("owner_applications").upsert(payload,{onConflict:"profile_id,season_id"}).select().maybeSingle();
+    if(r.error){
+      var em=String(r.error.message||"");
+      CG.toast(/SIGN_UP_FIRST:/.test(em) ? em.replace(/^.*SIGN_UP_FIRST:\s*/,"")
+             : /ONE_EDIT:/.test(em) ? em.replace(/^.*ONE_EDIT:\s*/,"") : "Couldn’t submit: "+em,"err"); return;
+    }
+    CG.auth.ownerApp=r.data||payload; /* keep the row (with its id) so the office chat appears at once */
+    CG.toast(isEdit ? "Application updated. That was your one edit." : prev ? "Application resubmitted." : "Application submitted. The review board will review it.","ok"); CG.router();
+  };
+  if(isEdit && !prev.edited_at){
+    CG.confirm("Use your one edit?","You can change a submitted application once. After this update your answers are final, unless the league office changes them.","Update application", send);
+    return;
+  }
+  send();
 };
 
 /* ================================================================
@@ -10591,6 +10620,7 @@ CG.hubApplicationDetail = function(id, type){
       fields += row("Proposed location", a.proposed_location?esc(a.proposed_location):"");
       fields += row("Franchise picks", CG.franchisePicksLine(a));
       fields += row("Preferred club", a.preferred_club?esc(a.preferred_club):"");
+      fields += row("Edited", a.edited_at ? esc(CG.fmtFull(Date.parse(a.edited_at)))+" (their one edit)" : "");   /* v4.20 */
       fields += row("EA ID", a.ea_id?esc(a.ea_id):"");
     } else if (a.departments && a.departments.length){
       fields += row("Departments", a.departments.map(function(k){ return '<span class="chip chip-chrome chip-xs">'+esc(CG.staffDeptLabel(k))+'</span>'; }).join(" "));
