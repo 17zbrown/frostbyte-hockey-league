@@ -609,10 +609,10 @@ async function caseworkNudge(cfg, teamById, et, dry, errors, unconfigured) {
   const [profs, links, oaAll, sa, ma, ballots, cases, seasons] = await Promise.all([
     sbGet("profiles?select=id,role,departments,gamertag"),
     sbGet("discord_links?select=profile_id,discord_id"),
-    sbGet("owner_applications?status=eq.pending&select=id,profile_id,season_id"),
-    sbGet("staff_applications?status=eq.pending&select=id,profile_id"),
+    sbGet("owner_applications?status=eq.pending&select=id,profile_id,season_id,filed_at"),
+    sbGet("staff_applications?status=eq.pending&select=id,profile_id,filed_at"),
     sbGet("management_applications?status=eq.pending&select=id,role,team_id,nominee_id"),
-    sbGet("application_ballots?select=app_type,application_id,voter_id"),
+    sbGet("application_ballots?select=app_type,application_id,voter_id,updated_at"),
     sbGet("action_requests?status=not.in.(resolved,denied)&assigned_to=not.is.null&select=id,subject,type,assigned_to"),
     sbGet("seasons?select=id,owner_app_deadline"),
   ]);
@@ -624,8 +624,18 @@ async function caseworkNudge(cfg, teamById, et, dry, errors, unconfigured) {
   const gt = Object.fromEntries(profs.map((p) => [p.id, p.gamertag || "a member"]));
   const mention = (pid) => (did[pid] ? `<@${did[pid]}>` : `**${gt[pid] || "a reviewer"}**`);
   const reviewers = profs.filter((p) => (p.role === "staff" || p.role === "commissioner") && Array.isArray(p.departments) && p.departments.includes("applications"));
+  // v4.22 ("Fresh vote", commissioner 2026-10-19): a ballot counts only if cast or changed since the application was last
+  // filed, exactly as resolve_application_if_ready counts it, so a refiled application chases every reviewer again.
+  // Management nominations have no filed_at and count every ballot.
+  const filedAt = {};
+  for (const a of oaAll) filedAt["owner:" + a.id] = a.filed_at ? Date.parse(a.filed_at) : 0;
+  for (const a of sa) filedAt["staff:" + a.id] = a.filed_at ? Date.parse(a.filed_at) : 0;
   const votedBy = {};
-  for (const b of ballots) (votedBy[b.app_type + ":" + b.application_id] = votedBy[b.app_type + ":" + b.application_id] || new Set()).add(b.voter_id);
+  for (const b of ballots) {
+    const key = b.app_type + ":" + b.application_id;
+    if (filedAt[key] && Date.parse(b.updated_at) < filedAt[key]) continue;   // an earlier vote: on the record, not counted
+    (votedBy[key] = votedBy[key] || new Set()).add(b.voter_id);
+  }
 
   const appLines = [];
   const owe = (key) => reviewers.filter((r) => !(votedBy[key] || new Set()).has(r.id));

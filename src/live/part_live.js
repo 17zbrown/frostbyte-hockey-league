@@ -54,7 +54,7 @@ CG.pingDiscordSync = function(){
    every six seconds through a 140-pick draft night. */
 CG.ROLE_RPCS = ("set_member_role set_team_manager set_staff_profile sign_free_agent move_player office_found_owner_club "+
   "waive_player admin_remove_from_roster ban_player unban_player accept_trade "+
-  "apply_application_decision override_application_decision decide_staff_application "+
+  "apply_application_decision override_application_decision "+
   "decide_owner_application start_next_season"
 ).split(" ").reduce(function(m,k){ m[k]=1; return m; }, {});
 CG._installRoleRpcWrapper = function(){
@@ -2636,7 +2636,7 @@ CG._wrapHubDashboard = function(){
     var oa = CG.auth.ownerApp, sa = CG.auth.staffApp;
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Applications</h3></div><div class="card-b" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">'+
       (oa?'<a class="chip '+(oa.status==="approved"?"chip-win":oa.status==="denied"?"chip-loss":oa.status==="withdrawn"?"":"chip-warn")+'" href="#/owner" style="cursor:pointer">Own a club: '+esc(oa.status)+'</a>':'<a class="chip" href="#/owner" style="cursor:pointer">Apply to own a club</a>')+
-      (sa?'<span class="chip '+(sa.status==="approved"?"chip-win":sa.status==="denied"?"chip-loss":"chip-warn")+'">Join the staff — '+esc(sa.status)+'</span>':'<a class="chip" href="#/staffapply" style="cursor:pointer">Apply — join the staff</a>')+
+      (sa?'<a class="chip '+(sa.status==="approved"?"chip-win":sa.status==="denied"?"chip-loss":sa.status==="withdrawn"?"":sa.status==="waitlisted"?"chip-chrome":"chip-warn")+'" href="#/staffapply" style="cursor:pointer">Join the staff: '+esc(sa.status)+'</a>':'<a class="chip" href="#/staffapply" style="cursor:pointer">Apply to join the staff</a>')+
       '<span class="caption" style="flex-basis:100%">Owner applications are reviewed in the off-season window; staff applications any time.</span></div></div>';
     return h;
   };
@@ -4421,17 +4421,22 @@ CG.ROUTES.staffapply = function(){
       (mgmtMediaOnly ? '<a class="btn btn-ghost btn-sm" href="#/hub">Team HQ</a>' : '<a class="btn btn-ghost btn-sm" href="#/hub/staffdesk">Staff Desk</a>')+'</div>'
     : "";
   var app = CG.auth.staffApp;
+  /* v4.22 (commissioner, 2026-10-19): "add a withdraw button for staff applications" and "Waitlist applications should
+     not fill automatically"; a refiled application is voted afresh ("Fresh vote"). */
+  var staffWithdrawable = !!(app && app.id && (app.status==="pending" || app.status==="waitlisted"));
   var statusNote = app
-    ? (app.status==="pending" ? '<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Application received.</b> The league office reviews staff applications — you’ll get a notification either way. You can update yours below.</div>'
-      : app.status==="waitlisted" ? '<div class="note chr" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re on the staff waitlist.</b> Every seat is filled right now — the moment one opens, the longest-waiting application is appointed automatically, and you’ll be notified the second it’s you.</div>'
-      : app.status==="denied" ? '<div class="note red" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your last application wasn’t approved.</b> You’re welcome to update it and reapply.</div>' : "")
+    ? (app.status==="pending" ? '<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Application received.</b> The league office reviews staff applications, and you’ll get a notification either way. You can update or withdraw yours below.</div>'
+      : app.status==="waitlisted" ? '<div class="note chr" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re on the staff waitlist.</b> There is no seat for you right now. Nobody is admitted automatically: when a seat opens, the league office’s reviewers admit from the waitlist, and you’ll be notified if it’s you. Updating your application keeps your place; withdrawing it gives the place up.</div>'
+      : app.status==="denied" ? '<div class="note red" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your last application wasn’t approved.</b> You’re welcome to update it and reapply; the reviewers vote on it afresh.</div>'
+      : app.status==="withdrawn" ? '<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You withdrew your application.</b> You may file it again at any time below; the reviewers then vote on it afresh.</div>'
+      : (app.status==="approved" && !lockedFromStaff) ? '<div class="note grn" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your last application was approved.</b> If you have since left the staff, you may apply again below; the reviewers vote on it afresh.</div>' : "")
     : "";
   var v = function(k){ return app ? esc(app[k]||"") : ""; };
   var pickedDepts = (app && app.departments) || [];
   var chat = app && app.id ? CG.appChatSection("staff", app.id, {office:false}) : "";
-  return head + '<div class="shell" style="max-width:640px;padding-bottom:48px">'+staffNote+statusNote+chat+
-    '<div class="card"><div class="card-h"><h3>'+(app?"Update application":"Application")+'</h3>'+
-      (app?'<span class="chip '+(app.status==="pending"?"chip-warn":app.status==="waitlisted"?"chip-chrome":"chip-loss")+'" style="text-transform:capitalize">'+esc(app.status)+'</span>':'<span class="chip chip-chrome">Open</span>')+'</div><div class="card-b">'+
+  return head + '<div class="shell" style="max-width:640px;padding-bottom:48px"><div id="sa-status">'+staffNote+statusNote+'</div>'+chat+
+    '<div id="sa-form"><div class="card"><div class="card-h"><h3>'+(app?"Update application":"Application")+'</h3>'+
+      (app?'<span class="chip '+(app.status==="pending"?"chip-warn":app.status==="waitlisted"?"chip-chrome":app.status==="withdrawn"?"":app.status==="approved"?"chip-win":"chip-loss")+'" style="text-transform:capitalize">'+esc(app.status)+'</span>':'<span class="chip chip-chrome">Open</span>')+'</div><div class="card-b">'+
     '<div class="fld"><span>Departments * <span class="caption">(pick up to 2)</span></span><p class="caption" style="margin:2px 0 8px">Name the two departments you’d work — the league office assigns duties from here. Two keeps an application honest about where you’ll actually spend your time.</p>'+
       '<div class="stack" style="gap:8px">'+CG.STAFF_DEPARTMENTS.map(function(d){
         var on = pickedDepts.indexOf(d[0])>=0;
@@ -4445,24 +4450,33 @@ CG.ROUTES.staffapply = function(){
     '<label class="fld"><span>Relevant experience</span><input id="sa-exp" placeholder="e.g. reffed in two leagues, ran stats for…" value="'+v("experience")+'"></label>'+
     '<label class="fld"><span>Why you? <span class="caption">(required)</span></span><textarea id="sa-pitch" rows="4" placeholder="What would you bring to the league office?">'+v("pitch")+'</textarea></label>'+
     '<div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap">'+
-      '<button class="btn btn-chrome" id="sa-submit"'+(lockedFromStaff?" disabled":"")+'>'+(app?"Update application":"Submit application")+'</button>'+
+      '<button class="btn btn-chrome" id="sa-submit"'+(lockedFromStaff?" disabled":"")+'>'+(!app?"Submit application":app.status==="approved"?"Apply again":(app.status==="withdrawn"||app.status==="denied")?"Resubmit application":"Update application")+'</button>'+
+      (staffWithdrawable ? '<button class="btn btn-ghost btn-sm" id="sa-withdraw" style="color:var(--red-ink)">Withdraw application</button>' : '')+
       '<span class="caption">Staff review the queue on the <b>Staff Desk</b>; approval adds the Discord Staff role automatically.</span></div>'+
-    '</div></div>'+
+    '</div></div></div>'+
     '<p class="caption" style="margin-top:14px">Looking to run a club instead? <a href="#/owner" style="font-weight:700;border-bottom:2px solid var(--chrome)">Apply to own a club →</a></p>'+
   '</div>';
 };
 CG.AFTER.staffapply = function(){
   var dc=document.getElementById("dcSignIn"); if(dc) dc.addEventListener("click", function(){ CG.signIn(); });
+  CG.wireStaffForm();
+  CG.wireAppChat();
+};
+/* v4.22: one department toggle look, shared by the click handler and the in-place repaint */
+CG.setStaffDept = function(el, val){
+  el.setAttribute("aria-pressed", val?"true":"false");
+  el.style.borderColor = val ? "var(--chrome)" : "";
+  var c = el.querySelector(".chip");
+  if (c){ c.classList.toggle("chip-chrome", val); c.textContent = val ? "IN" : "—"; }
+};
+/* v4.22: the form's wiring, run again after an in-place repaint (the chat keeps its own wiring) */
+CG.wireStaffForm = function(){
   var sub=document.getElementById("sa-submit"); if(sub) sub.addEventListener("click", CG.submitStaffApp);
+  var wd=document.getElementById("sa-withdraw"); if(wd) wd.addEventListener("click", CG.withdrawStaffApp);
   document.querySelectorAll("[data-sa-dept]").forEach(function(b){ b.addEventListener("click", function(){
     var on = this.getAttribute("aria-pressed")!=="true";
     var mine = (this.getAttribute("data-sa-dept")||"").toLowerCase();
-    var set = function(el, val){
-      el.setAttribute("aria-pressed", val?"true":"false");
-      el.style.borderColor = val ? "var(--chrome)" : "";
-      var c = el.querySelector(".chip");
-      if (c){ c.classList.toggle("chip-chrome", val); c.textContent = val ? "IN" : "—"; }
-    };
+    var set = CG.setStaffDept;
     /* Two departments max. Media is exempt from the check because picking it clears everything else
        (Rule 2.7, below) — the board can only end up smaller, never over the cap. */
     if (on && mine !== "media"){
@@ -4488,7 +4502,6 @@ CG.AFTER.staffapply = function(){
         : "Media can’t be held alongside another department — Media was cleared (Rule 2.7)", "ok");
     }
   }); });
-  CG.wireAppChat();
 };
 CG.staffDeptLabel = function(key){
   key = (CG.DEPT_ALIAS && CG.DEPT_ALIAS[key]) || key;
@@ -4515,22 +4528,57 @@ CG.submitStaffApp = async function(){
   if(!pitch){ CG.toast("Tell the league office why you — the pitch is the application","err"); return; }
   var payload={ profile_id: CG.auth.user.id, departments:depts, timezone:v("sa-tz")||null, availability:v("sa-avail")||null,
     experience:v("sa-exp")||null, pitch:pitch, status:"pending", updated_at:new Date().toISOString() };
+  var prevSt = CG.auth.staffApp && CG.auth.staffApp.status;
   var r=await CG.sb.from("staff_applications").upsert(payload,{onConflict:"profile_id"}).select().maybeSingle();
   if(r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
   CG.auth.staffApp=r.data||payload; /* keep the row (with its id) so the office chat appears at once */
-  CG.toast("Application submitted — the league office will review it","ok"); CG.router();
+  /* v4.22: saving a waitlisted application keeps it on the waitlist (guard_app_decision); a refile is voted afresh */
+  CG.toast(CG.auth.staffApp.status==="waitlisted" ? "Application updated. You are still on the waitlist."
+    : (prevSt==="withdrawn"||prevSt==="denied"||prevSt==="approved") ? "Application filed again. The reviewers will vote on it afresh."
+    : prevSt ? "Application updated." : "Application submitted. The league office will review it.","ok");
+  if (prevSt) CG.repaintStaffParts(); else CG.router();   /* v4.22: a first submit builds the office chat, so it renders the page */
 };
-CG.decideStaffApp = function(id, approve, name){
-  CG.confirm((approve?"Approve":"Deny")+" "+esc(name)+"’s staff application?",
-    approve ? "They become league staff immediately: the Staff Desk appears in their hub and the Discord Staff role lands within a few minutes."
-            : "They’ll be notified and can reapply any time.",
-    approve?"Approve":"Deny", function(){
-    CG.sb.rpc("decide_staff_application",{ p_id:id, p_approve:approve }).then(function(r){
-      if(r.error){ CG.toast("Couldn’t decide: "+r.error.message,"err"); return; }
-      CG.toast(String(r.data||name)+(approve?" is now league staff":" — application denied"),"ok");
-      CG.reloadLeague();
-    });
+/* v4.22: repaint the status note and the form in place (seamless rule); typed answers and department picks survive.
+   (CG.decideStaffApp, never called, left with its door decide_staff_application: it could approve a withdrawn or
+   waitlisted application past waitlist_admit's Rule 2.7 checks.) */
+CG.repaintStaffParts = function(){
+  var t = document.createElement("div"); t.innerHTML = CG.ROUTES.staffapply();
+  var typed = {}, picked = null, form = document.getElementById("sa-form");
+  if (form){
+    form.querySelectorAll("input[id],textarea[id]").forEach(function(el){ typed[el.id] = el.value; });
+    picked = [].slice.call(form.querySelectorAll('[data-sa-dept][aria-pressed="true"]')).map(function(b){ return b.getAttribute("data-sa-dept"); });
+  }
+  ["sa-status","sa-form"].forEach(function(id){
+    var cur = document.getElementById(id), nx = t.querySelector("#"+id);
+    if (cur && nx) cur.outerHTML = nx.outerHTML;
   });
+  Object.keys(typed).forEach(function(id){ var el = document.getElementById(id); if (el) el.value = typed[id]; });
+  if (picked) document.querySelectorAll("[data-sa-dept]").forEach(function(b){ CG.setStaffDept(b, picked.indexOf(b.getAttribute("data-sa-dept")) >= 0); });
+  CG.wireStaffForm();
+};
+/* v4.22 (commissioner, 2026-10-19): "add a withdraw button for staff applications". One door,
+   withdraw_staff_application; success is its confirmed status, never the absence of an error. Never final: a staff
+   application may be filed again at any time, and the refile is voted afresh. */
+CG.withdrawStaffApp = function(){
+  var a = CG.auth.staffApp;
+  if(!CG.sb||!CG.auth.user||!a||!a.id){ CG.toast("Sign in first","err"); return; }
+  CG.confirm("Withdraw your staff application?",
+    a.status==="waitlisted" ? "The reviewers stop considering it and you give up your place on the waitlist. You may file it again at any time, and it is voted on afresh."
+                            : "The reviewers stop voting on it. You may file it again at any time, and it is voted on afresh.",
+    "Withdraw", async function(){
+      var btn = document.getElementById("sa-withdraw"); if(btn) btn.disabled = true;
+      var r = await CG.sb.rpc("withdraw_staff_application", { p_app: a.id });
+      if (r.error || !r.data || !r.data.ok || r.data.status !== "withdrawn"){
+        if(btn) btn.disabled = false;
+        var em = r.error ? (r.error.message||"") : "the league did not confirm it. Refresh the page and check your application.";
+        CG.toast(/WITHDRAW:/.test(em) ? em.replace(/^.*WITHDRAW:\s*/,"") : "Couldn’t withdraw: "+em, "err");
+        return;
+      }
+      CG.auth.staffApp = Object.assign({}, a, { status:"withdrawn", waitlisted_at:null, updated_at:new Date().toISOString() });
+      ((CG.lg && CG.lg._staffApps) || []).forEach(function(x){ if (x.id === a.id){ x.status = "withdrawn"; x.waitlisted_at = null; } });
+      CG.toast("Application withdrawn. You may file it again at any time.", "ok");
+      CG.repaintStaffParts();
+    });
 };
 
 /* ================================================================
@@ -6779,7 +6827,7 @@ CG.admPreseason = function(qs){
     '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Every club and its current roster. Remove waives a player to the free-agent pool; a manager keeps their Owner/GM/AGM seat — those are set under Teams.</span></div></div>';
   h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Owner applications</h3><span class="chip '+(pendingApps?"chip-warn":"chip-win")+'">'+(pendingApps?pendingApps+" pending":"none pending")+'</span></div>';
   if (apps.length){
-    h+=apps.map(function(a){ var prof=a.profiles||{}, sc=a.status==="approved"?"chip-win":a.status==="denied"?"chip-loss":"chip-warn";
+    h+=apps.map(function(a){ var prof=a.profiles||{}, sc=a.status==="approved"?"chip-win":a.status==="denied"?"chip-loss":a.status==="withdrawn"?"":a.status==="waitlisted"?"chip-chrome":"chip-warn";
       return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+
         '<b style="font-family:var(--f-disp)">'+esc(prof.gamertag||"Applicant")+'</b><span class="chip '+sc+'">'+esc((a.status||"pending").toUpperCase())+'</span></div>'+
         '<div class="caption" style="display:flex;gap:14px;flex-wrap:wrap">'+CG.franchisePicksLine(a)+(a.ea_id?'<span>EA '+esc(a.ea_id)+'</span>':"")+'</div>'+
@@ -6792,7 +6840,7 @@ CG.admPreseason = function(qs){
   var pendSApps=sapps.filter(function(a){ return a.status==="pending"; }).length;
   h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Staff applications</h3><span class="chip '+(pendSApps?"chip-warn":"chip-win")+'">'+(pendSApps?pendSApps+" pending":"none pending")+'</span></div>';
   if (sapps.length){
-    h+=sapps.map(function(a){ var prof=a.profiles||{}, sc=a.status==="approved"?"chip-win":a.status==="denied"?"chip-loss":"chip-warn";
+    h+=sapps.map(function(a){ var prof=a.profiles||{}, sc=a.status==="approved"?"chip-win":a.status==="denied"?"chip-loss":a.status==="withdrawn"?"":a.status==="waitlisted"?"chip-chrome":"chip-warn";
       return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+
         '<b style="font-family:var(--f-disp)">'+esc(prof.gamertag||"Applicant")+'</b><span class="chip '+sc+'">'+esc((a.status||"pending").toUpperCase())+'</span></div>'+
         ((a.departments&&a.departments.length)?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">'+a.departments.map(function(k){ return '<span class="chip chip-chrome" style="font-size:9px">'+esc(CG.staffDeptLabel(k))+'</span>'; }).join("")+'</div>':"")+
@@ -10501,6 +10549,14 @@ CG.AFTER._roster = function(){
 CG.appBallotsFor = function(type, id){
   return ((CG.lg && CG.lg._appBallots) || []).filter(function(v){ return v.app_type===type && v.application_id===id; });
 };
+/* v4.22 ("Fresh vote", commissioner 2026-10-19): the ballots that COUNT for an application are the ones cast or changed
+   since it was last filed (filed_at), exactly as resolve_application_if_ready counts them; older ones stay on the
+   record. Every reader that shows a tally, "you voted" or "your ballot" goes through this one helper. Management
+   nominations have no filed_at, so every ballot counts. The server stamps each ballot's time (stamp_ballot_time). */
+CG.appCountingBallots = function(type, a){
+  var f = a && a.filed_at ? Date.parse(a.filed_at) : 0;
+  return CG.appBallotsFor(type, a.id).filter(function(v){ return !f || Date.parse(v.updated_at) >= f; });
+};
 CG.loadAppBallots = function(){
   if (!CG.sb) return Promise.resolve(false);
   return CG.sb.from("application_ballots")
@@ -10515,7 +10571,12 @@ CG.appBallotSection = function(type, a, decided){
   var uid = CG.auth.user && CG.auth.user.id;
   var reviewers = CG.appReviewers();
   var N = reviewers.length, need = Math.floor(N/2)+1;
-  var voteBy = {}; CG.appBallotsFor(type, a.id).forEach(function(v){ voteBy[v.voter_id] = v; });
+  /* v4.22 ("Fresh vote", commissioner 2026-10-19): only ballots cast or changed since the application was last filed
+     count, exactly as resolve_application_if_ready counts them; older ones stay on the record */
+  var counting = CG.appCountingBallots(type, a), earlier = CG.appBallotsFor(type, a.id).length - counting.length;
+  var voteBy = {}; counting.forEach(function(v){ voteBy[v.voter_id] = v; });
+  /* v4.22: a waitlisted application is not before the vote; the reviewers admit or remove it from the Staff Desk */
+  var waitlisted = a.status === "waitlisted";
   var cast = reviewers.filter(function(r){ return voteBy[r.id]; }).length;
   var yes = reviewers.filter(function(r){ return voteBy[r.id] && voteBy[r.id].vote==="approve"; }).length;
   var no  = reviewers.filter(function(r){ return voteBy[r.id] && voteBy[r.id].vote==="deny"; }).length;
@@ -10523,12 +10584,13 @@ CG.appBallotSection = function(type, a, decided){
 
   var head = decided
     ? '<span class="chip '+(a.status==="approved"?"chip-win":a.status==="withdrawn"?"":"chip-loss")+'">'+esc((a.status||"").charAt(0).toUpperCase()+(a.status||"").slice(1))+'</span>'
+    : waitlisted ? '<span class="chip chip-chrome chip-xs">On the waitlist</span>'
     : '<span class="chip chip-xs">'+cast+' of '+N+' voted</span>';
   var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Reviewer vote</h3>'+head+'</div><div class="card-b">';
 
   h += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+
     '<span class="chip chip-win chip-xs">'+yes+' approve</span><span class="chip chip-loss chip-xs">'+no+' deny</span>'+
-    (N?'<span class="caption">'+need+' of '+N+' needed to pass</span>':"")+'</div>';
+    (N && !waitlisted ?'<span class="caption">'+need+' of '+N+' needed to pass</span>':"")+'</div>';   /* v4.22: a waitlisted one is not voted on */
 
   if (N){
     h += '<div class="stack" style="gap:9px;margin-bottom:14px">'+reviewers.slice().sort(function(x,y){ return (x.gamertag||"").localeCompare(y.gamertag||""); }).map(function(r){
@@ -10539,11 +10601,11 @@ CG.appBallotSection = function(type, a, decided){
         '<b style="font-family:var(--f-disp);font-size:13px">'+esc(r.gamertag||"An official")+(r.id===uid?" · you":"")+'</b>'+
         (v&&v.note?'<span class="small" style="color:var(--steel);flex:1;min-width:150px">“'+esc(v.note)+'”</span>':"")+'</div>';
     }).join("")+'</div>';
-  } else if (!decided){
+  } else if (!decided && !waitlisted){
     h += '<p class="caption" style="margin-bottom:12px;color:var(--amber-ink)">No application reviewers are assigned yet. A commissioner needs to add staff to the <b>Applications review</b> department — or decide this directly below.</p>';
   }
 
-  if (!decided && isReviewer){
+  if (!decided && !waitlisted && isReviewer){
     h += '<div style="border-top:1px solid var(--line-soft);padding-top:12px">'+
       '<span class="caption" style="display:block;margin-bottom:8px">'+(mine?"Your vote. Change it any time until the application is decided, the moment "+need+" of "+N+" reviewers agree":"Cast your vote: "+need+" of "+N+" reviewers decide it")+'</span>'+
       '<input id="appVoteNote" placeholder="Add a reason (optional)" autocomplete="off" aria-label="Reason for your vote" style="width:100%;margin-bottom:8px" value="'+esc((mine&&mine.note)||"")+'">'+
@@ -10552,21 +10614,21 @@ CG.appBallotSection = function(type, a, decided){
         '<button class="btn '+(mine&&mine.vote==="deny"?"btn-ink":"btn-ghost")+' btn-sm" data-vote-cast="deny" aria-pressed="'+!!(mine&&mine.vote==="deny")+'" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Deny</button>'+
         (mine?'<button class="btn btn-ghost btn-sm" data-vote-retract="1" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'" style="margin-left:auto">Retract</button>':"")+'</div></div>';
   }
-  if (!decided && isCommish){
+  if (!decided && !waitlisted && isCommish){
     h += '<div style="border-top:1px solid var(--line-soft);padding-top:12px;margin-top:12px">'+
       '<span class="caption" style="display:block;margin-bottom:8px">Commissioner override — decide now without waiting for the vote</span>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
         '<button class="btn btn-chrome btn-sm" data-app-override="approve" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Approve now</button>'+
         '<button class="btn btn-ghost btn-sm" data-app-override="deny" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Deny now</button>'+
-        (a.status==="waitlisted"
-          ? '<span class="chip chip-chrome btn-sm" style="align-self:center">On the waitlist</span>'
-          : '<button class="btn btn-ghost btn-sm" data-app-waitlist="1" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'" title="No open spot right now — queue them. When a seat opens they are appointed automatically, in waitlist order.">Waitlist</button>')+
+        '<button class="btn btn-ghost btn-sm" data-app-waitlist="1" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'" title="No open spot right now: queue them. Nobody is admitted automatically; the reviewers admit from the Staff Desk.">Waitlist</button>'+
         '</div></div>';
   }
 
   h += '<p class="caption" style="margin-top:12px">'+(a.status === "withdrawn"
     /* v4.21: an applicant may withdraw; that is not a decision, and nobody was told an outcome */
     ? "Withdrawn by the applicant, so it was not decided. The votes cast before the withdrawal stay on the record."
+    : waitlisted
+    ? "On the waitlist, so the reviewers’ votes do not decide it. Nobody is admitted automatically: the reviewers admit it or take it off the waitlist from the Waitlist card on the Staff Desk, in any order they choose."
     : decided
     ? "Decided by the reviewer vote (or a commissioner override). The applicant was notified of the outcome."
     : N===0
@@ -10576,6 +10638,7 @@ CG.appBallotSection = function(type, a, decided){
       : "The decision is automatic: it is approved once more than half of all "+N+" reviewer"+(N===1?"":"s")+" approve it, and denied once that can no longer happen. "+
         (type==="owner" ? "An owner application approved for a club the league does not field yet then waits on a commissioner’s go-ahead. " : "")+
         "Votes are visible only to the league office.")+'</p>';
+  if (earlier && !decided && !waitlisted) h += '<p class="caption" style="margin-top:6px">'+earlier+' earlier vote'+(earlier===1?"":"s")+', cast before it was last filed, '+(earlier===1?"stays":"stay")+' on the record but '+(earlier===1?"does":"do")+' not count (a refiled application is voted afresh).</p>';
   return h + '</div></div>';
 };
 /* ---- Seat conflicts on a GM/AGM nomination (Rule 2.6) ------------------------------------
@@ -10693,6 +10756,7 @@ CG.hubApplicationDetail = function(id, type){
   var statusChip = a.status==="approved" ? '<span class="chip chip-win">Approved</span>'
     : a.status==="denied" ? '<span class="chip chip-loss">Denied</span>'
     : a.status==="withdrawn" ? '<span class="chip">Withdrawn</span>'
+    : a.status==="waitlisted" ? '<span class="chip chip-chrome">Waitlisted</span>'
     : '<span class="chip chip-warn">Pending</span>';
 
   var h = '<div style="margin-bottom:18px">'+back+
@@ -10786,15 +10850,18 @@ CG.AFTER._applicationDetail = function(){
       CG.reloadLeague();   /* a placement changes the club list, not just this row */
     });
   }); });
-  /* waitlist — no spot now; auto-appointed when one opens, in waitlist order */
+  /* waitlist: no spot now. Until 2026-09-07 a waitlisted application was appointed automatically when a seat opened,
+     in waitlist order; that was retired ("The waitlist should not automatically accept someone when a position opens
+     up") and restated 2026-10-19 in v4.22 ("Waitlist applications should not fill automatically"). The reviewers
+     admit from the Staff Desk. */
   document.querySelectorAll("[data-app-waitlist]").forEach(function(b){ b.addEventListener("click", function(){
     var t = this.getAttribute("data-vt"), id = this.getAttribute("data-vid");
     CG.confirm("Put this application on the waitlist?",
-      "No spot is filled now. The moment a "+(t==="owner"?"club owner seat opens (an owner resigns or is not renewed)":"staff seat opens")+", the oldest waitlisted application is appointed automatically — the applicant and the commissioners are notified. Waitlist order is first on, first served.",
+      "It leaves the vote and waits for a seat. Nobody is admitted automatically: when a "+(t==="owner"?"club owner seat":"staff seat")+" opens, the reviewers admit from the Waitlist card on the Staff Desk, in any order they choose. The applicant keeps their place if they edit the application and gives it up if they withdraw it.",
       "Waitlist", function(){
       CG.sb.rpc("waitlist_application", { p_type:t, p_id:id }).then(function(r){
         if (r.error){ CG.toast("Couldn’t waitlist: "+r.error.message,"err"); return; }
-        CG.toast("Waitlisted — they’ll be appointed automatically when a spot opens","ok");
+        CG.toast("Waitlisted. The reviewers admit from the Staff Desk when a spot opens.","ok");
         CG.reloadLeague();
       });
     });
@@ -10817,7 +10884,7 @@ CG.AFTER._applicationDetail = function(){
     var v=this.getAttribute("data-vote-cast"), t=this.getAttribute("data-vt"), id=this.getAttribute("data-vid");
     var note=((document.getElementById("appVoteNote")||{}).value||"").trim();
     var btns=document.querySelectorAll("[data-vote-cast],[data-vote-retract]"); btns.forEach(function(x){ x.disabled=true; });
-    CG.sb.from("application_ballots").upsert({ app_type:t, application_id:id, voter_id:CG.auth.user.id, vote:v, note:(note||null), updated_at:new Date().toISOString() }, {onConflict:"app_type,application_id,voter_id"}).select("id").then(function(r){
+    CG.sb.from("application_ballots").upsert({ app_type:t, application_id:id, voter_id:CG.auth.user.id, vote:v, note:(note||null) }, {onConflict:"app_type,application_id,voter_id"})   /* v4.22b: updated_at is stamped by the server (stamp_ballot_time) */.select("id").then(function(r){
       if(r.error){ btns.forEach(function(x){x.disabled=false;}); CG.toast("Couldn’t save your vote: "+r.error.message,"err"); return; }
       if(!r.data||!r.data.length){ btns.forEach(function(x){x.disabled=false;}); CG.toast("Only assigned application reviewers can vote.","err"); return; }
       CG.toast("Vote recorded — "+(v==="approve"?"approve":"deny"),"ok");
@@ -10849,7 +10916,7 @@ CG.allTickets = function(){
       isOpen: !closed, at: a.created_at?Date.parse(a.created_at):0,
       route: "#/hub/complaint?id="+a.id, replies: ((lg._actionMsgs||{})[a.id]||[]).length });
   });
-  function appResult(s){ return s==="approved"?"Approved":s==="denied"?"Denied":s==="withdrawn"?"Withdrawn":"Pending"; }
+  function appResult(s){ return s==="approved"?"Approved":s==="denied"?"Denied":s==="withdrawn"?"Withdrawn":s==="waitlisted"?"Waitlisted":"Pending"; }
   (lg._staffApps||[]).forEach(function(a){
     var closed = a.status!=="pending";
     out.push({ group:"staff", typeLabel:"Staff application", icon:"users",
@@ -10980,7 +11047,7 @@ CG.hubStaffDesk = function(){
       sub = isOwner ? CG.franchisePicksLine(a)
         : ((a.departments&&a.departments.length) ? a.departments.map(function(k){ return esc(CG.staffDeptLabel(k)); }).join(" · ") : "Staff application");
     }
-    var vb = CG.appBallotsFor(type, a.id), vy = vb.filter(function(v){return v.vote==="approve";}).length, vn = vb.length - vy;
+    var vb = CG.appCountingBallots(type, a), vy = vb.filter(function(v){return v.vote==="approve";}).length, vn = vb.length - vy;   /* v4.22: Fresh vote */
     /* a nomination into a seat that is already held can't be honored — flag it in the queue so a
        reviewer sees it before casting the vote that decides it (Rule 2.6) */
     var sc = isMgmt ? CG.seatConflict(a, lg) : null;

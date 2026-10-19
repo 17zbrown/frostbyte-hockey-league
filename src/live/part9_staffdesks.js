@@ -144,7 +144,8 @@ CG.deskReviewBoard = function(){
   /* how many of the pending items still need MY ballot — the number a reviewer
      actually cares about when they open this page */
   var mine = 0;
-  function ballots(type, a){ return CG.appBallotsFor(type, a.id) || []; }
+  /* v4.22 ("Fresh vote"): only ballots since the application was last filed count, so "you voted" and the tally agree with the database */
+  function ballots(type, a){ return CG.appCountingBallots(type, a) || []; }
   function votedByMe(type, a){
     return ballots(type, a).some(function(v){ return v.profile_id === me || v.voter_id === me; });
   }
