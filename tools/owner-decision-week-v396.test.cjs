@@ -18,7 +18,9 @@ A("votes resolve once applications close (cron every 15 minutes)", /cron\.schedu
 A("the decision deadline is watched two days out and at it, nothing vacated automatically", /when now\(\) >= v_by - interval '2 days' then 'two_days'/.test(sql) && /cron\.schedule\('owner-decision-watch'/.test(sql) && !/owner_profile_id = null/.test(sql.slice(sql.indexOf("owner_decision_watch()"))));
 
 console.log("— the site");
-A("the form lists the league's clubs, not every NHL franchise", /var clubs = \(CG\.TEAMS\|\|\[\]\)\.map\(function\(t\)\{ return \(\(t\.city \? t\.city\+" " : ""\) \+ t\.name\)\.trim\(\); \}\)/.test(live) && /Choose a club…/.test(live));
+/* v4.19 (commissioner, 2026-10-18): "Allow people filling out owner applications to pick from any team in the NHL."
+   That reverses the v3.96 "current clubs only" form, so its pin moved to tools/owner-any-franchise-v419.test.cjs, which
+   pins the opposite (all thirty-two franchises). */
 A("the review board says a held club passes over in a reapply season", /Held now: passes to them if approved/.test(live) && /CG\.ownerAppClubStatus\(name, a\)/.test(live));
 A("the Control Center lists the deadline watch", /key:"owner-decision-watch", noRun:true, staleAfterMin:120/.test(live));
 

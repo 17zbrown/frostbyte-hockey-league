@@ -276,7 +276,7 @@ CG.deskReviewBoard = function(){
                   esc(nm)+(taken[nm] ? ' (taken)' : '')+'</option>';
               }).join("")+
             '</select>'+
-            '<span class="caption">the three they applied for — the club is created and handed over on admit</span>'+
+            '<span class="caption">the three they applied for: a club the league has is handed over on admit, and a new one waits for a commissioner’s go-ahead</span>'+
           '</div>'
         : '<div class="caption" style="margin-bottom:10px">'+depts+'</div>')+
       '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
@@ -291,7 +291,7 @@ CG.deskReviewBoard = function(){
     '<div class="card-b"><p class="caption" style="margin:0;max-width:78ch">'+
       '<b style="font-family:var(--f-disp)">Nobody is admitted automatically.</b> When a seat opens the list '+
       'does not move on its own — a reviewer admits from here, in whatever order the board decides. '+
-      'Admitting an owner hands them the club shown and creates it if it does not exist yet.</p></div>';
+      'Admitting an owner hands them the club shown. A club the league does not field yet is added only when a commissioner gives the go-ahead.</p></div>';  /* v4.19 */
   h += waitN
     ? waitO.map(function(a,i){ return waitRow(a,"owner",i); }).join("")+
       waitS.map(function(a,i){ return waitRow(a,"staff",i); }).join("")
@@ -358,7 +358,9 @@ CG.AFTER._deskReviewBoard = function(){
     CG.confirm("Admit "+esc(who)+" into the league?",
       t === "owner"
         ? (club
-            ? "They are handed the "+esc(club)+" straight away and the club goes live on the site. Nobody else on the list is moved."
+            ? ((CG.activeFranchiseSet && !CG.activeFranchiseSet()[club])
+                ? "They are approved for the "+esc(club)+", a new club for the league, which is added once a commissioner gives the go-ahead. Nobody else on the list is moved."
+                : "They are handed the "+esc(club)+" straight away. Nobody else on the list is moved.")
             : "No club is chosen, so this will be refused — pick one of their three franchises first.")
         : "They are granted the staff role and the Staff Desk appears in their hub.",
       "Admit", function(){

@@ -52,7 +52,7 @@ CG.pingDiscordSync = function(){
    writes roster_spots, and that table's trigger feeds role_sync_queue, which the always-on bot
    drains within seconds — the ping only added a full guild reconciliation per pick, up to one
    every six seconds through a 140-pick draft night. */
-CG.ROLE_RPCS = ("set_member_role set_team_manager set_staff_profile sign_free_agent move_player "+
+CG.ROLE_RPCS = ("set_member_role set_team_manager set_staff_profile sign_free_agent move_player office_found_owner_club "+
   "waive_player admin_remove_from_roster ban_player unban_player accept_trade "+
   "apply_application_decision override_application_decision decide_staff_application "+
   "decide_owner_application start_next_season"
@@ -4020,14 +4020,32 @@ CG.activeFranchiseSet = function(){
   });
   return set;
 };
-/* v3.96 (commissioner, 2026-10-13): "If we add expansion clubs, we will do that manually as needed." An applicant
-   chooses among the league's current clubs; the database refuses anything else (guard_owner_app_picks), and a new club
-   is added by the league office before it can be chosen. */
+/* v3.96 (commissioner, 2026-10-13): "If we add expansion clubs, we will do that manually as needed." That limited the
+   picks to the league's current clubs.
+   v4.19 (commissioner, 2026-10-18): "Allow people filling out owner applications to pick from any team in the NHL." The
+   form lists all thirty-two (CG.NHL_FRANCHISES mirrors public.nhl_franchises name for name, and the v4.19 SQL record
+   pins the list), the league's clubs first. guard_owner_app_picks refuses anything else. A franchise the league does
+   not field yet becomes a club only on a commissioner's go-ahead (public.office_found_owner_club). */
 CG.franchiseOptions = function(selected){
-  var clubs = (CG.TEAMS||[]).map(function(t){ return ((t.city ? t.city+" " : "") + t.name).trim(); }).filter(Boolean).sort();
-  return '<option value="">Choose a club…</option>'+clubs.map(function(name){
-    return '<option value="'+esc(name)+'"'+(selected===name?" selected":"")+'>'+esc(name)+'</option>';
-  }).join("");
+  var active = CG.activeFranchiseSet(), all = CG.NHL_FRANCHISES.slice().sort();
+  var opt = function(name){ return '<option value="'+esc(name)+'"'+(selected===name?" selected":"")+'>'+esc(name)+'</option>'; };
+  var inLg = all.filter(function(n){ return active[n]; }), rest = all.filter(function(n){ return !active[n]; });
+  /* a stored pick outside the thirty-two (history) still shows, so editing never drops it silently */
+  var extra = (selected && all.indexOf(selected) < 0) ? opt(selected) : "";
+  return '<option value="">Choose a franchise…</option>'+extra+
+    (inLg.length ? '<optgroup label="In the CGHL">'+inLg.map(opt).join("")+'</optgroup>' : "")+
+    (rest.length ? '<optgroup label="New to the league">'+rest.map(opt).join("")+'</optgroup>' : "");
+};
+/* v4.19: an approved application waiting on the commissioner's go-ahead for a club the league does not field yet. The
+   mirror of public._owner_app_held_club: approved, awarded an NHL franchise, no CGHL club by that name, and a season
+   that has not started (old approvals for clubs withdrawn before Season 1 are history, never a go-ahead). */
+CG.ownerAppHeldClub = function(a){
+  if (!a || a.status !== "approved" || !a.awarded_club) return null;
+  var s = (CG.SEASONS||[]).find(function(x){ return x.id === a.season_id; });
+  if (!s || s.status !== "upcoming") return null;
+  var want = String(a.awarded_club).trim().toLowerCase();
+  var name = CG.NHL_FRANCHISES.find(function(n){ return n.toLowerCase() === want; });
+  return (name && !CG.activeFranchiseSet()[name]) ? name : null;
 };
 /* v3.96: a season whose owners all reapply hands a club over on approval. The published rule is the marker: its
    rulebook chapter (Chapter S2) carries ownersReapply, mirroring app_config owners_reapply_<n> in the database. */
@@ -4048,8 +4066,11 @@ CG.ownersReapply = function(seasonId){
 CG.ownerAppClubStatus = function(name, a){
   var code = CG.activeFranchiseSet()[name];
   var team = code ? (CG.TEAMS||[]).find(function(t){ return t.code===code; }) : null;
-  /* v3.96: no club is founded from an application, and in a season whose owners all reapply the club passes over */
-  if (!team) return { ok:false, chip:'<span class="chip chip-warn chip-xs">Not a CGHL club</span>' };
+  /* v3.96: no club is founded from an application, and in a season whose owners all reapply the club passes over.
+     v4.19: any NHL franchise may be picked; one the league does not field yet is added only on the commissioner's go-ahead */
+  if (!team) return CG.NHL_FRANCHISES.indexOf(name) >= 0
+    ? { ok:true, chip:'<span class="chip chip-chrome chip-xs">New club: added on the commissioner’s go-ahead</span>' }
+    : { ok:false, chip:'<span class="chip chip-warn chip-xs">Not an NHL franchise</span>' };
   var holder = team.owner || null;   /* CG.TEAMS carries the Owner's profile id as owner */
   if (a && holder && holder === a.profile_id) return { ok:true, chip:'<span class="chip chip-win chip-xs">Their club now</span>' };
   if (team.owner && a && CG.ownersReapply(a.season_id))
@@ -4069,8 +4090,11 @@ CG.ownerAppClubPicker = function(a){
   var closed  = a.status==="denied" || a.status==="withdrawn";
   var live    = may && !closed && !placed;
 
+  var held    = CG.ownerAppHeldClub(a);   /* v4.19: approved, waiting on the commissioner's go-ahead for a new club */
+  var isNew   = !!(awarded && !CG.activeFranchiseSet()[awarded]);
   var head = placed  ? '<span class="chip chip-win chip-xs">Club handed over</span>'
            : closed  ? '<span class="chip chip-xs">Not awarded</span>'
+           : held    ? '<span class="chip chip-warn chip-xs">Waiting on the commissioner</span>'
            : awarded ? '<span class="chip chip-chrome chip-xs">'+esc(awarded)+'</span>'
                      : '<span class="chip chip-warn chip-xs">No choice yet</span>';
 
@@ -4082,15 +4106,20 @@ CG.ownerAppClubPicker = function(a){
     /* past tense — a denied application's award will never be acted on */
     h += '<p class="caption" style="margin-bottom:12px">This application was '+esc(a.status)+
          ', so no club was created'+(awarded?' — the <b>'+esc(awarded)+'</b> were only ever pencilled in':"")+'.</p>';
+  } else if (held){
+    h += '<p class="caption" style="margin-bottom:12px;color:var(--amber-ink)"><b>Approved for the '+esc(held)+'.</b> '+
+         'They would be a new club for the league, so nothing is created or handed over until a commissioner gives the go-ahead.</p>';
   } else if (!awarded && a.status==="approved"){
     h += '<p class="caption" style="margin-bottom:12px;color:var(--amber-ink)"><b>Approved with no club chosen.</b> '+
-         'Pick one below and it is created and handed over straight away.</p>';
+         'Pick one below. A club the league already has is handed over straight away; a new club waits for a commissioner’s go-ahead.</p>';
   } else if (!awarded){
     h += '<p class="caption" style="margin-bottom:12px;color:var(--amber-ink)"><b>Nobody has chosen yet.</b> '+
          'If the vote passes now, no club is created — the league office picks one afterwards.</p>';
   } else {
     h += '<p class="caption" style="margin-bottom:12px">The <b>'+esc(awarded)+'</b> '+
-         (a.status==="approved" ? 'were awarded to this applicant.' : 'will be created and handed over the moment this is approved.')+'</p>';
+         (a.status==="approved" ? 'were awarded to this applicant.'
+          : isNew ? 'would be a new club: they are added, and the applicant seated, only when a commissioner gives the go-ahead after approval.'
+          : 'are handed over the moment this is approved.')+'</p>';
   }
 
   h += '<div class="stack" style="gap:8px">'+picks.map(function(name, i){
@@ -4118,7 +4147,10 @@ CG.franchisePicksLine = function(a){
   var picks = [a.preferred_club, a.franchise_2, a.franchise_3].filter(Boolean);
   if (!picks.length) return '<span>No franchise selected</span>';
   return '<span>Franchise: '+picks.map(function(name,i){
-    return '<b>'+["1st","2nd","3rd"][i]+' '+esc(name)+'</b>'+(active[name]?"":' <span class="chip chip-warn" style="font-size:8px;padding:1px 5px">not a CGHL club</span>');
+    /* v4.19: a franchise the league does not field yet is a new club, not a mistake */
+    return '<b>'+["1st","2nd","3rd"][i]+' '+esc(name)+'</b>'+(active[name]?""
+      : CG.NHL_FRANCHISES.indexOf(name) >= 0 ? ' <span class="chip chip-chrome" style="font-size:8px;padding:1px 5px">new club</span>'
+      : ' <span class="chip chip-warn" style="font-size:8px;padding:1px 5px">not an NHL franchise</span>');
   }).join(" · ")+'</span>';
 };
 CG.ROUTES.owner = function(){
@@ -4154,7 +4186,11 @@ CG.ROUTES.owner = function(){
       ? '<div class="note grn" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("shield",15)+
         '<span style="flex:1">You’re on <b>Media</b> only, which is the one staff department that may also run a club (Rule 2.7). Take on a second department and you’d have to give the club seat up.</span></div>'
       : "");
-  var statusCard = CG.auth.ownerApp ? '<div class="note '+(a.status==="approved"?"grn":a.status==="denied"?"red":"chr")+'" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your application is '+esc((a.status||"pending").toUpperCase())+'.</b> Resubmit below to update it — the commissioners review every application.</div>' : "";
+  /* v4.19: an approval for a new club waits on the commissioner's go-ahead, and the applicant is told so */
+  var heldMine = CG.auth.ownerApp ? CG.ownerAppHeldClub(a) : null;
+  var statusCard = CG.auth.ownerApp ? '<div class="note '+(a.status==="approved"?"grn":a.status==="denied"?"red":"chr")+'" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your application is '+esc((a.status||"pending").toUpperCase())+'.</b> '+
+    (heldMine ? 'The '+esc(heldMine)+' would be a new club for the league: they are added, and you are seated as Owner, once a commissioner gives the go-ahead.'
+              : 'Resubmit below to update it. The review board reviews every application.')+'</div>' : "";
   /* v3.99 (commissioner, 2026-10-13): only a member signed up to play in the season may apply to own a club. The
      database refuses it too (guard_owner_app_signed_up), and withdrawing the sign-up withdraws a pending application. */
   var needSignup = !lockedFromOwning && !deadlineClosed && !(CG.isRegisteredNow && CG.isRegisteredNow());
@@ -4174,7 +4210,7 @@ CG.ROUTES.owner = function(){
     '<label class="fld"><span>EA ID *</span><input id="ow-ea" placeholder="Your EA account name" value="'+esc(a.ea_id||p.ea_id||"")+'"></label>'+
     '<label class="fld"><span>Typical availability</span><input id="ow-avail" placeholder="e.g. Weeknights after 9 PM ET" value="'+esc(a.availability||"")+'"></label>'+
     '<label class="fld"><span>League / management experience</span><textarea id="ow-exp" rows="2" placeholder="Leagues you’ve played or managed in…">'+esc(a.experience||"")+'</textarea></label>'+
-    '<div class="fld"><span>Franchise choices *</span><p class="caption" style="margin:2px 0 8px">Pick the clubs you’d most like to run, in order. Your second and third choices cover you if the club you want most goes to someone else. New clubs are added by the league office.</p>'+
+    '<div class="fld"><span>Franchise choices *</span><p class="caption" style="margin:2px 0 8px">Pick the three NHL franchises you would most like to run, in order. Any of the 32 may be chosen. Your second and third choices cover you if your first goes to someone else. A franchise the CGHL does not field yet becomes a new club only when a commissioner gives the go-ahead after the review board approves you.</p>'+
       '<div class="grid g3" style="gap:10px">'+
         '<label class="fld"><span style="font-size:11px">1st choice *</span><select id="ow-fr1">'+CG.franchiseOptions(a.preferred_club)+'</select></label>'+
         '<label class="fld"><span style="font-size:11px">2nd choice</span><select id="ow-fr2">'+CG.franchiseOptions(a.franchise_2)+'</select></label>'+
@@ -8708,6 +8744,16 @@ CG.teamForm = function(t){
     if ((c1v||"").toLowerCase() === (c2v||"").toLowerCase()){
       CG.toast("Pick the club's secondary color too — the Discord gradient and the site accents use both","err"); return;
     }
+    /* v4.19: a franchise an approved owner application waits on is added by the go-ahead, which also seats the
+       applicant. Adding it here would end the hold with nobody seated, so point to the application instead. */
+    if (isNew){
+      var fullNew = (((document.getElementById("tfCity").value||"").trim() ? (document.getElementById("tfCity").value||"").trim()+" " : "") + name).toLowerCase();
+      var heldApp = (CG.lg._ownerApps||[]).find(function(x){ var h = CG.ownerAppHeldClub(x); return h && (h.toLowerCase() === fullNew || h.toLowerCase() === name.toLowerCase()); });
+      if (heldApp){
+        CG.toast("An approved owner application is waiting on the go-ahead for this club. Give it from that application, which adds the club and seats its Owner.","err");
+        location.hash = "#/hub/application?id="+heldApp.id+"&type=owner"; return;
+      }
+    }
     var rec={ name:name, city:(document.getElementById("tfCity").value||"").trim()||null, code:code,
       division:document.getElementById("tfDiv").value,
       color:c1v,
@@ -9713,6 +9759,7 @@ CG.staffAttentionCard = function(){
     a = { open_cases:oc, oldest_case_hours:null, sla_breached:0,
       pending_staff_apps:(lg._staffApps||[]).filter(function(x){return x.status==="pending";}).length,
       pending_owner_apps:(lg._ownerApps||[]).filter(function(x){return x.status==="pending";}).length,
+      owner_apps_awaiting_go_ahead:(lg._ownerApps||[]).filter(function(x){ return CG.ownerAppHeldClub(x); }).length,
       active_suspensions:(lg.suspensions||[]).filter(function(x){return x.status==="active";}).length,
       unmatched_ea:null, finals_missing_stats:null, ineligible_players_7d:null,
       /* votes the office has already loaded for the desk — open, and still short a ballot */
@@ -9728,6 +9775,8 @@ CG.staffAttentionCard = function(){
       (a.oldest_case_hours!=null?" · oldest "+(a.oldest_case_hours>=24?Math.round(a.oldest_case_hours/24)+"d":a.oldest_case_hours+"h"):""),
       go:"#/hub/complaints", warn:n(a.sla_breached)>0 });
   if (apps>0) items.push({ label:apps+" application"+(apps===1?"":"s")+" to review", go:"#/hub/staffdesk", warn:false });
+  /* v4.19: the commissioner's own item: approvals held for a new club (_staff_attention counts them) */
+  if (n(a.owner_apps_awaiting_go_ahead)>0 && CG.role()==="commish") items.push({ label:n(a.owner_apps_awaiting_go_ahead)+" owner application"+(n(a.owner_apps_awaiting_go_ahead)===1?"":"s")+" waiting on your go-ahead for a new club", go:"#/admin", warn:true });
   if (n(a.votes_awaiting_ballots)>0) items.push({ label:n(a.votes_awaiting_ballots)+" staff vote"+(n(a.votes_awaiting_ballots)===1?"":"s")+" awaiting your ballot", go:"#/hub/staffdesk", warn:false });
   if (n(a.unmatched_ea)>0) items.push({ label:n(a.unmatched_ea)+" unmatched EA import"+(n(a.unmatched_ea)===1?"":"s"), go:"#/admin/eastats", warn:false });
   if (n(a.finals_missing_stats)>0) items.push({ label:n(a.finals_missing_stats)+" final"+(n(a.finals_missing_stats)===1?"":"s")+" missing box scores", go:"#/admin/eastats", warn:true });
@@ -10434,7 +10483,11 @@ CG.appBallotSection = function(type, a, decided){
     ? "Decided by the reviewer vote (or a commissioner override). The applicant was notified of the outcome."
     : N===0
       ? "There’s no reviewer vote yet — no staff are assigned to Applications review. A commissioner can add reviewers or decide with the override above."
-      : "The decision is automatic: once all "+N+" reviewer"+(N===1?"":"s")+" have voted, 50%+1 approvals approves it — otherwise it’s denied. Votes are visible only to the league office.")+'</p>';
+      /* v4.19: the database decides on a majority of all the reviewers (v3.68 Q47), not when the last one votes; an
+         owner application approved for a new club then waits on the commissioner's go-ahead */
+      : "The decision is automatic: it is approved once more than half of all "+N+" reviewer"+(N===1?"":"s")+" approve it, and denied once that can no longer happen. "+
+        (type==="owner" ? "An owner application approved for a club the league does not field yet then waits on a commissioner’s go-ahead. " : "")+
+        "Votes are visible only to the league office.")+'</p>';
   return h + '</div></div>';
 };
 /* ---- Seat conflicts on a GM/AGM nomination (Rule 2.6) ------------------------------------
@@ -10577,14 +10630,55 @@ CG.hubApplicationDetail = function(id, type){
       '</div>';
   }
   /* which club they're getting is decided before the vote lands — the approval acts on it */
-  if (isOwner) h += CG.ownerAppClubPicker(a);
+  if (isOwner) h += CG.ownerGoAheadCard(a) + CG.ownerAppClubPicker(a);
   /* the applicant chat sits above the vote: talk to the applicant, then the reviewers decide */
   h += CG.appChatSection(type, a.id, {office:true});
   /* the reviewer vote IS the decision — no manual approve/deny */
   h += CG.appBallotSection(type, a, decided);
   return h;
 };
+/* v4.19 (commissioner, 2026-10-18): "do not automatically create the team until a commissioner gives the go ahead."
+   The commissioner's card on an owner application the review board approved for a franchise the league does not field
+   yet. The go-ahead is one call (office_found_owner_club): it creates the club in the chosen division and seats the
+   applicant as Owner, or does nothing. It waits until the application's season is the one being set up, so a club never
+   appears in a season already being played. */
+CG.ownerGoAheadCard = function(a){
+  var club = CG.ownerAppHeldClub(a);
+  if (!club || CG.role() !== "commish") return "";
+  var who = (a.profiles && (a.profiles.gamertag || a.profiles.display_name)) || "the applicant";
+  var ready = !!(CG.SEASON && CG.SEASON.id === a.season_id);
+  var divs = (CG.DIVISIONS && CG.DIVISIONS.length) ? CG.DIVISIONS : ["East","West"];
+  return '<div class="card" id="goAheadCard" style="margin-bottom:18px"><div class="card-h"><h3>Commissioner go-ahead</h3><span class="chip chip-warn chip-xs">New club</span></div><div class="card-b">'+
+    '<p class="caption" style="margin-bottom:12px">The review board approved '+esc(who)+' for the <b>'+esc(club)+'</b>, which the league does not field yet. '+
+    'Nothing has been created. The go-ahead adds the club in the division you choose and seats '+esc(who)+' as its Owner; '+
+    'set its second color, logo and EA club in Clubs afterwards, and its Discord role and room follow within minutes.</p>'+
+    (ready
+      ? '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><label class="fld" style="margin:0"><span style="font-size:11px">Division</span><select id="goAheadDiv">'+
+          '<option value="">Choose…</option>'+divs.map(function(d){ return '<option value="'+esc(d)+'">'+esc(d)+'</option>'; }).join("")+'</select></label>'+
+        '<button class="btn btn-chrome btn-sm" data-go-ahead="'+esc(a.id)+'" data-club="'+esc(club)+'">Give the go-ahead</button></div>'
+      : '<p class="caption" style="color:var(--amber-ink)">Available once the season before this one is complete, so the club joins the season being set up and never the one being played.</p>')+
+    '</div></div>';
+};
 CG.AFTER._applicationDetail = function(){
+  var ga = document.querySelector("[data-go-ahead]");
+  if (ga) ga.addEventListener("click", function(){
+    var btn = this, id = btn.getAttribute("data-go-ahead"), club = btn.getAttribute("data-club");
+    var div = (document.getElementById("goAheadDiv")||{}).value || "";
+    if (!div){ CG.toast("Choose the new club’s division first","err"); return; }
+    CG.confirm("Add the "+esc(club)+"?",
+      "The "+esc(club)+" join the league in the "+esc(div)+" division and the applicant is seated as their Owner, now; if the applicant owns another club, that club loses its Owner. "+
+      "Their Discord role and room are created within minutes. They need a General Manager approved before the draft, and a new club changes the season’s shape (the club count, the division split and the schedule), so check those rules before the schedule is built.",
+      "Give the go-ahead", function(){
+      btn.disabled = true;
+      CG.sb.rpc("office_found_owner_club", { p_app:id, p_division:div }).then(function(r){
+        if (r.error){ btn.disabled = false; CG.toast(r.error.message || "Couldn’t add the club","err"); return; }
+        var d = r.data || {};
+        CG.toast(d.message || "Club added", d.ok === false ? "err" : "ok");
+        if (d.ok === false){ btn.disabled = false; return; }
+        CG.reloadLeague();   /* a new club changes the club list, the seats and the application */
+      });
+    });
+  });
   /* the review board's club choice. Awarding after an approval places the owner on the
      spot, so the toast reports what the server actually did rather than assuming. */
   document.querySelectorAll("[data-club-award]").forEach(function(b){ b.addEventListener("click", function(){
@@ -10821,7 +10915,7 @@ CG.hubStaffDesk = function(){
     h += '<div class="card-b"><p class="caption">No applications waiting. Members apply to own a club (#/owner) or join the staff (#/staffapply); owners nominate a GM/AGM from their Team HQ.</p></div>';
   } else {
     h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Open an application to read it and cast your vote. '+
-      (revCount ? 'Once all <b>'+revCount+'</b> application reviewer'+(revCount===1?"":"s")+' vote, 50%+1 decides it automatically.'
+      (revCount ? 'More than half of all <b>'+revCount+'</b> application reviewer'+(revCount===1?"":"s")+' decides it automatically, and an approval for a new club waits on a commissioner’s go-ahead.'
                 : '<b style="color:var(--amber-ink)">No reviewers are assigned</b> — a commissioner must add staff to the Applications review department, or decide with the commissioner override.')+'</span></div>';
   }
   h += '</div>';
@@ -11292,6 +11386,10 @@ CG.admOverviewLive = function(){
   h += CG.overviewCharts();
   var actions = [];
   if (unlinked.length) actions.push(['Link '+unlinked.length+' club'+(unlinked.length===1?"":"s")+' to EA ('+unlinked.map(function(t){return t.code;}).join(", ")+') so their stats auto-import',"#/admin/eastats","EA stats"]);
+  /* v4.19: approvals held for a new club need the commissioner, so they come first */
+  var heldApps = (lg._ownerApps||[]).filter(function(x){ return CG.ownerAppHeldClub(x); });
+  if (heldApps.length) actions.unshift([heldApps.length+' owner application'+(heldApps.length===1?"":"s")+' approved by the review board for a new club, waiting on your go-ahead',
+    heldApps.length===1 ? "#/hub/application?id="+heldApps[0].id+"&type=owner" : "#/admin/preseason", "Give the go-ahead"]);
   if (pendingApps.length) actions.push([pendingApps.length+' owner application'+(pendingApps.length===1?"":"s")+' waiting on a decision',"#/admin/preseason","Review"]);
   if (unsigned.length) actions.push([unsigned.length+' registered player'+(unsigned.length===1?"":"s")+' not yet on a club — sign or draft them',"#/admin/preseason",(CG.isBasic()?"Draft & placement":"Pre-season")]);
   if (openCases.length) actions.push([openCases.length+' complaint'+(openCases.length===1?"":"s / requests")+' open in the league office',"#/admin/complaints","Case queue"]);
