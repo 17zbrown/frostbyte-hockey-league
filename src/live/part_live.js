@@ -220,6 +220,12 @@ CG.playoffFloorFor = function(pid){
   var m = CG.lg && CG.lg.playoffFloors;
   return (m && m[pid] != null) ? m[pid] : CG.playoffMinGp();
 };
+/* Games counted toward the floor: games played plus any league office credit (public.regular_gp, which the playoff
+   lineup gate reads). A credit adds no statistics, so season lines and Stat Central keep games played. */
+CG.floorGp = function(lg, pid){
+  var s = ((lg && lg.pstats) || {})[pid], c = (lg && lg.gpCredits) || {};
+  return ((s && s.gp) || 0) + (c[pid] || 0);
+};
 CG.playoffRoad = function(lg, clubCode){
   var out = [];
   if (!CG.playoffMinGp() || !lg || !lg.byTeam || !lg.byTeam[clubCode]) return out;
@@ -232,7 +238,7 @@ CG.playoffRoad = function(lg, clubCode){
   (lg.byTeam[clubCode]||[]).forEach(function(pl){
     if (!pl.spotId) return;
     var min = CG.playoffFloorFor(pl.id);
-    var gp = ((lg.pstats||{})[pl.id]||{}).gp || 0, need = Math.max(0, min - gp);
+    var gp = CG.floorGp(lg, pl.id), need = Math.max(0, min - gp);
     var cap = CG.weeklyCap({ squad: pl.squad, pos: pl.pos }), canPlay = exemptLeft;
     Object.keys(weeks).forEach(function(w){
       var used = CG.weekUsedFor ? (CG.weekUsedFor(pl.id, clubCode, weeks[w][0]) || 0) : 0;
@@ -1636,6 +1642,10 @@ CG.applySession = async function(session, quiet){
   } else { CG.auth.profile = null; CG.auth.registration = null; CG.auth.ownerApp = null; }
   CG.auth.role = CG.computeRole(CG.auth.profile);
   await CG.loadManagerData();
+  /* management loads the floors with its own data; a signed-in player needs them for the eligibility card */
+  if (CG.auth.user && CG.auth.role !== "mgmt" && CG.auth.role !== "commish" && CG.auth.role !== "staff"){
+    CG.loadPlayoffFloors().then(function(ok){ if (ok && !quiet && location.hash.indexOf("/hub")>=0 && CG.router) CG.router(); });
+  }
   CG.loadMyLineups();          /* every role — a player needs to know if he is dressed */
   await Promise.all([CG.loadAvailability(), CG.loadTrades()]);
   /* real notifications: load + realtime subscribe on sign-in, tear down on sign-out */
@@ -1777,6 +1787,14 @@ CG.mapDraftData = function(lg, draftPicks, registrations){
   lg.registrationsCount = (registrations||[]).length;
 };
 /* manager-gated data (draft board + registrations) — loaded after auth for management */
+/* v3.94: every rostered player's playoff floor (Rule 8.3), prorated for a player placed after opening night, and any
+   league office credit toward it. Public record, so it loads for every signed-in member, not only management: a
+   player's own eligibility card reads it. Until it lands CG.playoffFloorFor falls back to the season's floor. */
+CG.loadPlayoffFloors = function(){
+  if (!CG.sb || !CG.lg || !CG.SEASON || !CG.SEASON.id) return Promise.resolve(false);
+  return CG.sbAllRpc("playoff_floors", { p_season: CG.SEASON.id }, "profile_id")
+    .then(function(r){ if (r && !r.error){ var m = {}, c = {}; (r.data||[]).forEach(function(x){ m[x.profile_id] = x.floor; if (x.credit) c[x.profile_id] = x.credit; }); CG.lg.playoffFloors = m; CG.lg.gpCredits = c; return true; } return false; }, function(){ return false; });
+};
 CG.loadManagerData = async function(){
   if (!CG.sb || !CG.lg) return;
   var role = CG.auth.role;
@@ -1830,12 +1848,7 @@ CG.loadManagerData = async function(){
       jobs.push(CG.sbCapped(CG.sb.from("weekly_cap_exceptions").select("id,game_id,profile_id,team_id,reason,granted_by,created_at").eq("season_id", CG.SEASON.id), "weekly_cap_exceptions")
         .then(function(r){ if (r && !r.error) CG.lg.capExceptions = r.data || []; }, function(){}));
     }
-    /* v3.94: every rostered player's playoff floor (Rule 8.3), prorated for a player placed after opening night.
-       Public record, so it loads for everyone; until it lands CG.playoffFloorFor falls back to the season's floor. */
-    if (CG.SEASON && CG.SEASON.id){
-      jobs.push(CG.sbAllRpc("playoff_floors", { p_season: CG.SEASON.id }, "profile_id")
-        .then(function(r){ if (r && !r.error){ var m = {}; (r.data||[]).forEach(function(x){ m[x.profile_id] = x.floor; }); CG.lg.playoffFloors = m; } }, function(){}));
-    }
+    jobs.push(CG.loadPlayoffFloors());
     /* my club's private draft board (ranked wishlist; RLS keeps it club-only) */
     if (myBoardTeam && myBoardTeam.id && CG.SEASON && CG.SEASON.id){
       jobs.push(CG.sbCapped(CG.sb.from("draft_boards").select("profile_id,rank")
@@ -8238,7 +8251,7 @@ CG._hideRepaintPill = function(){ var b = document.getElementById("cgRepaintPill
    loadManagerData puts on CG.lg is missing here. */
 CG._LG_CARRY = ["_appBallots","_appMsgs","_draftPicksRaw","_lineups","_gameLinePlan","_mgmtApps","_mgmtMoves","_mgmtPolicy","_mgmtPolicyAt",
   "_myBoard","_myTrades","_ownerApps","_registrationsRaw","_servers","_staffApps","_vetoes","_actionReqs","_actionMsgs","draftState",
-  "_teamLines","_linePlan","capExceptions","playoffFloors","_replacements","_regLoadError"];
+  "_teamLines","_linePlan","capExceptions","playoffFloors","gpCredits","_replacements","_regLoadError"];
 CG._carryLg = function(from, to, skip){
   if (!from || !to) return;
   /* v4.05: keys whose data the rebuild just re-read are not carried; loadManagerData re-reads the office's copy */

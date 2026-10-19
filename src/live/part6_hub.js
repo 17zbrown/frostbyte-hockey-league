@@ -364,7 +364,7 @@ CG.hubDashboard = function(){
       }
     }
     if (CG.playoffMinGp && CG.playoffMinGp() && me.spotId){
-      var myGp = (lg.pstats[me.id]||{}).gp||0, myMin = CG.playoffFloorFor(me.id), myLeft = (lg.schedule||[]).filter(function(g){ return g.stage==="regular" && g.status!=="final" && (g.home===me.team || g.away===me.team); }).length;
+      var myGp = CG.floorGp(lg, me.id), myMin = CG.playoffFloorFor(me.id), myLeft = (lg.schedule||[]).filter(function(g){ return g.stage==="regular" && g.status!=="final" && (g.home===me.team || g.away===me.team); }).length;
       cards.push('<div class="card"><div class="card-h"><h3>Playoff eligibility</h3>'+(myGp>=myMin?'<span class="chip chip-win">eligible</span>':(myMin-myGp)<=myLeft?'<span class="chip chip-warn">'+(myMin-myGp)+' to go</span>':'<span class="chip chip-loss">out of reach</span>')+'</div><div class="card-b">'+
         '<div style="display:flex;align-items:center;gap:12px"><b class="num" style="font-size:26px">'+myGp+'<span class="caption" style="font-size:12px"> / '+myMin+'</span></b>'+
         '<span style="flex:1;height:8px;border-radius:4px;background:var(--line);overflow:hidden"><i style="display:block;height:100%;width:'+Math.round(Math.min(1,myGp/myMin)*100)+'%;background:'+(myGp>=myMin?"var(--green)":"var(--chrome)")+'"></i></span></div>'+
