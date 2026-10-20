@@ -90,7 +90,8 @@ console.log("\n— the Seasons editor");
 A("a Format select, first in the form", /<select id="ssFormat">/.test(live) && /CG\.FORMAT_NAME\[f\]/.test(live));
 A("new seasons default to the standard", /format:"basic",\s*salary_cap:CG\.FORMAT_RULES\.basic\.salary_cap, roster_max:CG\.FORMAT_RULES\.basic\.roster_max,/.test(live));
 A("roster_max is the format's, never typed", /roster_max:fr\.roster_max,/.test(live) && /id="ssRoster" type="number" min="6" max="30" value="'\+\(s\.roster_max\|\|CG\.fmt\("roster_max", s\)\)\+'" readonly/.test(live));
-A("Auto-space has a basic path spaced from draft night", /if \(fmtSel\.value === "basic"\)\{/.test(live) && /the Thursday strictly before/.test(live) && /the Wednesday strictly after/.test(live));
+/* v4.24: the basic cutoff is the day before the draft (commissioner, 2026-10-20), no longer the Thursday strictly before */
+A("Auto-space has a basic path spaced from draft night", /if \(fmtSel\.value === "basic"\)\{/.test(live) && /var cutoffDay = CG\.dayAdd\(draftDay, -1\);/.test(live) && /the Wednesday strictly after/.test(live));
 A("a basic season refuses pre-season / free-agency dates on save", /A basic-format season has no pre-season or free-agency window/.test(live));
 A("the format travels with the save", /status:document\.getElementById\("ssStatus"\)\.value, format:fmtV,/.test(live));
 

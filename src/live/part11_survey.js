@@ -70,6 +70,9 @@ SV.Q = [
   { id: "wish", kind: "text", title: "Anything you would like to see in Season 2 and beyond?", hint: "Optional." }
 ];
 SV.COPY = {
+  /* v4.24, the commissioner: "Can you actually name it the Season 1 survey?" It looks back on Season 1; the questions
+     still say Season 2 where they ask about it, and SV.KEY ("s2-2026") stays, so nobody's finished survey resets */
+  name: "Season 1 survey",
   introTitle: "Help shape Season 2",
   /* three of the eight are typed answers now, so the time promise says 3 minutes, not 2 */
   introSub: SV.Q.length + " quick questions, about 3 minutes. Skip anything you like.",
@@ -278,7 +281,7 @@ SV.questionHtml = function(q, a){
 SV.stepHtml = function(step, a, from){
   var N = SV.Q.length, gate = from === "signup", C = SV.COPY;
   if (step === 0) return {
-    body: '<div class="sv-intro"><p class="eyebrow chr">Season 2 survey</p>' +
+    body: '<div class="sv-intro"><p class="eyebrow chr">' + esc(C.name) + '</p>' +
       '<h3 class="sv-title" id="svTitle" tabindex="-1">' + esc(gate ? C.gateTitle : C.introTitle) + '</h3>' +
       '<p class="sv-lede">' + esc(C.introSub) + '</p></div>',
     /* a quiet link, like every question screen's: skipping is offered, not presented as the equal choice */
@@ -592,7 +595,7 @@ SV.resultsHtml = function(){
   var body = res.data ? SV.resultsBody(res.t) : res.err ? "" :
     '<div class="card"><div class="card-b"><span class="caption">Loading the answers…</span></div></div>';
   return '<section class="svr" id="svResults" aria-labelledby="svrTitle">' +
-    '<div class="svr-head"><div><h2 class="h-sec" id="svrTitle">Season ' + SV.SEASON + ' survey</h2>' +
+    '<div class="svr-head"><div><h2 class="h-sec" id="svrTitle">' + esc(SV.COPY.name) + '</h2>' +
       '<p class="lede">What members told the league ahead of Season ' + SV.SEASON + '. Anonymous: no name or account leaves the database.</p></div>' +
       '<button type="button" class="btn btn-ghost btn-sm" data-svr="reload"' + (res.busy ? " disabled" : "") + '>' + (res.busy ? "Loading…" : "Refresh") + '</button></div>' +
     (res.err ? '<div class="note red" role="alert" style="margin-bottom:14px">Couldn’t load the survey results: ' + esc(res.err) + '</div>' : "") +

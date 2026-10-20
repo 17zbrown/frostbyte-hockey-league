@@ -164,8 +164,10 @@ console.log("— the rulebook says the same thing");
   /* v2.48 — basic has no pre-season, so Rule 2.9's basic text closes position changes at the
      sign-up cutoff itself (Rule 2.8's deadline); the old "Tuesday before the first pre-season
      game" wording is preserved verbatim as the full-format variant */
+  /* v4.24 (commissioner, 2026-10-20): "Yes say 'the day before the draft.'" The cutoff moved from the Thursday
+     preceding the draft to the day before it; the deadline is still the sign-up cutoff itself. */
   A("basic states the deadline is the sign-up cutoff, not a pre-season-relative date",
-    /Position changes close at the sign-up cutoff, which is 11:59 PM Eastern Time on the Thursday preceding the draft/.test(sec("2.9")));
+    /Position changes close at the sign-up cutoff, which is 11:59 PM Eastern Time on the day before the draft\./.test(sec("2.9")) && !/Thursday/.test(sec("2.9")));
   A("...(full format) states the old Tuesday-before-pre-season deadline exactly",
     /11:59 PM Eastern on the Tuesday before the first pre-season game/.test(secFull("2.9")));
   A("...says filing AND approving both close", /no request may be filed and none may be approved/.test(sec("2.9")));

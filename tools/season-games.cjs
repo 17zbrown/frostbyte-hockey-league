@@ -55,7 +55,7 @@ const NEEDED = [
   "seasonShape",
   "HOLIDAY_RULES", "HOLIDAYS", "HOLIDAY_BY_KEY", "HOLIDAY_DEFAULTS",
   "holidayDate", "seasonHolidayKeys", "tickedHolidays", "sameHolidaySet",
-  "holidayWeek", "gameNights",
+  "holidayWeek", "holidayWeekLabel", "gameNights",
   "shuffleArr", "generateSchedule"
 ];
 

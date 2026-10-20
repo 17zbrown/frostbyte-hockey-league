@@ -43,7 +43,8 @@ A("chapter titles use 'and', not '&'", !titles.some((t) => /&/.test(t)), titles.
 A("Chapter 0 step headings use a colon", rb.chapters[0].sections.some((s) => s.title === "Step one: the off-season"));
 const all = chap.join("\n");
 A("binding figures survive: the regular-season shape", /six \(6\) game-weeks, three nights a week, three games a night, fifty-four \(54\) games per club/.test(all));
-A("...the draft-eligibility cutoff", /11:59 PM Eastern on the Thursday/.test(all));
+/* v4.24 (commissioner, 2026-10-20): "Yes say 'the day before the draft.'" The cutoff's day changed on purpose. */
+A("...the draft-eligibility cutoff", /11:59 PM Eastern on the day before the draft/.test(all));
 A("...the training-camp limit", /up to ten \(10\) training-camp players/.test(all));
 A("...the playoff floor", /thirty percent \(30%\) of the season's regular-season schedule/.test(all));
 A("...the forfeit window", /ten \(10\) minutes/.test(all));

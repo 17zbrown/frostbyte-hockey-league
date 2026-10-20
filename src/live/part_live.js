@@ -3856,7 +3856,7 @@ CG.ROUTES.brand = function(){
       '<h2 class="h-sec">Broadcast-grade, player-run</h2>'+
       '<p class="lede" style="color:var(--on-ink-dim)">Write from the reader’s side of the screen. Plain and specific, active voice, real numbers. A control says exactly what it does; an error says how to fix it.</p></div></div></div>'+
     '<div class="shell"><div class="grid g2">'+
-      [["“Unlock your competitive journey today!”","“Register to play — sign-ups close at 11:59 PM ET the Thursday before the draft.”"],
+      [["“Unlock your competitive journey today!”","“Register to play: sign-ups close at 11:59 PM ET the day before the draft.”"],
        ["“An error occurred.”","“Couldn’t save — your sign-in expired. Sign out and back in, then retry.”"],
        ["“96 players and counting 🔥”","“Rosters fill through the draft.”"],
        ["“Admin backend”","“Control Center” · “the league office”"]
@@ -5528,7 +5528,11 @@ CG.hubDraftLive = function(){
     [["The clock","Each club gets "+((st&&st.pick_seconds)||120)+" seconds on the clock. Miss it and the pick is skipped: nobody drafts for you, and the pick goes empty (Rule 2.8)."],
      ["Your board is private","Only your club’s management sees it. It updates live: drafted players get struck through the moment they’re taken."],
      ["A skipped pick goes empty","It can’t be made up later in the draft. Once the draft is over, you receive one player at random for each pick you missed, at the league minimum, from the players still without a club."],
-     ["Eligibility","Registered by 11:59 PM ET the Thursday before the draft and, for randomly assigned first-years, at least 3 pre-season appearances (Rule 2.8). Returning players are exempt; anyone short of three still plays — placed on a club under Rule 2.2."]
+     /* v4.24 (commissioner, 2026-10-20): "Yes say 'the day before the draft.'" The basic format has no pre-season,
+        so its card no longer names an appearance test (Rule 2.8: registration by the cutoff is the sole test). */
+     ["Eligibility", CG.fmt("preseason")
+       ? "Registered by 11:59 PM ET the day before the draft and, for randomly assigned first-years, at least 3 pre-season appearances (Rule 2.8). Returning players are exempt; anyone short of three still plays, placed on a club under Rule 2.2."
+       : "Registered by 11:59 PM ET the day before the draft. That is the only test (Rule 2.8): anyone who registers later still plays, placed on a club as depth after the draft."]
     ].map(function(kv){ return '<div><b style="font-family:var(--f-disp);display:block;margin-bottom:4px">'+kv[0]+'</b><p class="small" style="color:var(--steel);line-height:1.6">'+kv[1]+'</p></div>'; }).join("")+
     '</div></div></div>';
   return h;
@@ -7041,7 +7045,7 @@ CG.generateSchedule = function(stage){
   var weeks = Math.ceil(slots/perNight/shape.nights);
   var plan = CG.gameNights(CG.etYMD(anchorIso), weeks, shape.nights, savedKeys);
   if (!plan.nights.length){ CG.toast("Every candidate week is a holiday week — turn some off in Holidays","err"); return; }
-  var skipNote = plan.skipped.length ? " Skipping "+plan.skipped.map(function(h){ return h.name+" (week of "+h.week+")"; }).join(", ")+"." : "";
+  var skipNote = plan.skipped.length ? " Skipping "+plan.skipped.map(CG.holidayWeekLabel).join(", ")+"." : "";
 
   CG.confirm("Generate the "+(stage==="preseason"?"pre-season":esc(s.name||"season")+" schedule")+"?",
     codes.length+" clubs · "+slots+" games each · "+perNight+" a night, "+shape.perWeek+" a week ("+
@@ -12474,6 +12478,9 @@ CG.holidayWeek = function(wedYmd, keys){
   }
   return null;
 };
+/* v4.24: the one label for a week CG.holidayWeek skipped, used by the generator confirm and both Auto-space
+   toasts (the toasts joined the raw objects and showed "holiday week skipped: [object Object]"). */
+CG.holidayWeekLabel = function(h){ return h.name+" (week of "+h.week+")"; };
 /* Snap to Wednesday, lay out `nights` consecutive evenings a week, and step over any week holding
    an observed holiday. `nights` comes from the season shape — it used to read the CG.NIGHTS_PER_WEEK
    constant, so a season set to 4 nights got 3 nights of dates and the generator ran short. */
@@ -13049,21 +13056,28 @@ CG.seasonForm = function(id){
       ? "No pre-season, no free-agency week: a "+r.draft_rounds+"-round snake draft on a Saturday, puck drop the Wednesday after, "+r.weeks+" weeks, the deadline after week "+r.trade_deadline_week+", a "+r.roster_max+"-man roster ("+CG.rosterShapeWords({format:f})+")"+(r.camp_max>=999?" with unlimited camp":" with a training camp of up to "+r.camp_max)+", everyone "+r.cap_skater+" games a week (camp "+r.cap_camp+"), $"+(r.salary_cap/1e6)+"M cap, six of eight in the playoffs with a floor of 30% of the regular season ("+CG.playoffFloorOfLength(CG.seasonShape ? CG.seasonShape({ weeks: r.weeks }).perClub : 54)+" games at "+r.weeks+" weeks) and a "+r.series_cap+"-game series cap."
       : "The richer model on the shelf: two dark weeks, a two-week pre-season with random loans, a "+r.draft_rounds+"-round linear draft, a free-agency week, "+r.weeks+" weeks, a "+r.roster_max+"-man roster (9 F / 6 D / "+r.quota.G+" G), goaltenders "+r.cap_goalie+" games a week, $"+(r.salary_cap/1e6)+"M cap, multi-season contracts, extensions and pick trading.";
     document.getElementById("ssSpaceHelp").textContent = f==="basic"
-      ? "Give “Draft night” a Saturday and Auto-space fills the rest: sign-ups open until 11:59 PM ET the Thursday before it, puck drop the Wednesday after, this season’s run of regular-season weeks, and playoffs the game week after the last one. Every leg steps over the weeks holding a holiday you have ticked in Holidays. The sign-up cutoff is a draft-eligibility cutoff, not a hard close — registration stays open, and anyone who signs up late is placed on a club as depth after the draft. Nothing saves until you hit Save."
-      : "Give “Off-season begins” one date — the first midnight after last season’s final playoff game — and Auto-space fills the rest: two dark weeks to seat owners and management, then 2 pre-season weeks (Wed/Thu/Fri), the draft the Saturday after the final Friday — with sign-ups open until 11:59 PM ET the Thursday before it — a full week of free agency opening 24 hours after the draft, puck drop the Wednesday after free agency closes, this season’s full run of regular-season weeks, and playoffs the game week after the last one. (Only have a pre-season date? Fill that instead — it spaces forward from there.) Every leg steps over the weeks holding a holiday you have ticked in Holidays. The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open, and anyone who signs up late is randomly assigned after the draft. Nothing saves until you hit Save.";
+      ? "Give “Draft night” a Saturday and Auto-space fills the rest: sign-ups open until 11:59 PM ET the day before it, puck drop the Wednesday after, this season’s run of regular-season weeks, and playoffs the game week after the last one. Every leg steps over the weeks holding a holiday you have ticked in Holidays. The sign-up cutoff is a draft-eligibility cutoff, not a hard close: registration stays open, and anyone who signs up late is placed on a club as depth after the draft. Nothing saves until you hit Save."
+      : "Give “Off-season begins” one date (the first midnight after last season’s final playoff game) and Auto-space fills the rest: two dark weeks to seat owners and management, then 2 pre-season weeks (Wed/Thu/Fri), the draft the Saturday after the final Friday (sign-ups open until 11:59 PM ET the day before it), a full week of free agency opening 24 hours after the draft, puck drop the Wednesday after free agency closes, this season’s full run of regular-season weeks, and playoffs the game week after the last one. (Only have a pre-season date? Fill that instead; it spaces forward from there.) Every leg steps over the weeks holding a holiday you have ticked in Holidays. The sign-up deadline is a draft-eligibility cutoff, not a hard close: registration stays open, and anyone who signs up late is randomly assigned after the draft. Nothing saves until you hit Save.";
   }
   fmtSel.addEventListener("change", syncFormat); syncFormat();
   document.getElementById("ssSpace").addEventListener("click", function(){
     var shpS = CG.seasonShape(Object.assign({}, s, { weeks: s.weeks || CG.FORMAT_RULES[fmtSel.value].weeks })), hKeys = CG.seasonHolidayKeys(CG.SEASON);
     function put(id, iso){ document.getElementById(id).value = dt(iso); }
     if (fmtSel.value === "basic"){
-      /* BASIC: everything spaces from draft night. Cutoff 11:59 PM ET the Thursday before; puck
+      /* BASIC: everything spaces from draft night. Cutoff 11:59 PM ET the day before; puck
          drop the first Wednesday after the draft; the format's weeks; playoffs the week after. */
       var drV = document.getElementById("ssDraft").value;
       if (!drV){ CG.toast("Give “Draft night” a date — everything spaces from it","err"); return; }
       var draftDay = drV.slice(0,10);
       var dow = CG.dayOfWeek(draftDay);                     /* 0=Sun … 6=Sat */
-      var cutoffDay = CG.dayAdd(draftDay, -(((dow - 4) + 7) % 7 || 7));   /* the Thursday strictly before */
+      /* v4.24 (commissioner, 2026-10-20): "Yes say 'the day before the draft.'" The cutoff used to be the Thursday
+         strictly before the draft, a Season 1 pattern (Thursday, September 17 for Saturday, September 19); it is now
+         the calendar day before draft night, whatever weekday the draft falls on. CG.etISO puts 11:59 PM on that ET
+         day in EST or EDT as the date requires: a Saturday, January 9, 2027 draft closes sign-ups at 04:59 UTC on
+         January 9. Both deadline columns are written from ssRegDl on Save. */
+      var cutoffDay = CG.dayAdd(draftDay, -1);                            /* the day before the draft */
+      /* the owner-apps default keeps its old anchor, a week before the old Thursday, so no other date moves */
+      var thuBefore = CG.dayAdd(draftDay, -(((dow - 4) + 7) % 7 || 7));   /* the Thursday strictly before */
       var wedDay = CG.dayAdd(draftDay, ((3 - dow) + 7) % 7 || 7);         /* the Wednesday strictly after */
       var regB = CG.gameNights(wedDay, shpS.weeks, shpS.nights, hKeys);
       var regStartB = regB.nights[0].wed, regEndB = regB.nights[regB.nights.length-1].fri;
@@ -13074,10 +13088,10 @@ CG.seasonForm = function(id){
       put("ssStarts",   CG.etISO(regStartB,"21:00"));
       put("ssEnds",     CG.etISO(regEndB,"23:59"));
       put("ssPlayoffs", CG.etISO(poB.nights[0].wed,"21:00"));
-      if (!document.getElementById("ssOwnDl").value) put("ssOwnDl", CG.etISO(CG.dayAdd(cutoffDay,-7),"20:00"));
+      if (!document.getElementById("ssOwnDl").value) put("ssOwnDl", CG.etISO(CG.dayAdd(thuBefore,-7),"20:00"));
       var skippedB = regB.skipped.concat(poB.skipped);
       CG.toast("Timeline spaced: cutoff "+cutoffDay+" → draft "+draftDay+" → puck drop "+regStartB+" → playoffs "+poB.nights[0].wed+
-        (skippedB.length?" · holiday week"+(skippedB.length===1?"":"s")+" skipped: "+skippedB.join(", "):""),"ok");
+        (skippedB.length?" · holiday week"+(skippedB.length===1?"":"s")+" skipped: "+skippedB.map(CG.holidayWeekLabel).join(", "):""),"ok");
       return;
     }
     /* FULL. Two ways in. Give the off-season start (the first midnight after last season's final
@@ -13102,10 +13116,11 @@ CG.seasonForm = function(id){
       ownDl = CG.etISO(CG.dayAdd(preStart,-7),"20:00");
     }
     var draftDay = CG.dayAdd(preFinal,1);                       /* Saturday draft night */
-    /* Sign-ups stay open through the pre-season: the draft-eligibility cutoff is 11:59 PM ET on the
-       Thursday before the draft (v2.46) — late enough that a Thursday sign-up can still play the
-       final Friday's three games and reach the Rule 2.8 minimum. */
-    regDl = CG.etISO(CG.dayAdd(draftDay,-2),"23:59");
+    /* Sign-ups stay open through the pre-season: the draft-eligibility cutoff was 11:59 PM ET on the
+       Thursday before the draft (v2.46), late enough that a Thursday sign-up can still play the
+       final Friday's three games and reach the Rule 2.8 minimum. v4.24 (commissioner, 2026-10-20):
+       "Yes say 'the day before the draft.'" It is now the day before the draft, the final pre-season Friday. */
+    regDl = CG.etISO(CG.dayAdd(draftDay,-1),"23:59");
     var faOpenDay  = CG.dayAdd(draftDay,1);                     /* 24h after draft night */
     var faCloseDay = CG.dayAdd(faOpenDay,CG.FA_WINDOW_DAYS);    /* a full week of free agency */
     /* Puck drop waits for free agency to close, so every club starts game 1 settled. */
@@ -13125,7 +13140,7 @@ CG.seasonForm = function(id){
     var skipped = pre.skipped.concat(reg.skipped, po.skipped);
     CG.toast("Timeline spaced: "+(offDay?"off-season "+offDay+" → ":"")+"pre-season "+preStart+
       " → draft "+draftDay+" → free agency closes "+faCloseDay+" → puck drop "+regStart+
-      (skipped.length?" · holiday week"+(skipped.length===1?"":"s")+" skipped: "+skipped.join(", "):""),"ok");
+      (skipped.length?" · holiday week"+(skipped.length===1?"":"s")+" skipped: "+skipped.map(CG.holidayWeekLabel).join(", "):""),"ok");
   });
   document.getElementById("ssGo").addEventListener("click", function(){
     var name=(document.getElementById("ssName").value||"").trim();
