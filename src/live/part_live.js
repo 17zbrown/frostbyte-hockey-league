@@ -13687,7 +13687,8 @@ CG.ROUTES.admin = function(param, qs){
      slate stays FIRST: it is what a commissioner opens mid-game-night, and the generators — one
      confirm click from clearing every fixture — must never be the landing view. */
   if (param==="schedule") return CG.adminShell("schedule", CG.admScheduleLive() + CG.admPlayoffsLive());
-  if (param==="seasons") return CG.adminShell("seasons", CG.admSeasonsLive());
+  /* v4.23: the Season 2 survey's results sit under the season record they inform (CG.SURVEY, part11_survey.js) */
+  if (param==="seasons") return CG.adminShell("seasons", CG.admSeasonsLive() + CG.SURVEY.resultsHtml());
   if (param==="results") return CG.ROUTES._404();  /* retired: EA stats auto-import replaced manual entry */
   if (param==="draft") return CG.adminShell("draft", CG.admDraftLive());
   /* retired prototype panels — their buttons toasted success while saving nothing real:
@@ -13712,7 +13713,7 @@ CG.AFTER.admin = function(param, qs){
   if (param==="news"){ CG.AFTER._admNewsLive(); CG.AFTER._admHomepage(); return; }
   if (param==="rankings"){ CG.AFTER._admRankings(); return; }
   if (param==="schedule"){ CG.AFTER._admScheduleLive(); CG.AFTER._admPlayoffs(); return; }
-  if (param==="seasons"){ CG.AFTER._admSeasons(); return; }
+  if (param==="seasons"){ CG.AFTER._admSeasons(); CG.SURVEY.loadResults(); return; }
   if (param==="draft"){ CG.AFTER._admDraft(); return; }
   if (param==="" || param==null){
     CG.AFTER._popStats();

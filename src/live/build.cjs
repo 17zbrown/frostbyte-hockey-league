@@ -30,6 +30,9 @@ const PARTS = [
   /* community forums — new top-level routes, so it can load any time after the
      public page helpers (pageHead/ic) exist */
   "part10_forums.js",
+  /* the Season 2 survey (v4.23): chains CG.AFTER.register to gate the sign-up form, so it has to
+     load after part_live defines that hook */
+  "part11_survey.js",
   ...(LAYER ? [LAYER] : []),           /* filename relative to src/live, e.g. preview_layer.js */
   "part8_blueprint_init.js",
 ];

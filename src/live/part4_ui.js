@@ -1077,7 +1077,9 @@ CG.viz = (function(){
       return '<div class="vz-hb" style="--i:' + i + (r.c ? ';--hb:' + esc(r.c) : "") + '"' +
         ' data-tip="' + esc(r.tip || (r.k + " — " + (o.fmt ? o.fmt(r.v, r) : num(r.v)))) + '">' +
         '<span class="vz-hbt"><i style="width:' + pct + '%"></i>' +
-          '<em>' + esc(r.k) + '</em></span>' +
+          '<em>' + esc(r.k) + '</em>' +
+          /* v4.23: an optional tag at the track's end (the survey results' "Banned now"), text so it is never color alone */
+          (r.tag ? '<b class="vz-hbtag">' + esc(r.tag) + '</b>' : "") + '</span>' +
         '<span class="vz-hbv">' + esc(o.fmt ? o.fmt(r.v, r) : num(r.v)) + '</span></div>';
     }).join("") + '</div>' +
     (o.note ? '<p class="vz-note">' + esc(o.note) + '</p>' : "");
