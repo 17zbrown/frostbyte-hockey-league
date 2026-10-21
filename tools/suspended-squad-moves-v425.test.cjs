@@ -47,8 +47,10 @@ const hub = R("src/live/part6_hub.js"), live = R("src/live/part_live.js");
 const sb = hub.slice(hub.indexOf("function squadBtn(p){"), hub.indexOf("function squadBtn(p){") + 2600);
 A("the squad buttons have no suspension lock", !!sb && !/suspensionOf|\bsus\b/.test(sb.slice(0, sb.indexOf("if (fz.on && !fzOffice)"))));
 A("the swap picker offers a suspended counterpart", !/CG\.suspensionOf\(x\.id\)/.test(live) && /return x\.spotId && !x\.mgmt && !CG\.isWaived\(x\.id\) && x\.squad===wantSquad &&\n\s+CG\.posGroup\(x\.pos\)===CG\.posGroup\(me\.pos\);/.test(live));
-A("the Waive button is locked for a suspended player, for every role", /if \(susp\) return '<button class="btn btn-ghost btn-sm" disabled title="'\+esc\(CG\.suspensionText\(susp\)\)\+'">'\+CG\.ic\("lock",12\)\+' Waive<\/button>';/.test(hub));
-A("...after the season's own close, before minimum service", hub.indexOf("if (susp) return '<button") > hub.indexOf("FA_MOVES_CLOSED)+'\">Waive</button>';") && hub.indexOf("if (susp) return '<button") < hub.indexOf("var mv = (CG.role()!==\"commish\" && CG.canMovePlayer)"));
+/* v4.27 (commissioner, 2026-10-21: "Commissioners may move remove or edit any player at any time. Commissioners always
+   have more ability that team managers, even in the team HQ."): the waiver bar is the club's, not the office's */
+A("the Waive button is locked for a suspended player, for the club (the office keeps it since v4.27)", /if \(susp && CG\.role\(\)!=="commish"\) return '<button class="btn btn-ghost btn-sm" disabled title="'\+esc\(CG\.suspensionText\(susp\)\)\+'">'\+CG\.ic\("lock",12\)\+' Waive<\/button>';/.test(hub));
+A("...after the season's own close, before minimum service", hub.indexOf("if (susp && CG.role()!==\"commish\") return '<button") > hub.indexOf("FA_MOVES_CLOSED)+'\">Waive</button>';") && hub.indexOf("if (susp && CG.role()!==\"commish\") return '<button") < hub.indexOf("var mv = (CG.role()!==\"commish\" && CG.canMovePlayer)"));
 A("one client twin of public.is_suspended: a staff-only suspension never locks a player", /CG\.playSuspensionOf = function\(pid\)\{\n  return \(\(CG\.lg && CG\.lg\.suspensions\) \|\| \[\]\)\.find\(function\(s\)\{ return s\.playerId===pid && s\.status==="active" && s\.scope!=="staff"; \}\) \|\| null;\n\};/.test(hub));
 A("...read by the roster row (and so the Waive lock), the trade chip and both lineup boards", /var susp = CG\.playSuspensionOf\(p\.id\);/.test(hub) && /var s = CG\.playSuspensionOf \? CG\.playSuspensionOf\(pid\) : null;/.test(live)
   && (hub.match(/if \(s\.status==="active" && s\.scope!=="staff"\) suspended\[s\.playerId\]=true;/g) || []).length === 2);
@@ -79,15 +81,15 @@ eval(R("src/live/part5b_public2.js").match(/CG\.rulebookForFormat = function\(rb
 const book = (fmt) => JSON.stringify(CG.rulebookForFormat(rb, fmt).chapters);
 const r72 = sec("7.2").paragraphs.join(" "), r21 = sec("2.1").paragraphs.join(" "), r22 = sec("2.2").paragraphs.join(" ");
 A("7.2: no lock in place; moved and traded like any other player", /The suspension does not hold the player in place on the roster: the player's club may move the player between its active roster and its training camp under Rule 2\.1, and may trade the player under Rule 2\.3, like any other player, and any club may trade for a suspended player\./.test(r72));
-A("7.2: no waiver, and the office is bound", /A suspended player may not be waived until the suspension is served; this bar binds the league office as it binds the club \(Rule 2\.6\)\./.test(r72));
+A("7.2: the club may not waive; a commissioner may (v4.27)", /The club may not waive a suspended player until the suspension is served; a commissioner may, as a commissioner may move, remove or edit any player at any time \(Rule 2\.6\)\./.test(r72));
 A("7.2: the suspension still travels, and a season-long one still removes", /serves the rest of the suspension on that club's games\./.test(r72) && /expelled, does not stay on the roster but is removed:/.test(r72));
 A("7.2: the scheduling bar stands", /A suspended player may not be scheduled on a lineup or a line, dress, appear in a league lobby/.test(r72));
-A("2.1 says it", /A suspended player may be called up, sent down and traded like any other player, but may not be waived until their suspension is served \(Rule 7\.2\)\./.test(r21));
+A("2.1 says it", /A suspended player may be called up, sent down and traded like any other player, but may not be waived by their club until their suspension is served \(Rule 7\.2\)\./.test(r21));
 A("2.2 carves the waiver out", /A club may waive a player at any time, whether or not the player has played \(Rule 2\.4\), save a player whose suspension is running, who may not be waived until it is served \(Rule 7\.2\)\./.test(r22));
-A("2.6 in both formats: the office exception is gone and the bar named", [sec("2.6").paragraphs[6], sec("2.6").full[6]].every((p) => /Neither the club nor the league office may waive a suspended player until the suspension is served \(Rule 7\.2\)\./.test(p) && !/may also move a suspended player/.test(p)));
+A("2.6 in both formats: the office exception is gone and the bar named", [sec("2.6").paragraphs[6], sec("2.6").full[6]].every((p) => /a commissioner may, for example, waive a suspended player, whom the club itself may not waive \(Rule 7\.2\)\./.test(p) && !/may also move a suspended player/.test(p)));
 for (const fmt of ["basic", "full"]) {
   const b = book(fmt);
-  A("the rendered " + fmt + " book has the new rule and none of the old lock", /may not be waived until the suspension is served/.test(b) && !/locked in place|locked where (he|they) (is|stand)|may also move a suspended player|is not held in place/.test(b));
+  A("the rendered " + fmt + " book has the new rule and none of the old lock", /may not waive a suspended player until the suspension is served/.test(b) && !/locked in place|locked where (he|they) (is|stand)|may also move a suspended player|is not held in place/.test(b));
 }
 A("no dash as punctuation in the changed sections", !/—| - /.test(JSON.stringify(["2.1", "2.2", "2.6", "7.2"].map((k) => [sec(k).paragraphs, sec(k).full || []]))));
 

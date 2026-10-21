@@ -2349,9 +2349,11 @@ CG.hubRoster = function(qs){
           ((CG.movesClosedForMe && CG.movesClosedForMe()) ? '<button class="btn btn-ghost btn-sm" disabled title="'+esc(CG.MOVES_CLOSED)+'">Trade</button>'
             : '<button class="btn btn-ghost btn-sm" data-trade="'+p.id+'">Trade</button>')+
           (function(){ if (CG.faMovesClosedForMe && CG.faMovesClosedForMe()) return '<button class="btn btn-ghost btn-sm" disabled title="'+esc(CG.FA_MOVES_CLOSED)+'">Waive</button>';
-            /* v4.25 (Rule 7.2): a suspended player cannot be waived until it is served. waive_player refuses it for the
-               league office too, so this has no role check */
-            if (susp) return '<button class="btn btn-ghost btn-sm" disabled title="'+esc(CG.suspensionText(susp))+'">'+CG.ic("lock",12)+' Waive</button>';
+            /* v4.25 (Rule 7.2): a club cannot waive a suspended player until it is served.
+               v4.27 (commissioner, 2026-10-21: "Commissioners may move remove or edit any player at any time.
+               Commissioners always have more ability that team managers, even in the team HQ."): the office keeps the
+               button, as waive_player lets a commissioner through */
+            if (susp && CG.role()!=="commish") return '<button class="btn btn-ghost btn-sm" disabled title="'+esc(CG.suspensionText(susp))+'">'+CG.ic("lock",12)+' Waive</button>';
             var mv = (CG.role()!=="commish" && CG.canMovePlayer) ? CG.canMovePlayer(p) : null;
             /* Rule 2.4 minimum service: only the WAIVE waits for his games now (v3.40). A club may
                trade a player the day he signs. v3.79: it binds the club's management, never the

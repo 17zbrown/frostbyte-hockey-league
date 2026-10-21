@@ -117,10 +117,10 @@ A("...the extension clause only where extensions exist (full format)", !/extensi
 A("...and the office's nomination takes effect at once", /one the league office makes takes effect at once/.test(sec("2.6").paragraphs[0]));
 /* v4.25 (commissioner, 2026-10-21): Rule 7.2 no longer has a squad lock for the office to be exempt from; its waiver
    bar binds the office too, so the 7.2 half now pins that */
-A("Rules 2.4, 4.2 and 5.3 say the office's exemption, and 7.2 binds the office to the waiver bar", /may waive or trade a player short of it/.test(sec("2.4").paragraphs.join(" "))
+A("Rules 2.4, 4.2 and 5.3 say the office's exemption, and 7.2 exempts the office from the waiver bar (v4.27)", /may waive or trade a player short of it/.test(sec("2.4").paragraphs.join(" "))
   && /The league office may still change a club's picks after it/.test(sec("4.2").paragraphs.join(" "))
   && /The league office may still file or change a club's sheet after that/.test(sec("5.3").paragraphs.join(" "))
-  && /this bar binds the league office as it binds the club/.test(sec("7.2").paragraphs.join(" ")));
+  && /The club may not waive a suspended player until the suspension is served; a commissioner may/.test(sec("7.2").paragraphs.join(" ")));
 const i79 = rb.changelog.findIndex((c) => c.version === "3.79"), e79 = rb.changelog[i79];
 A("changelog records 3.79, right after 3.78", i79 >= 0 && rb.changelog[i79 + 1].version === "3.78");
 const newText = [sec("2.6").paragraphs[6], sec("2.6").full[6]].concat(e79.items, [e79.summary]).join(" ");

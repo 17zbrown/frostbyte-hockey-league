@@ -64,7 +64,8 @@ A("lineup builders lock only a running one", (hub.match(/if \(s\.status==="activ
 /* v4.25 (commissioner, 2026-10-21: "allow suspended players to be moved between training camp and the active roster, or
    traded but not waived"): the lock moved from the squad buttons to the Waive button, and the row is marked, not dimmed.
    tools/suspended-squad-moves-v425.test.cjs pins the rest */
-A("Team HQ lock helper (the Waive button since v4.25)", /CG\.suspensionOf = function\(pid\)/.test(hub) && /if \(susp\) return '<button class="btn btn-ghost btn-sm" disabled title="'\+esc\(CG\.suspensionText\(susp\)\)/.test(hub));
+/* v4.27: the Waive lock is the club's; a commissioner keeps the button (Rule 2.6) */
+A("Team HQ lock helper (the Waive button since v4.25, the club's only since v4.27)", /CG\.suspensionOf = function\(pid\)/.test(hub) && /if \(susp && CG\.role\(\)!=="commish"\) return '<button class="btn btn-ghost btn-sm" disabled title="'\+esc\(CG\.suspensionText\(susp\)\)/.test(hub));
 A("Team HQ row marked", /\(susp\?" susp-row":""\)/.test(hub));
 A("Extend on the desks", /data-desk-extend=/.test(desks) && /data-comm-extend=/.test(desks));
 A("community copy says 3 to 18", /3 to 18 games in steps of three/.test(desks) && !/runs <b>3, 6 or 9 games<\/b>/.test(desks));
@@ -101,7 +102,7 @@ const rb = JSON.parse((function(){ const c = R("src/live/part3_content.js"); ret
 const sec = (id) => rb.chapters.flatMap((c) => c.sections).find((s) => s.id === id);
 const s72 = sec("7.2").paragraphs.join("\n");
 A("7.2 ladder", /in steps of three \(3\), from three \(3\) to eighteen \(18\) games/.test(s72));
-A("7.2 since v4.25: no lock in place, no waiver", /The suspension does not hold the player in place on the roster/.test(s72) && /A suspended player may not be waived until the suspension is served/.test(s72) && !/locked in place/.test(s72));
+A("7.2 since v4.25: no lock in place, no waiver by the club (v4.27)", /The suspension does not hold the player in place on the roster/.test(s72) && /The club may not waive a suspended player until the suspension is served/.test(s72) && !/locked in place/.test(s72));
 A("7.2 carries over and ends 11:59 PM", /carries into the next season/.test(s72) && /ends at 11:59 PM Eastern Time on its last day/.test(s72));
 A("7.2 one at a time + second in season", /A member is under one suspension at a time/.test(s72) && /suspended a second time in the same season is suspended for the remainder of that season/.test(s72));
 A("7.2 appearing while suspended", /recorded as a forfeit loss for the player's club/.test(s72) && /each receive a written warning/.test(s72));
@@ -109,7 +110,7 @@ A("7.2 public record", /public record of a suspension shows its length, its head
 A("7.6 once, routed, issuer barred", /Each sanction may be appealed once/.test(sec("7.6").paragraphs[0]) && /never decides its appeal/.test(sec("7.6").paragraphs[1]) && !/decided by a panel/.test(sec("7.6").paragraphs[1]));
 A("7.7 new scale + timeout", /three \(3\) to eighteen \(18\) games in steps of three/.test(sec("7.7").paragraphs[1]) && /timeout in the league Discord/.test(sec("7.7").paragraphs[1]));
 A("7.7 bans entered on the site", /entered on the site by a commissioner/.test(sec("7.7").paragraphs.join(" ")));
-A("2.1.4 names the v4.25 rule", /A suspended player may be called up, sent down and traded like any other player, but may not be waived until their suspension is served \(Rule 7\.2\)/.test(sec("2.1").paragraphs[3]));
+A("2.1.4 names the v4.25 rule (as v4.27 words it)", /A suspended player may be called up, sent down and traded like any other player, but may not be waived by their club until their suspension is served \(Rule 7\.2\)/.test(sec("2.1").paragraphs[3]));
 /* by version, never by position: a later release takes changelog[0] */
 const e351 = rb.changelog.find((c) => c.version === "3.51");
 A("v3.51 recorded", !!e351);

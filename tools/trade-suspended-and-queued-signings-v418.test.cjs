@@ -50,7 +50,7 @@ global.window = global; global.CG = {}; eval(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook, sec = (id) => [].concat(...rb.chapters.map((c) => c.sections || [])).find((x) => x.id === id) || { paragraphs: [] };
 const r72 = sec("7.2").paragraphs.join(" "), r21 = sec("2.1").paragraphs.join(" ");
 A("Rule 7.2: a suspended player may be traded, and the suspension travels", /may trade the player under Rule 2\.3, like any other player, and any club may trade for a suspended player\./.test(r72) && /The suspension goes with the player, who joins the new club by the placement rule of Rule 2\.1 and serves the rest of the suspension on that club's games\./.test(r72) && !/locked in place/.test(r72));
-A("Rule 2.1: moved and traded like any other player, never waived (v4.25)", /A suspended player may be called up, sent down and traded like any other player, but may not be waived until their suspension is served \(Rule 7\.2\)\./.test(r21));
+A("Rule 2.1: moved and traded like any other player, never waived by the club (v4.25, v4.27)", /A suspended player may be called up, sent down and traded like any other player, but may not be waived by their club until their suspension is served \(Rule 7\.2\)\./.test(r21));
 const e = rb.changelog.find((c) => c.version === "4.18") || {};
 A("the changelog has its 4.18 entry, right before 4.17", e.version === "4.18" && (rb.changelog[rb.changelog.indexOf(e) + 1] || {}).version === "4.17");
 A("...naming both changes, with no em dash or gendered pronoun", /trade a suspended player/.test(e.summary || "") && (e.items || []).some((i) => /ask to sign a player/.test(i)) && !/[—–]/.test(JSON.stringify(e)) && !/\b(he|his|him|she|her)\b/i.test(JSON.stringify(e)));
