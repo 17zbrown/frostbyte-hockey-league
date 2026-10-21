@@ -917,7 +917,7 @@ CG.hubLineup = function(qs){
     : (dbLu ? { LW:dbLu.lw||null, C:dbLu.center||null, RW:dbLu.rw||null, LD:dbLu.ld||null, RD:dbLu.rd||null, G:dbLu.goalie||null } : {});
   var roster = lg.byTeam[club];
   var suspended = {};
-  lg.suspensions.forEach(function(s){ if (s.status==="active") suspended[s.playerId]=true; });   /* v3.51: status is the database's own "running"; lifted and served never lock */
+  lg.suspensions.forEach(function(s){ if (s.status==="active" && s.scope!=="staff") suspended[s.playerId]=true; });   /* v3.51: status is the database's own "running"; lifted and served never lock. v4.25: a staff-only suspension never locks a lineup either (guard_lineup_suspended reads public.is_suspended, scope play or both) */
   var assigned = Object.values(slots);
   /* Per-GAME switcher: one chip per upcoming game, not per night. Three games a night each lock on
      their own puck drop, so a manager must be able to jump straight to game 2 or 3 — the old
@@ -1003,7 +1003,7 @@ CG.hubLineup = function(qs){
       var un = avv === "no", noAns = !avKey || avv === "nr";
       var used = assigned.indexOf(p.id)>=0;
       var dis = suspended[p.id];
-      var reason = dis ? "Suspended: locked until it is served (Rule 7.2)" : un ? "Marked not available for this game; you may still dress him" : noAns ? "No availability answer for this game" : "";
+      var reason = dis ? "Suspended: cannot be scheduled until it is served (Rule 7.2)" : un ? "Marked not available for this game; you may still dress him" : noAns ? "No availability answer for this game" : "";
       return groupHead + '<div class="bp'+(used?" dis":"")+(dis?" dis":"")+(un?" warn":"")+'" data-bench="'+p.id+'" draggable="'+(!locked&&!used&&!dis)+'" '+(reason?'title="'+esc(reason)+'"':"")+'>'+
         CG.crest(p.team,20)+'<b style="font-size:13px">'+esc(p.tag)+'</b><span class="mono" style="font-size:10px;color:var(--steel)">'+p.pos+'</span>'+(CG.isCamp(p)?CG.campChip("xs"):"")+
         (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':un?'<span class="chip chip-warn" style="font-size:9px">UNAVAIL</span>':noAns?'<span class="chip chip-ink" style="font-size:9px">NO ANSWER</span>':used?'<span class="chip chip-win" style="font-size:9px">IN</span>':"")+
@@ -1454,7 +1454,7 @@ CG.hubLines = function(qs){
   if (!club || !lg.byTeam[club]) return '<div class="note">This account doesn’t run a club — the line creator belongs to team management.</div>';
   var roster = lg.byTeam[club];
   var suspended = {};
-  lg.suspensions.forEach(function(s){ if (s.status==="active") suspended[s.playerId]=true; });   /* v3.51: status is the database's own "running"; lifted and served never lock */
+  lg.suspensions.forEach(function(s){ if (s.status==="active" && s.scope!=="staff") suspended[s.playerId]=true; });   /* v3.51: status is the database's own "running"; lifted and served never lock. v4.25: a staff-only suspension never locks a lineup either (guard_lineup_suspended reads public.is_suspended, scope play or both) */
   var slotsOf = function(n){ return (CG._lcDraft && CG._lcDraft[n]) ? CG._lcDraft[n] : CG.lineFromRow((lg._teamLines||{})[n]); };
   var dirtyN = 0; [1,2,3].forEach(function(n){ if (CG._lcDraft && CG._lcDraft[n]) dirtyN++; });
   /* which lines each player is on, for the roster board's L1..L4 chips */
@@ -1534,7 +1534,7 @@ CG.hubLines = function(qs){
         (byPos[pos]||[]).map(function(p){
           var dis = suspended[p.id];
           return '<div class="lc-pc'+(dis?" dis":"")+capCls(p.id)+'" data-rcard="'+p.id+'" draggable="'+(!dis)+'" tabindex="0" role="button" '+
-            (dis?'title="Suspended: locked until it is served (Rule 7.2)"':(capSt[p.id]?'title="'+esc(capSt[p.id].why)+'"':''))+' aria-label="'+esc(p.tag)+', '+CG.POS_NAME[p.pos]+(capSt[p.id]?". "+esc(capSt[p.id].why):"")+'">'+
+            (dis?'title="Suspended: cannot be scheduled until it is served (Rule 7.2)"':(capSt[p.id]?'title="'+esc(capSt[p.id].why)+'"':''))+' aria-label="'+esc(p.tag)+', '+CG.POS_NAME[p.pos]+(capSt[p.id]?". "+esc(capSt[p.id].why):"")+'">'+
             CG.lcAv(p,34)+
             /* v2.91: the name owns the first row; position, line chips and the week load share the
                second. They used to compete for one line, so every name was cut to an initial and
@@ -1551,7 +1551,7 @@ CG.hubLines = function(qs){
       '<div class="lc-board" style="margin-top:8px">'+camp.map(function(p){
         var dis = suspended[p.id];
         return '<div class="lc-pc'+(dis?" dis":"")+capCls(p.id)+'" data-rcard="'+p.id+'" draggable="'+(!dis)+'" tabindex="0" role="button" '+
-          (dis?'title="Suspended: locked until it is served (Rule 7.2)"':(capSt[p.id]?'title="'+esc(capSt[p.id].why)+'"':''))+' aria-label="'+esc(p.tag)+', training camp'+(capSt[p.id]?". "+esc(capSt[p.id].why):"")+'">'+
+          (dis?'title="Suspended: cannot be scheduled until it is served (Rule 7.2)"':(capSt[p.id]?'title="'+esc(capSt[p.id].why)+'"':''))+' aria-label="'+esc(p.tag)+', training camp'+(capSt[p.id]?". "+esc(capSt[p.id].why):"")+'">'+
           CG.lcAv(p,34)+
           '<span class="two"><b>'+esc(p.tag)+'</b><span class="ln2"><span class="ps">Camp · '+CG.POS_NAME[p.pos]+'</span>'+
             (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+
@@ -2122,10 +2122,18 @@ function squadRoom(club, p){
 }
 /* v3.51 (commissioner, 2026-09-28): "Lock a player in the team HQ by graying them out and locking
    them while they are suspended. If they are suspended they cannot be moved between the roster and
-   training camp as punishment to the team." The database refuses it (guard_squad_move); this grays
-   the row and says why before the click. status "active" is the database's own "running". */
+   training camp as punishment to the team." The database refused it (guard_squad_move); this grayed
+   the row and said why before the click. status "active" is the database's own "running".
+   v4.25 (commissioner, 2026-10-21: "allow suspended players to be moved between training camp and the active roster,
+   or traded but not waived"): that lock is gone; the row is marked, not grayed, and the Waive button is the one locked.
+   CG.suspensionOf finds ANY running suspension, a staff-only one included (the discipline desk's "one at a time" needs
+   that). CG.playSuspensionOf is the client twin of public.is_suspended (scope play or both): it is the one that decides
+   what a suspension stops on the ice and in Team HQ, so a staff-only suspension never locks a player's moves. */
 CG.suspensionOf = function(pid){
   return ((CG.lg && CG.lg.suspensions) || []).find(function(s){ return s.playerId===pid && s.status==="active"; }) || null;
+};
+CG.playSuspensionOf = function(pid){
+  return ((CG.lg && CG.lg.suspensions) || []).find(function(s){ return s.playerId===pid && s.status==="active" && s.scope!=="staff"; }) || null;
 };
 CG.suspensionText = function(s){
   if (!s) return "";
@@ -2133,8 +2141,10 @@ CG.suspensionText = function(s){
     : s.mode==="seasons" ? "for the rest of Season "+(s.untilSeason||"")
     : "through "+(s.endsAt ? CG.fmtDay(Date.parse(s.endsAt)) : "further notice")+" at 11:59 PM ET";
   /* v4.18 (commissioner, 2026-10-18: "Allow teams to be able to trade and trade for suspended players."): the lock is
-     on the club's squad moves, never on a trade; the suspension travels with the player */
-  return "Suspended, "+len+". They are locked where they are: they cannot be scheduled, called up or sent down until it is served, but they may be traded, and the suspension goes with them (Rule 7.2).";
+     on the club's squad moves, never on a trade; the suspension travels with the player.
+     v4.25 (commissioner, 2026-10-21: "allow suspended players to be moved between training camp and the active roster,
+     or traded but not waived"): the squad lock is lifted and the waiver is barred instead (waive_player refuses it) */
+  return "Suspended, "+len+". They cannot be scheduled until it is served. The club may still call them up, send them down or trade them, and the suspension goes with them, but may not waive them (Rule 7.2).";
 };
 /* v3.79 (commissioner, 2026-10-02: "it's asking me to swap ... when the team ... is below the maximum"): say WHY a
    one-way move is not possible. Rule 2.1 caps each position GROUP, so a roster under its total can still be full at
@@ -2159,13 +2169,10 @@ CG.squadSwapWhy = function(club, p){
 };
 function squadBtn(p){
   if (!p.spotId) return "";
-  var sus = CG.suspensionOf(p.id);
-  /* v3.79: a suspended player is locked in place for his club (Rule 7.2); the league office may still move him,
-     as guard_squad_move has always allowed */
-  if (sus && CG.role()!=="commish"){
-    return '<button class="btn btn-ghost btn-sm" disabled title="'+esc(CG.suspensionText(sus))+'">'+CG.ic("lock",12)+' '+
-      (p.squad==="tc" ? "Call up" : "To camp")+'</button>';
-  }
+  /* v3.79 locked a suspended player in place for their club here (Rule 7.2), the office excepted. v4.25 (commissioner,
+     2026-10-21: "allow suspended players to be moved between training camp and the active roster, or traded but not
+     waived"): the lock is gone, in guard_squad_move and here, so a suspended player gets the same buttons as anyone;
+     the bar moved to the Waive button. */
   /* v3.61 (commissioner, 2026-09-28, Q29): "Management can never be sent to training camp, they must
      stay on the active roster." The database refuses it for everyone (guard_squad_move); the button says
      so before the click. A manager found in camp can still be called up. */
@@ -2175,7 +2182,6 @@ function squadBtn(p){
   }
   var club = CG.myClub();
   var title = 'No limit on squad changes outside the weekly roster freeze, Wednesday 7:30 PM to Friday midnight ET (Rule 2.1)';
-  if (sus) title = 'Suspended: his club cannot move him until it is served (Rule 7.2); the league office can. '+title;
   /* v3.40: the weekly movement freeze. Both directions, both buttons. The database refuses it
      anyway; this says so before the click instead of after it. */
   var fz = CG.rosterFreeze ? CG.rosterFreeze() : { on:false };
@@ -2305,7 +2311,7 @@ CG.hubRoster = function(qs){
   var wkRefR = (CG.lineNights ? ((CG.lineNights(club)[0] || {}).game || null) : null);
   var rowFor = function(p){
     var waived = CG.isWaived(p.id), onBlk = CG.isOnBlock(p.id), mrole = CG.mgmtTag(p.mgmt);
-    var susp = CG.suspensionOf(p.id);
+    var susp = CG.playSuspensionOf(p.id);   /* v4.25: a playing suspension, as waive_player reads it */
     var status = waived ? '<span class="chip chip-loss">Waived</span>'
       : mrole ? '<span class="chip chip-chrome">'+mrole+'</span>'
       : onBlk ? '<span class="chip chip-warn">On block</span>'
@@ -2343,6 +2349,9 @@ CG.hubRoster = function(qs){
           ((CG.movesClosedForMe && CG.movesClosedForMe()) ? '<button class="btn btn-ghost btn-sm" disabled title="'+esc(CG.MOVES_CLOSED)+'">Trade</button>'
             : '<button class="btn btn-ghost btn-sm" data-trade="'+p.id+'">Trade</button>')+
           (function(){ if (CG.faMovesClosedForMe && CG.faMovesClosedForMe()) return '<button class="btn btn-ghost btn-sm" disabled title="'+esc(CG.FA_MOVES_CLOSED)+'">Waive</button>';
+            /* v4.25 (Rule 7.2): a suspended player cannot be waived until it is served. waive_player refuses it for the
+               league office too, so this has no role check */
+            if (susp) return '<button class="btn btn-ghost btn-sm" disabled title="'+esc(CG.suspensionText(susp))+'">'+CG.ic("lock",12)+' Waive</button>';
             var mv = (CG.role()!=="commish" && CG.canMovePlayer) ? CG.canMovePlayer(p) : null;
             /* Rule 2.4 minimum service: only the WAIVE waits for his games now (v3.40). A club may
                trade a player the day he signs. v3.79: it binds the club's management, never the
@@ -2359,7 +2368,9 @@ CG.hubRoster = function(qs){
     var posCell = (loan && rp && rp !== p.pos)
       ? '<span title="Listed at '+esc(p.pos)+' for the pre-season to fill an open seat; he registered as '+esc(rp)+' (Rule 0.4)">'+esc(p.pos)+' <span class="caption">· reg. '+esc(rp)+'</span></span>'
       : esc(p.pos);
-    return '<tr class="'+(loan?"loan-row":"")+(susp?" susp-row":"")+'"'+((waived||susp)?' style="opacity:.55"':"")+
+    /* v4.25: a suspended row is no longer dimmed. Its squad and trade buttons work now, and a dimmed row reads as
+       disabled; the red Suspended chip and the row title still say they cannot be scheduled */
+    return '<tr class="'+(loan?"loan-row":"")+(susp?" susp-row":"")+'"'+(waived?' style="opacity:.55"':"")+
       (susp?' title="'+esc(CG.suspensionText(susp))+'"':"")+'>'+
       '<td class="tleft"><span class="playercell">'+CG.crest(p.team,20)+'<span class="nm" data-go="'+CG.playerRoute(p)+'" style="cursor:pointer">'+esc(p.tag)+'</span></span></td>'+
       /* v2.91: the club sets its own numbers. Editable for management (and the office in a

@@ -36,19 +36,21 @@ console.log("\n2. Suspended players can be traded");
 A("the trade builder's roster has no suspension filter", /CG\.tRoster = function\(code\)\{ return \(CG\.lg\.byTeam\[code\]\|\|\[\]\)\.filter\(function\(p\)\{ return !p\.mgmt && p\.origin!=="preseason_random"; \}\); \};/.test(live));
 A("the Roster tab's Trade button is not gated on a suspension", /\(\(CG\.movesClosedForMe && CG\.movesClosedForMe\(\)\) \? '<button class="btn btn-ghost btn-sm" disabled title="'\+esc\(CG\.MOVES_CLOSED\)\+'">Trade<\/button>'\n\s+: '<button class="btn btn-ghost btn-sm" data-trade="'\+p\.id\+'">Trade<\/button>'\)/.test(hub));
 A("the Trade Hub marks a suspended player in the picker and on the offer rows", /CG\.tradeSuspChip = function\(pid\)\{/.test(live) && /\+CG\.tradeSuspChip\(p\.id\)\+'<span class="caption" style="display:block">'\+p\.pos/.test(live) && /\(p\?CG\.tradeSuspChip\(pid\):''\)/.test(live));
-A("the suspension tooltip says they may be traded and the suspension goes with them", /they may be traded, and the suspension goes with them \(Rule 7\.2\)/.test(hub) && !/He is locked where he is/.test(hub));
+/* v4.25 (commissioner, 2026-10-21): the squad lock is lifted and the waiver barred; the trade half of v4.18 stands */
+A("the suspension tooltip says they may be traded and the suspension goes with them", /The club may still call them up, send them down or trade them, and the suspension goes with them, but may not waive them \(Rule 7\.2\)/.test(hub) && !/He is locked where he is/.test(hub));
 {
   /* run the chip for real */
   const src = live.match(/CG\.tradeSuspChip = function\(pid\)\{[\s\S]*?\n\};/)[0];
-  const C = { suspensionOf: (id) => (id === "s" ? { mode: "games", games: 3, gamesServed: 1 } : null), suspensionText: () => "Suspended, 1 of 3 games served." };
+  /* v4.25: the chip reads CG.playSuspensionOf (playing scope only), the twin of public.is_suspended */
+  const C = { playSuspensionOf: (id) => (id === "s" ? { mode: "games", games: 3, gamesServed: 1 } : null), suspensionText: () => "Suspended, 1 of 3 games served." };
   new Function("CG", "esc", src)(C, (x) => String(x));
   A("the chip shows for a suspended player and nothing for anyone else", /Suspended<\/span>/.test(C.tradeSuspChip("s")) && C.tradeSuspChip("x") === "");
 }
 global.window = global; global.CG = {}; eval(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook, sec = (id) => [].concat(...rb.chapters.map((c) => c.sections || [])).find((x) => x.id === id) || { paragraphs: [] };
 const r72 = sec("7.2").paragraphs.join(" "), r21 = sec("2.1").paragraphs.join(" ");
-A("Rule 7.2: the lock does not bar a trade, and the suspension travels", /The lock does not bar a trade: a club may trade a suspended player, and any club may trade for one, under Rule 2\.3 like any other player\. The suspension goes with the player, who joins the new club by the placement rule of Rule 2\.1, is locked in place there, and serves the rest of the suspension on that club's games\./.test(r72) && /locked in place on their club's roster/.test(r72));
-A("Rule 2.1: locked where they stand, but may still be traded", /A suspended player is locked where they stand, and may not be called up or sent down by their club, until their suspension is served, but may still be traded \(Rule 7\.2\)\./.test(r21));
+A("Rule 7.2: a suspended player may be traded, and the suspension travels", /may trade the player under Rule 2\.3, like any other player, and any club may trade for a suspended player\./.test(r72) && /The suspension goes with the player, who joins the new club by the placement rule of Rule 2\.1 and serves the rest of the suspension on that club's games\./.test(r72) && !/locked in place/.test(r72));
+A("Rule 2.1: moved and traded like any other player, never waived (v4.25)", /A suspended player may be called up, sent down and traded like any other player, but may not be waived until their suspension is served \(Rule 7\.2\)\./.test(r21));
 const e = rb.changelog.find((c) => c.version === "4.18") || {};
 A("the changelog has its 4.18 entry, right before 4.17", e.version === "4.18" && (rb.changelog[rb.changelog.indexOf(e) + 1] || {}).version === "4.17");
 A("...naming both changes, with no em dash or gendered pronoun", /trade a suspended player/.test(e.summary || "") && (e.items || []).some((i) => /ask to sign a player/.test(i)) && !/[—–]/.test(JSON.stringify(e)) && !/\b(he|his|him|she|her)\b/i.test(JSON.stringify(e)));

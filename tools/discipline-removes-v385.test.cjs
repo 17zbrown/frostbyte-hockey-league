@@ -17,7 +17,7 @@ A("the discipline form says it before a season-long suspension", /A suspension t
 A("the ban form says it", /take him off his club\\u2019s roster and out of any front-office seat, and withdraw his sign-ups \(Rule 7\.2\)/.test(live));
 global.CG = {}; vm.runInThisContext(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook, s72 = rb.chapters.flatMap((c) => c.sections || []).find((x) => x.id === "7.2");
-A("Rule 7.2 states it", /A member suspended for the remainder of a season or longer, or expelled, is not held in place but removed/.test(s72.paragraphs[1]));
+A("Rule 7.2 states it", /A member suspended for the remainder of a season or longer, or expelled, does not stay on the roster but is removed/.test(s72.paragraphs[1]));
 A("changelog 3.85", !!rb.changelog.find((c) => c.version === "3.85"));
 console.log(fail ? "\n" + fail + " of " + n + " FAILED" : "\nall " + n + " passed");
 process.exit(fail ? 1 : 0);

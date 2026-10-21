@@ -10512,11 +10512,12 @@ CG.AFTER._roster = function(){
     /* v2.41: the active roster is shaped by position GROUP (9 forwards / 6 defensemen / 2 goaltenders),
        so a straight swap matches the group — a wing for a center, a left defenseman for a right one;
        a goaltender only for a goaltender. The database's shape check makes the same test. */
+    /* v3.79 left a suspended player out of this picker for their club (Rule 7.2). v4.25 (commissioner, 2026-10-21:
+       "allow suspended players to be moved between training camp and the active roster, or traded but not waived"):
+       a suspended player swaps like anyone, so the filter is gone */
     var opts = roster.filter(function(x){
       return x.spotId && !x.mgmt && !CG.isWaived(x.id) && x.squad===wantSquad &&
-        CG.posGroup(x.pos)===CG.posGroup(me.pos) &&
-        /* v3.79: a suspended player is locked in place for his club (Rule 7.2); the office may move him */
-        !(CG.role()!=="commish" && CG.suspensionOf && CG.suspensionOf(x.id));
+        CG.posGroup(x.pos)===CG.posGroup(me.pos);
     });
     if (!opts.length){
       CG.toast("No eligible "+(wantSquad==="tc"?"camp":"active")+" "+(CG.posGroup(me.pos)==="G"?"goaltender":CG.posGroup(me.pos)==="D"?"defenseman":"forward")+
@@ -14977,7 +14978,9 @@ CG.tradeSide = function(pids){
    player can be traded (the database never refused it; Rule 7.2 now says so), so the Trade Hub marks one, and the club
    trading for them sees what they are taking on: the suspension goes with the player. */
 CG.tradeSuspChip = function(pid){
-  var s = CG.suspensionOf ? CG.suspensionOf(pid) : null;
+  /* v4.25: a playing suspension only (CG.playSuspensionOf, the twin of public.is_suspended); a staff-only one travels with
+     nobody's roster spot */
+  var s = CG.playSuspensionOf ? CG.playSuspensionOf(pid) : null;
   return s ? ' <span class="chip chip-loss chip-xs" title="'+esc(CG.suspensionText(s))+'">Suspended</span>' : '';
 };
 CG.tradePlayerRow = function(pid, opts){

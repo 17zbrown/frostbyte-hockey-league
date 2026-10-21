@@ -76,14 +76,15 @@ A("server picks stay open to the office after the lock, with the server in force
 A("a late save reads the re-settled server back and fails loud", /CG\.sb\.rpc\("resolve_game_server", \{ p_game:gameId \}\)/.test(hub) && /Saved, but the server could not be read back/.test(hub));
 A("minimum service is the club's, not the office's", /var mv = \(CG\.role\(\)!=="commish" && CG\.canMovePlayer\) \? CG\.canMovePlayer\(p\) : null;/.test(hub));
 A("the office renumbers in a preview whatever seat is mirrored", /var canEditNum = \(CG\.role\(\)==="commish" && !!\(CG\.previewClub && CG\.previewClub\(\)\)\)/.test(hub));
-A("a suspended player is locked for the club, not the office", /if \(sus && CG\.role\(\)!=="commish"\)\{/.test(hub) && /the league office can\. '\+title;/.test(hub));
+/* v4.25 (commissioner, 2026-10-21): the squad lock is gone for everyone, so the office exception went with it */
+A("v4.25: a suspended player is not locked for anyone", !/if \(sus && CG\.role\(\)!=="commish"\)\{/.test(hub) && !/the league office can\. '\+title;/.test(hub));
 A("the swap button carries the reason, not 'Roster full'", /data-squad-swap="'\+p\.spotId\+'" title="'\+esc\(CG\.squadSwapWhy\(club, p\)/.test(hub) && !/title="Roster full/.test(hub));
 A("the swap dialog says it too", /esc\(CG\.squadSwapWhy \? CG\.squadSwapWhy\(club, me\)/.test(live) && !/Your roster is full, so this is a straight swap/.test(live));
 A("a refused swap re-enables the dialog", /if \(r\.error\)\{ swapBtn\.disabled = false; CG\.toast\(r\.error\.message, "err"\); return; \}/.test(live) && /function\(e\)\{ swapBtn\.disabled = false; CG\.toast\("Couldn’t swap/.test(live));
 /* review, 2026-10-02: an insert's RETURNING is the row as inserted ("pending"); the trigger approves it after, so re-read */
 A("an office nomination reads its decided status back after the insert", !/r\.data\[0\]\.status/.test(grab(live, "CG.submitMgmtApp = function"))
   && /CG\.sb\.from\("management_applications"\)\.select\("status,seat_block"\)\.eq\("id", r\.data\[0\]\.id\)\.maybeSingle\(\)/.test(live) && /m\.isOffice \? "Appoint" : "Submit nomination"/.test(live));
-A("a suspended counterpart is not offered to a club in the swap picker", /!\(CG\.role\(\)!=="commish" && CG\.suspensionOf && CG\.suspensionOf\(x\.id\)\)/.test(live));
+A("v4.25: the swap picker offers a suspended counterpart", !/CG\.suspensionOf\(x\.id\)/.test(live));
 A("the Depth chip no longer says he never counts against the shape", !/never counts against the 9\/6\/3 shape/.test(hub) && /counts toward the '\+CG\.ROSTER_QUOTA\.F\+' F/.test(hub));
 A("the extension window is the club's (never in basic)", /var winOpen = CG\.extensionWindowOpen\(\) \|\| \(CG\.role\(\)==="commish" && !CG\.isBasic\(\)\);/.test(live));
 A("the office picks while the draft is paused, both desks", (live.match(/status==="paused" && CG\.role\(\)==="commish"/g) || []).length === 2);
@@ -114,10 +115,12 @@ const rb = CG.CONTENT.rulebook, sec = (id) => rb.chapters.flatMap((c) => c.secti
 A("Rule 2.6: no clock binds the office; structure still does", /No clock binds the league office in a club's Team HQ\./.test(sec("2.6").paragraphs[6]) && /The limits on what a roster may hold are not clocks, and they bind the office as they bind the club/.test(sec("2.6").paragraphs[6]));
 A("...the extension clause only where extensions exist (full format)", !/extension window/.test(sec("2.6").paragraphs[6]) && /extension window opens/.test(sec("2.6").full[6]));
 A("...and the office's nomination takes effect at once", /one the league office makes takes effect at once/.test(sec("2.6").paragraphs[0]));
-A("Rules 2.4, 4.2, 5.3 and 7.2 say the office's exemption", /may waive or trade a player short of it/.test(sec("2.4").paragraphs.join(" "))
+/* v4.25 (commissioner, 2026-10-21): Rule 7.2 no longer has a squad lock for the office to be exempt from; its waiver
+   bar binds the office too, so the 7.2 half now pins that */
+A("Rules 2.4, 4.2 and 5.3 say the office's exemption, and 7.2 binds the office to the waiver bar", /may waive or trade a player short of it/.test(sec("2.4").paragraphs.join(" "))
   && /The league office may still change a club's picks after it/.test(sec("4.2").paragraphs.join(" "))
   && /The league office may still file or change a club's sheet after that/.test(sec("5.3").paragraphs.join(" "))
-  && /The lock binds the club; the league office may move the player/.test(sec("7.2").paragraphs.join(" ")));
+  && /this bar binds the league office as it binds the club/.test(sec("7.2").paragraphs.join(" ")));
 const i79 = rb.changelog.findIndex((c) => c.version === "3.79"), e79 = rb.changelog[i79];
 A("changelog records 3.79, right after 3.78", i79 >= 0 && rb.changelog[i79 + 1].version === "3.78");
 const newText = [sec("2.6").paragraphs[6], sec("2.6").full[6]].concat(e79.items, [e79.summary]).join(" ");
