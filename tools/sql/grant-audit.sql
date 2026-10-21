@@ -67,4 +67,16 @@ from pg_class c join pg_namespace n on n.oid = c.relnamespace
 where n.nspname = 'public' and c.relkind = 'v'
   and not coalesce('security_invoker=true' = any(c.reloptions) or 'security_invoker=on' = any(c.reloptions), false)
   and (has_table_privilege('anon', c.oid, 'INSERT') or has_table_privilege('anon', c.oid, 'UPDATE') or has_table_privilege('anon', c.oid, 'DELETE')
-    or has_table_privilege('authenticated', c.oid, 'INSERT') or has_table_privilege('authenticated', c.oid, 'UPDATE') or has_table_privilege('authenticated', c.oid, 'DELETE'));
+    or has_table_privilege('authenticated', c.oid, 'INSERT') or has_table_privilege('authenticated', c.oid, 'UPDATE') or has_table_privilege('authenticated', c.oid, 'DELETE'))
+union all
+-- 9) (v4.26) a club release that skips the waiver. Audit F-2-18: the policy "gm deletes own team roster" let a seat holder
+--    delete a roster row through the API, so the release reached neither the transaction log nor the waived_at stamp
+--    (Rule 2.2). A roster row leaves only through a SECURITY DEFINER door (waive_player, the office's removal doors):
+--    no DELETE policy on roster_spots, and no DELETE or TRUNCATE (which RLS never sees) for the API roles.
+--    sql/2026-10-21-roster-delete-door-v426.sql.
+select 'roster-delete-door-open', 'policy ' || policyname, cmd, false
+from pg_policies where schemaname = 'public' and tablename = 'roster_spots' and cmd = 'DELETE'
+union all
+select 'roster-delete-door-open', r.role || ' ' || pv.priv, '', r.role = 'anon'
+from unnest(array['anon','authenticated']) r(role), unnest(array['DELETE','TRUNCATE']) pv(priv)
+where has_table_privilege(r.role, 'public.roster_spots', pv.priv);

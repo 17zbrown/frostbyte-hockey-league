@@ -868,6 +868,7 @@ Ranked by severity. *Target* says whether the book, the system, or both should c
 - *Evidence:* pg_policies roster_spots 'gm deletes own team roster' DELETE is_gm_of(team_id); public.waive_player(uuid)
 - *Correction:* Withdraw the direct DELETE policy so waive_player is the only door for a club release. No book change.
 - *Checked:* held under adversarial verification
+- *Closed:* v4.26 (2026-10-21). The policy is dropped, and anon and authenticated lost DELETE and TRUNCATE on roster_spots; grant audit check 9 keeps it closed. sql/2026-10-21-roster-delete-door-v426.sql.
 
 **F-2-19** Rule 2.7 (2.7.1). Target: decision.
 - *The book says:* A commissioner or staff member may not own or manage a club, and a club seat holder may not sit on the staff (with only the Media exception).
