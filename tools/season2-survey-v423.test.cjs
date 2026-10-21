@@ -122,8 +122,10 @@ console.log("— THE question set, in order");
 console.log("— THE X-Factor list");
 {
   const sk = SV.XF.skaters, gk = SV.XF.goalies;
-  A("23 skater X-Factors, every name", JSON.stringify(sk) === JSON.stringify(["Ankle Breaker", "Backhand Beauty", "Big Rig", "Big Tipper", "Born Leader",
-    "Elite Edges", "Hipster", "No Contest", "One T", "Pressure+", "Quick Draw", "Quick Pick", "Quick Release", "Rocket", "Second Wind", "Send It",
+  /* v4.28 (commissioner, 2026-10-21): Quick Draw is not an X-Factor in World of Chel, so the list is 22 skaters, 27 in all
+     (tools/survey-quick-draw-v428.test.cjs) */
+  A("22 skater X-Factors, every name", JSON.stringify(sk) === JSON.stringify(["Ankle Breaker", "Backhand Beauty", "Big Rig", "Big Tipper", "Born Leader",
+    "Elite Edges", "Hipster", "No Contest", "One T", "Pressure+", "Quick Pick", "Quick Release", "Rocket", "Second Wind", "Send It",
     "Spark Plug", "Stick ’Em Up", "Tape to Tape", "Truculence", "Unstoppable Force", "Warrior", "Wheels"]), sk);
   A("5 goaltender X-Factors", JSON.stringify(gk) === JSON.stringify(["Dialed In", "Post to Post", "Recharge", "Show Stopper", "Sponge"]), gk);
   A("alphabetical within each group", [sk, gk].every((l) => JSON.stringify(l) === JSON.stringify(l.slice().sort((a, b) => a.localeCompare(b)))));
@@ -137,7 +139,7 @@ console.log("— THE X-Factor list");
   A("the tags match the rulebook's own Rule 4.5", r45 && SV.XF.bannedEvery.concat(SV.XF.bannedRed).every((x) => r45.indexOf(x) >= 0), r45.slice(0, 120));
   for (const qi of [4, 5, 6]){
     const q = SV.Q[qi], h = SV.questionHtml(q, {});
-    A(q.tier + ": all 28 as check boxes", (h.match(/type="checkbox"/g) || []).length === 28);
+    A(q.tier + ": all 27 as check boxes", (h.match(/type="checkbox"/g) || []).length === 27);
     A(q.tier + ": Skaters then Goaltenders", h.indexOf(">Skaters<") > 0 && h.indexOf(">Skaters<") < h.indexOf(">Goaltenders<"));
     A(q.tier + ": nothing pre-checked", !/ checked/.test(h));
     A(q.tier + ": Select all and None", /data-sv="all"[^>]*>Select all</.test(h) && /data-sv="none"[^>]*>None</.test(h));
@@ -394,8 +396,8 @@ console.log("The commissioner's results (Control Center > Seasons)");
     t.q.nights.votes.Wednesday === 2 && t.q.nights.votes.Thursday === 1 && t.q.nights.votes.Monday === 0 && t.q.nights.odd === 1 &&
     t.q.nights.answered === 2 && JSON.stringify(Object.keys(t.q.nights.votes)) === JSON.stringify(SV.DAYS), t.q.nights);
   A("nights per week", t.q.perWeek.answered === 2 && t.q.perWeek.votes["3"] === 1 && t.q.perWeek.votes["2"] === 1);
-  A("every tier holds all 28 X-Factors, with its ban votes and its None votes",
-    ["xfGold", "xfBlue", "xfRed"].every((k) => Object.keys(t.q[k].votes).length === 28) &&
+  A("every tier holds all 27 X-Factors, with its ban votes and its None votes",
+    ["xfGold", "xfBlue", "xfRed"].every((k) => Object.keys(t.q[k].votes).length === 27) &&
     t.q.xfGold.votes.Truculence === 2 && t.q.xfGold.votes.Rocket === 1 && t.q.xfGold.answered === 2 && t.q.xfGold.none === 0 &&
     t.q.xfBlue.answered === 2 && t.q.xfBlue.none === 1 && t.q.xfRed.none === 1 && t.q.xfRed.votes.Rocket === 1);
   A("the written answers: trimmed, newest first (the server's order)", JSON.stringify(t.q.worked.texts.map((e) => e.text)) ===
@@ -408,7 +410,7 @@ console.log("The commissioner's results (Control Center > Seasons)");
     "Blue (All-Star)", "Red (Elite)", "Season 1: what worked?", "Season 1: what needs fixing?", "Anything you would like to see in Season 2 and beyond?"]
     .map((x) => h.indexOf(">" + x + "<")).every((i, k, a) => i > 0 && (k === 0 || i > a[k - 1])));
   const gold = card("Gold (Specialist)"), red = card("Red (Elite)"), blue = card("Blue (All-Star)");
-  A("each tier lists every X-Factor, most votes first", (gold.match(/class="vz-hb"/g) || []).length === 28 &&
+  A("each tier lists every X-Factor, most votes first", (gold.match(/class="vz-hb"/g) || []).length === 27 &&
     /<em>Truculence<\/em>[\s\S]*<em>Rocket<\/em>[\s\S]*<em>Ankle Breaker<\/em>/.test(gold));
   A("...with its None votes", /2 of 3 answered · 0 voted None/.test(gold) && /2 of 3 answered · 1 voted None/.test(blue));
   A("...and the Banned now mark from Rule 4.5's list (six, eight at Red)", (gold.match(/vz-hbtag">Banned now</g) || []).length === 6 &&

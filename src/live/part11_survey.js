@@ -34,10 +34,14 @@ SV.STEP_MS = 350;        /* a second click this soon after a step change is the 
    answers and the tests read this list and nothing else. Alphabetical within each group. */
 SV.XF = {
   skaters: ["Ankle Breaker", "Backhand Beauty", "Big Rig", "Big Tipper", "Born Leader", "Elite Edges", "Hipster",
-            "No Contest", "One T", "Pressure+", "Quick Draw", "Quick Pick", "Quick Release", "Rocket", "Second Wind",
-            "Send It", "Spark Plug", "Stick ’Em Up", "Tape to Tape", "Truculence", "Unstoppable Force", "Warrior",
-            "Wheels"],
+            "No Contest", "One T", "Pressure+", "Quick Pick", "Quick Release", "Rocket", "Second Wind", "Send It",
+            "Spark Plug", "Stick ’Em Up", "Tape to Tape", "Truculence", "Unstoppable Force", "Warrior", "Wheels"],
   goalies: ["Dialed In", "Post to Post", "Recharge", "Show Stopper", "Sponge"],
+  /* v4.28 (commissioner, 2026-10-21: "remove the quick draw perk from the survey choices since that is not an x-factor
+     available in world of chel"). A name taken off the list stays here with the reason, so earlier answers that picked
+     it are said under the results chart (SV.tally) instead of reading as "a choice the survey does not offer", and a
+     half-finished answer kept in this browser cannot send it (SV.payload). */
+  removed: { "Quick Draw": "not an X-Factor in World of Chel" },
   /* banned today under Rule 4.5. Shown as a quiet "Banned now" tag, never pre-checked: the member is asked,
      not told. tools/season2-survey-v423.test.cjs holds these to the rulebook's own Rule 4.5 text. */
   bannedEvery: ["Truculence", "Spark Plug", "Hipster", "Pressure+", "Unstoppable Force", "Big Rig"],
@@ -169,7 +173,10 @@ SV.payload = function(a){
     if (q.kind === "text"){ if (s(v)) out[q.id] = s(v).slice(0, q.max || 2000); }
     else if (q.kind === "one"){ if (s(v)) out[q.id] = s(v); }
     else if (Array.isArray(v)){
-      var list = v.filter(function(x){ return s(x); });
+      /* v4.28: an X-Factor answer keeps only names still on the list (a pick saved in this browser before a name was
+         removed is invisible on screen, so it is never sent) */
+      var xf = q.kind === "xf" ? SV.XF.skaters.concat(SV.XF.goalies) : null;
+      var list = v.filter(function(x){ return s(x) && (!xf || xf.indexOf(x) >= 0); });
       if (list.length) out[q.id] = list;
     }
     if (q.kind === "xf" && a[q.id + "None"] === true) out[q.id + "None"] = true;
@@ -506,7 +513,7 @@ SV.tally = function(rows){
   var t = { count: 0, daily: 0, signup: 0, q: {} }, parts = resParts();
   parts.forEach(function(x){
     var v = {}; choicesOf(x).forEach(function(c){ v[c] = 0; });
-    t.q[x.id] = { answered: 0, none: 0, odd: 0, votes: v, texts: [] };
+    t.q[x.id] = { answered: 0, none: 0, odd: 0, removed: {}, votes: v, texts: [] };
   });
   (rows || []).forEach(function(r){
     r = r || {};
@@ -525,7 +532,9 @@ SV.tally = function(rows){
       list.forEach(function(c){
         if (typeof c !== "string" || has(seen, c)) return;
         seen[c] = true;
-        if (has(s.votes, c)) s.votes[c]++; else s.odd++;
+        if (has(s.votes, c)) s.votes[c]++;
+        else if (x.kind === "xf" && has(SV.XF.removed, c)) s.removed[c] = (s.removed[c] || 0) + 1;   /* v4.28: said by name */
+        else s.odd++;
       });
     });
   });
@@ -533,8 +542,15 @@ SV.tally = function(rows){
 };
 function share(n, d){ return d ? Math.round(100 * n / d) : 0; }
 function oddNote(s){
-  return s.odd ? s.odd + " answer" + (s.odd === 1 ? "" : "s") + " named a choice the survey does not offer, so " +
-    (s.odd === 1 ? "it is" : "they are") + " not counted." : null;
+  /* v4.28: a removed X-Factor is named with the reason, before any other uncounted answer */
+  var notes = Object.keys(s.removed || {}).map(function(c){
+    var n = s.removed[c];
+    return c + " was removed from the survey (" + SV.XF.removed[c] + "), so " + n + " earlier vote" + (n === 1 ? "" : "s") + " for it " +
+      (n === 1 ? "is" : "are") + " not counted.";
+  });
+  if (s.odd) notes.push(s.odd + " answer" + (s.odd === 1 ? "" : "s") + " named a choice the survey does not offer, so " +
+    (s.odd === 1 ? "it is" : "they are") + " not counted.");
+  return notes.length ? notes.join(" ") : null;
 }
 /* one bar per choice, filled against the people who answered the question */
 function voteBars(x, s, o){
