@@ -107,6 +107,26 @@ console.log("\n— an RPC refusal degrades to a recorded error");
   A("no phantom removals announced", posts.length === 0 && !("signupsRemoved" in sum));
 }
 
+console.log("\nv4.30: one row per member and action; only a removal is announced");
+{
+  rpcResult = [
+    { action: "warned", profile_id: "w1", gamertag: "WarnedOne", detail: "until Oct 25, 07:00 PM ET" },
+    { action: "removed", profile_id: "r1", gamertag: "GoneOne", detail: "suspended through Season 2" },
+    { action: "skipped", profile_id: "s1", gamertag: "LockedOne", detail: "sign-up already gone or locked" },
+    { action: "error", profile_id: "e1", gamertag: "BrokenOne", detail: "withdrawal: P0001 boom" },
+  ];
+  const sum = await run("chan1");
+  A("only the removal is summarized and announced", JSON.stringify(sum.signupsRemoved) === JSON.stringify(["GoneOne"]) && posts.length === 1);
+  const d = posts[0] && posts[0].body.embeds[0].description;
+  A("...and the warned, skipped and failed members are never named in public", !!d && !/WarnedOne|LockedOne|BrokenOne/.test(d));
+  A("a warning lands in the run summary, not in the room", JSON.stringify(sum.signupsWarned) === JSON.stringify(["WarnedOne"]));
+  A("a failed row fails the run loudly", sum.errors.length === 1 && /BrokenOne: withdrawal: P0001 boom/.test(JSON.stringify(sum.errors[0])));
+  A("the room no longer promises a fresh sign-up after a rejoin, and has no dash", !!d && !/fresh sign-up/.test(d) && !/\u2014/.test(d));
+  rpcResult = [{ action: "warned", profile_id: "w1", gamertag: "WarnedOne", detail: "x" }];
+  const sum2 = await run("chan1");
+  A("a tick with only warnings posts nothing", posts.length === 0 && !("signupsRemoved" in sum2));
+}
+
 console.log("\n— the sweep wiring and the places the rule is told to humans");
 {
   const sync = readFileSync(new URL("../jobs/discord-sync.js", import.meta.url), "utf8");

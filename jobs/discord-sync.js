@@ -329,11 +329,21 @@ const SIGNUP_REMOVAL_GRACE_HOURS = 24;
    holds the clock in roster_departure_notices). */
 const ROSTER_DEPARTURE_GRACE_HOURS = 24;
 async function removeDepartedSignups(sum) {
-  let removed = [];
+  let rows = [];
   try {
-    removed = (await sbPost("rpc/remove_departed_signups",
+    rows = (await sbPost("rpc/remove_departed_signups",
       { p_grace_hours: SIGNUP_REMOVAL_GRACE_HOURS }, "return=representation")) || [];
   } catch (e) { sum.errors.push({ signupRemoval: String(e.message || e) }); return; }
+  /* v4.30 (commissioner, 2026-10-24: a member out of the Discord past the window is suspended through the next season):
+     the RPC now warns first and reports one row per member, like sweep_roster_departures: 'warned' (the site notice
+     that starts the window), 'removed', 'skipped' and 'error'. Only a removal is announced here; a warning is private
+     to the member, and a failed row fails this run loudly so the watchdog cannot go green. A row with no action is the
+     pre-v4.30 shape, so this file can deploy before the SQL does (deploy order: this job first, then the migration). */
+  const bad = rows.filter((r) => r.action === "error");
+  if (bad.length) sum.errors.push({ signupRemoval: bad.map((r) => `${r.gamertag || r.profile_id}: ${r.detail}`) });
+  const warned = rows.filter((r) => r.action === "warned");
+  if (warned.length) sum.signupsWarned = warned.map((r) => r.gamertag || r.profile_id);
+  const removed = rows.filter((r) => !r.action || r.action === "removed");
   if (!removed.length) return;
   sum.signupsRemoved = removed.map((r) => r.gamertag || r.profile_id);
   const chId = sum.__departChanId;
@@ -342,8 +352,8 @@ async function removeDepartedSignups(sum) {
      record matters most (first tick against a backlog). Chunk the names so no batch size can
      400 the whole announcement away; each chunk posts independently. */
   const blurb = "\n\nOut of the server for over " + SIGNUP_REMOVAL_GRACE_HOURS + " hours while still on the " +
-    "sign-up board — the registration was archived and removed from the pool, and the member " +
-    "was told on the site how to come back. Re-registering after a rejoin counts as a fresh sign-up.";
+    "sign-up board: the registration was archived and removed from the pool, and the member " +
+    "was told on the site (Rule 1.1).";
   const chunks = [];
   let cur = [], len = 0;
   for (const n of sum.signupsRemoved) {
