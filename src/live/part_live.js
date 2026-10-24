@@ -9122,7 +9122,8 @@ CG.actionStatusChip = function(st){
 };
 CG.actionCard = function(a, review, opts){
   /* v3.76: club mode is a front office answering its own players (Rule 2.3): reply, respond, resolve, deny.
-     The league office's casework tools (claim, staff-only notes, discipline, history) stay off it. */
+     The league office's casework tools (claim, staff-only notes, discipline, history) stay off it.
+     v4.32: Respond is retired; a club answers with the final decision statement it writes on Resolve or Deny. */
   var club = !!(opts && opts.club);
   var meta = CG.ACTION_META[a.type]||{label:a.type,icon:"flag"};
   var msgs = (CG.lg._actionMsgs||{})[a.id]||[];
@@ -9140,6 +9141,7 @@ CG.actionCard = function(a, review, opts){
   if (aboutName) metaBits.push("About: "+esc(aboutName));
   metaBits.push(CG.fmtFull(Date.parse(a.created_at)));
   var isPos = a.type==="position_change";
+  var closed = a.status==="resolved"||a.status==="denied";
   var posLine = isPos ? (a.current_position||"?")+" → "+(a.requested_position||"?") : "";
   var h = '<div class="card"><div class="card-b" style="display:flex;flex-direction:column;gap:10px">'+
     '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+CG.ic(meta.icon||"flag",15)+
@@ -9167,7 +9169,9 @@ CG.actionCard = function(a, review, opts){
   }
   h += (a.subject?'<b style="font-size:14px">'+esc(a.subject)+'</b>':"")+
     '<p class="small" style="color:var(--steel);white-space:pre-wrap">'+esc(a.details||"")+'</p>'+
-    (a.response?'<div class="note grn" style="margin:0"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">Official response</b>'+esc(a.response)+'</div>':"");
+    /* v4.32: the final decision statement (Rule 1.4), escaped, its line breaks kept. A filer's reply reopens a decided
+       case; until it is decided again the old statement shows as the earlier one */
+    (a.response?'<div class="note grn" style="margin:0"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">'+(closed?"Final decision statement":"Earlier decision statement")+'</b><span style="white-space:pre-wrap">'+esc(a.response)+'</span></div>':"");
   if (msgs.length){
     h += '<div class="stack" style="gap:8px;border-top:1px solid var(--line-soft);padding-top:10px">'+msgs.map(function(m){
       var isStaff = m.profiles && (m.profiles.role==="staff" || m.profiles.role==="commissioner");
@@ -9182,7 +9186,6 @@ CG.actionCard = function(a, review, opts){
         (att?'<div style="padding-left:2px">'+att+'</div>':"")+'</div>';
     }).join("")+'</div>';
   }
-  var closed = a.status==="resolved"||a.status==="denied";
   if (!closed){
     h += '<div style="display:flex;flex-direction:column;gap:6px">'+
       '<div style="display:flex;gap:8px"><input data-reply-for="'+a.id+'" placeholder="Add a reply or more detail…" style="flex:1">'+
@@ -9193,7 +9196,6 @@ CG.actionCard = function(a, review, opts){
   if (review && !conflicted){
     h += '<div style="display:flex;gap:7px;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding-top:10px">'+
       (a.status!=="reviewing"&&!closed?'<button class="btn btn-ghost btn-sm" data-act-status="reviewing" data-act-id="'+a.id+'">Mark reviewing</button>':"")+
-      (!closed?'<button class="btn btn-ghost btn-sm" data-act-respond="'+a.id+'">Respond</button>':"")+
       /* a position change is decided, not merely closed: Approve applies the switch to the
          registration through decide_position_change; the generic Resolve/Deny (which changed
          nothing but the status) and the discipline tools stay off this card type */
@@ -9221,6 +9223,33 @@ CG.actionCard = function(a, review, opts){
   }
   return h+'</div></div>';
 };
+/* v4.32 (commissioner, 2026-10-24): "Can you add a 'final decision statement' box for all action center decisions that
+   are attached to the decision statement?" ONE box for every decision on a request: Resolve and Deny (league office, and
+   a club's front office on a trade request), Approve and Deny on a position change, Overturn and Deny on a forfeit
+   appeal, and Issue discipline. It is required, saved as the request's response, shown to the filer on the request and
+   carried in their notice. The database refuses a decision without it (guard_decision_statement), so a cached page or a
+   direct API call cannot skip it. Never prefilled: a reopened case is decided again with a NEW statement (Rule 1.4). */
+CG.DECISION_STATEMENT_MAX = 2000;   /* guard_decision_statement enforces the same cap */
+CG.decisionStatementField = function(caption){
+  return '<label class="fld"><span>Final decision statement</span>'+
+    '<textarea id="decStmt" rows="5" maxlength="'+CG.DECISION_STATEMENT_MAX+'" placeholder="What was decided, and why"></textarea></label>'+
+    '<p class="caption">'+esc(caption)+'</p>';
+};
+CG.readDecisionStatement = function(){
+  var el = document.getElementById("decStmt"), txt = ((el && el.value) || "").trim();
+  if (!txt){ CG.toast("Write the final decision statement first","err"); if (el) el.focus(); return null; }
+  return txt;
+};
+/* a modal, not an inline field: the live pulse repaints the page but skips while #overlay-root holds a dialog, so a
+   statement being typed is never wiped (seamless interactions) */
+CG.decisionModal = function(title, introHtml, caption, okLabel, run){
+  CG.modal(title, (introHtml||"")+CG.decisionStatementField(caption),
+    '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="decGo">'+esc(okLabel)+'</button>');
+  document.getElementById("decGo").addEventListener("click", function(){
+    var txt = CG.readDecisionStatement(); if (txt === null) return;
+    this.disabled = true; run(txt, this);
+  });
+};
 CG.hubComplaintsLive = function(opts){
   opts = opts||{};
   var isCommish = CG.role()==="commish";
@@ -9231,7 +9260,8 @@ CG.hubComplaintsLive = function(opts){
      review queue is not, because that is the league office's desk and a club matter is not on it. */
   /* v3.93: a club's forfeit appeal is its whole front office's (Owner, GM, AGM), whoever filed it */
   var myClubId = (CG.myManagedTeam && CG.myManagedTeam()) ? ((CG.lg._codeToId||{})[CG.myManagedTeam().code]||null) : null;
-  var mine = CG.auth.user ? all.filter(function(a){ return a.profile_id===uid || (a.type==="forfeit_appeal" && myClubId && a.team_id===myClubId); }) : [];
+  /* v4.32: so is its statistics correction (Rule 6.3), so the whole front office reads the decision on it */
+  var mine = CG.auth.user ? all.filter(function(a){ return a.profile_id===uid || (a.type==="forfeit_appeal" && myClubId && a.team_id===myClubId) || (a.type==="stats_correction" && myClubId && a.team_id===myClubId); }) : [];
   var queue = review && !opts.mineOnly ? CG.staffCases() : mine;
   /* review filter: All / Mine (assigned to me) / Unclaimed / Open */
   var flt = review ? (CG._caseFilter||"all") : null;
@@ -9255,8 +9285,8 @@ CG.hubComplaintsLive = function(opts){
         return '<button data-case-filter="'+f[0]+'" class="'+(flt===f[0]?"on":"")+'" role="tab" aria-selected="'+(flt===f[0])+'">'+f[1]+'</button>'; }).join("")+'</div>':"")+'</div>';
   h += queue.length
     ? '<div class="stack" style="gap:12px">'+queue.map(function(a){ return CG.actionCard(a, review); }).join("")+'</div>'
-    : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("flag",22)+'</div><b>Nothing on file'+(review?"":" yet")+'</b><p>'+(review?"Member complaints and requests queue here the moment they’re filed.":"File one above — you’ll see its status and any league-office response right here.")+'</p></div></div>';
-  h += '<div class="note" style="margin-top:18px">Complaints follow Chapter 7: submission → review → written decision, with appeals within 48 hours (Rule 7.6). The league office is notified the moment you file.</div>';
+    : '<div class="card"><div class="empty"><div class="e-art">'+CG.ic("flag",22)+'</div><b>Nothing on file'+(review?"":" yet")+'</b><p>'+(review?"Member complaints and requests queue here the moment they’re filed.":"File one above. Its status, and once it is decided the final decision statement, show right here.")+'</p></div></div>';
+  h += '<div class="note" style="margin-top:18px">Every request is decided with a final decision statement you can read here (Rule 1.4). Complaints follow Chapter 7, with appeals within 48 hours (Rule 7.6). The league office is notified the moment you file.</div>';
   return h;
 };
 /* Everyone in the league, not just everyone on a roster. A complaint can name a free agent or a
@@ -9437,11 +9467,13 @@ CG.caseDisciplineModal = function(caseId, targetName, targetId){
         return '<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" class="dcCode" value="'+esc(r.code)+'"><span>'+esc(r.label)+'</span></label>';
       }).join("")+'</div></div>'+
       CG.disciplineLengthFields(ctx, true, true)+
-      '<label class="fld"><span>Reason (recorded on the player and the case; he is shown it)</span><textarea id="dcReason" rows="3" placeholder="What was the violation?"></textarea></label>'+
+      '<label class="fld"><span>Grounds (on the player’s record; the player and league staff see them)</span><textarea id="dcReason" rows="3" placeholder="What was the violation?"></textarea></label>'+
       '<p class="caption">This resolves the case, posts to #staff-casework, and notifies the player with appeal instructions (Chapter 7).</p>';
   };
   CG.modal("Issue discipline",
-    '<label class="fld"><span>Player</span><select id="dcPlayer">'+opts+'</select></label><div id="dcBody">'+draw(match&&match.id)+'</div>',
+    '<label class="fld"><span>Player</span><select id="dcPlayer">'+opts+'</select></label><div id="dcBody">'+draw(match&&match.id)+'</div>'+
+      /* v4.32: outside #dcBody, which is redrawn when the player changes, so the statement survives it */
+      CG.decisionStatementField("The member who filed sees this on the case. Leave out the sanction and its grounds: Rule 7.2 shows those only to the player disciplined and league staff."),
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="dcGo">Issue discipline</button>');
   CG.wireDisciplineLength();
   document.getElementById("dcPlayer").addEventListener("change", function(){
@@ -9450,9 +9482,10 @@ CG.caseDisciplineModal = function(caseId, targetName, targetId){
   document.getElementById("dcGo").addEventListener("click", function(){
     var pid=document.getElementById("dcPlayer").value; if(!pid){ CG.toast("Pick the player","err"); return; }
     var len = CG.readDisciplineLength(); if (!len) return;
+    var stmt = CG.readDecisionStatement(); if (stmt === null) return;
     var codes = [].slice.call(document.querySelectorAll(".dcCode:checked")).map(function(c){ return c.value; });
     var args = Object.assign({ p_request:caseId, p_profile:pid, p_reason:(document.getElementById("dcReason").value||"").trim()||null,
-                               p_codes: codes.length ? codes : null }, len);
+                               p_codes: codes.length ? codes : null, p_statement:stmt }, len);
     var btn=this; btn.disabled=true;
     CG.sb.rpc("discipline_from_case", args).then(function(r){
       btn.disabled=false;
@@ -9512,36 +9545,38 @@ CG.AFTER._complaintsLive = function(){
     CG.caseDisciplineModal(this.getAttribute("data-case-discipline"), this.getAttribute("data-target"), this.getAttribute("data-target-id")||null); }); });
   document.querySelectorAll("[data-pos-decide]").forEach(function(b){ b.addEventListener("click", function(){
     var approve=this.getAttribute("data-pos-decide")==="approve", id=this.getAttribute("data-pos-id"), line=this.getAttribute("data-pos-line")||"the change";
-    CG.confirm(approve?"Approve this position change?":"Deny this position change?",
-      approve?"Their registration flips to the requested position ("+esc(line)+") and the case closes. The Discord position role follows on the next sync."
-             :"The registration stays as it is and the case closes as denied. They're notified either way.",
-      approve?"Approve the switch":"Deny the request", function(){
-        CG.sb.rpc("decide_position_change",{ p_request:id, p_approve:approve }).then(function(r){
+    /* v4.32: decided with the final decision statement (Rule 1.4); line is escaped once here (CG.confirm escaped it twice) */
+    CG.decisionModal(approve?"Approve this position change":"Deny this position change",
+      '<p style="color:var(--steel)">'+esc(approve?"Their registration flips to the requested position ("+line+") and the case closes. The Discord position role follows on the next sync."
+                                                  :"The registration stays as it is and the case closes as denied.")+'</p>',
+      "They see this on the request and in the notice that tells them of the decision.",
+      approve?"Approve the switch":"Deny the request", function(txt, btn){
+        CG.sb.rpc("decide_position_change",{ p_request:id, p_approve:approve, p_note:txt }).then(function(r){
+          btn.disabled = false;
           if (r.error){ CG.toast(r.error.message||"Couldn’t decide the request","err"); return; }
-          CG.toast(approve?"Approved — their registration is updated":"Request denied","ok");
+          if (CG.closeOverlay) CG.closeOverlay();
+          CG.toast(approve?"Approved: their registration is updated":"Request denied","ok");
           if (CG.reloadLeague) CG.reloadLeague(); else CG.refreshActions();
         });
       });
   }); });
   document.querySelectorAll("[data-ffa-decide]").forEach(function(b){ b.addEventListener("click", function(){
     var overturn = this.getAttribute("data-ffa-decide")==="overturn", id = this.getAttribute("data-ffa-id");
-    CG.modal(overturn ? "Overturn the forfeit" : "Deny the appeal",
-      '<label class="fld"><span>Reason, shown to the club</span><textarea id="ffaResp" rows="4"></textarea></label>'+
-      '<p class="caption">'+(overturn ? "The forfeit is cleared and the result as played stands. Both clubs and the scores channel are told."
-                                     : "The forfeit stands. The club is told, with your reason.")+'</p>',
-      '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="ffaGo">'+(overturn ? "Overturn" : "Deny")+'</button>');
-    document.getElementById("ffaGo").addEventListener("click", function(){
-      var txt = (document.getElementById("ffaResp").value||"").trim();
-      if (!txt){ CG.toast("Give the reason; the club sees it","err"); return; }
-      var btn = this; btn.disabled = true;
-      CG.sb.rpc("decide_forfeit_appeal", { p_request:id, p_overturn:overturn, p_response:txt }).then(function(r){
-        btn.disabled = false;
-        if (r.error){ CG.toast(r.error.message||"Couldn’t decide the appeal","err"); return; }
-        if (CG.closeOverlay) CG.closeOverlay();
-        CG.toast(overturn ? "Overturned: the result as played stands" : "Appeal denied: the forfeit stands","ok");
-        if (CG.reloadLeague) CG.reloadLeague(); else CG.refreshActions();
+    /* v4.32: the club's reason is now the final decision statement (Rule 1.4), the same box as every decision */
+    CG.decisionModal(overturn ? "Overturn the forfeit" : "Deny the appeal",
+      '<p style="color:var(--steel)">'+(overturn ? "The forfeit is cleared and the result as played stands. Both clubs and the scores channel are told."
+                                                  : "The forfeit stands. The club is told, with your statement.")+'</p>',
+      overturn ? "Both clubs’ front offices see this in their notices, and it is posted in both club rooms on Discord."
+               : "The club’s Owner, GM and AGM see this on the appeal and in their notices.",
+      overturn ? "Overturn" : "Deny", function(txt, btn){
+        CG.sb.rpc("decide_forfeit_appeal", { p_request:id, p_overturn:overturn, p_response:txt }).then(function(r){
+          btn.disabled = false;
+          if (r.error){ CG.toast(r.error.message||"Couldn’t decide the appeal","err"); return; }
+          if (CG.closeOverlay) CG.closeOverlay();
+          CG.toast(overturn ? "Overturned: the result as played stands" : "Appeal denied: the forfeit stands","ok");
+          if (CG.reloadLeague) CG.reloadLeague(); else CG.refreshActions();
+        });
       });
-    });
   }); });
   document.querySelectorAll("[data-case-history]").forEach(function(b){ b.addEventListener("click", function(){
     CG.caseHistoryModal(this.getAttribute("data-target")); }); });
@@ -9549,26 +9584,22 @@ CG.AFTER._complaintsLive = function(){
     var id=this.getAttribute("data-act-id"), st=this.getAttribute("data-act-status");
     /* .select() so a row blocked by RLS (a conflict of interest) comes back as 0 rows, not a
        silent success — otherwise the official is told the case was ruled when nothing changed */
-    CG.sb.from("action_requests").update({ status:st, updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){
-      if(r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
-      if(!r.data||!r.data.length){ CG.toast("You can’t rule on this case — you filed it or you’re named in it. Another official has to handle it.","err"); return; }
-      CG.toast("Case "+st,"ok"); CG.refreshActions();
-    });
-  }); });
-  document.querySelectorAll("[data-act-respond]").forEach(function(b){ b.addEventListener("click", function(){
-    var id=this.getAttribute("data-act-respond");
-    CG.modal("Official response",
-      '<label class="fld"><span>Response to the member</span><textarea id="arResp" rows="5"></textarea></label>'+
-      '<p class="caption">Shown on their case as the league’s written decision — pair it with Resolve or Deny.</p>',
-      '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-chrome" id="arGo">Save response</button>');
-    document.getElementById("arGo").addEventListener("click", function(){
-      var txt=(document.getElementById("arResp").value||"").trim();
-      CG.sb.from("action_requests").update({ response:txt||null, updated_at:new Date().toISOString() }).eq("id",id).select("id").then(function(r){
-        if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-        if(!r.data||!r.data.length){ CG.toast("You can’t respond on this case — you filed it or you’re named in it. Another official has to handle it.","err"); return; }
-        if (CG.closeOverlay) CG.closeOverlay(); CG.toast("Response saved","ok"); CG.refreshActions();
+    var write = function(patch, btn){
+      patch.status = st; patch.updated_at = new Date().toISOString();
+      CG.sb.from("action_requests").update(patch).eq("id",id).select("id").then(function(r){
+        if (btn) btn.disabled = false;
+        if(r.error){ CG.toast("Couldn’t update: "+r.error.message,"err"); return; }
+        if(!r.data||!r.data.length){ CG.toast("You can’t rule on this case: you filed it or you’re named in it. Another official has to handle it.","err"); return; }
+        if (btn && CG.closeOverlay) CG.closeOverlay();
+        CG.toast("Case "+st,"ok"); CG.refreshActions();
       });
-    });
+    };
+    /* v4.32: Mark reviewing is not a decision, so it stays one click. Resolve and Deny write the final decision
+       statement in the same update as the status (guard_decision_statement refuses one without the other) */
+    if (st==="reviewing"){ write({}); return; }
+    CG.decisionModal(st==="resolved" ? "Resolve this request" : "Deny this request", "",
+      "The member who filed sees this on the request and in the notice that tells them of the decision.",
+      st==="resolved" ? "Resolve" : "Deny", function(txt, btn){ write({ response:txt }, btn); });
   }); });
   document.querySelectorAll("[data-act-del]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-act-del");
@@ -14153,7 +14184,7 @@ CG.hubClubRequests = function(){
   var closed = all.filter(function(a){ return a.status==="resolved" || a.status==="denied"; });
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · front office</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Player requests</h1>'+
-    '<p class="lede" style="margin-top:8px">What your own players have asked of you. These come to the Owner, GM and AGM and to nobody else: the league office does not receive them and does not rule on them (Rule 2.3). You are under no obligation to act on one.</p></div>';
+    '<p class="lede" style="margin-top:8px">What your own players have asked of you. These come to the Owner, GM and AGM and to nobody else: the league office does not receive them and does not rule on them (Rule 2.3). You are under no obligation to act on one. If you resolve or deny one, you write a final decision statement that the player reads on the request (Rule 1.4).</p></div>';
   h += '<div class="card-h" style="padding:0 0 12px;border:0"><h3>Open ('+open.length+')</h3></div>';
   h += open.length
     ? '<div class="stack" style="gap:12px">'+open.map(function(a){ return CG.actionCard(a, true, { club:true }); }).join("")+'</div>'

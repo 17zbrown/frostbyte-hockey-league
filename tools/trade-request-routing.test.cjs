@@ -34,7 +34,7 @@ console.log("\n— ONE definition of league casework, and every staff surface re
   A("the league office's case QUEUE is staff cases", /var queue = review && !opts\.mineOnly \? CG\.staffCases\(\) : mine;/.test(live));
   A("...while the member's own list stays raw, so he sees the request he filed",
     /* v3.93: still raw for what he filed; it also carries his club's forfeit appeals for its Owner, GM and AGM */
-    /var mine = CG\.auth\.user \? all\.filter\(function\(a\)\{ return a\.profile_id===uid \|\| \(a\.type==="forfeit_appeal" && myClubId && a\.team_id===myClubId\); \}\) : \[\];/.test(live));
+    /var mine = CG\.auth\.user \? all\.filter\(function\(a\)\{ return a\.profile_id===uid \|\| \(a\.type==="forfeit_appeal" && myClubId && a\.team_id===myClubId\) \|\| \(a\.type==="stats_correction" && myClubId && a\.team_id===myClubId\); \}\) : \[\];/.test(live));
   A("the league-office dashboard counts are staff cases too", /CG\.visibleComplaints = function\(\)\{\s*\n\s*return CG\.staffCases\(\)\.map/.test(live));
   A("the staff-desk attention fallback counts staff cases", /var oc = CG\.staffCases\(\)\.filter/.test(live));
   A("the ticket archive builds from staff cases", /CG\.staffCases\(\)\.forEach\(function\(a\)\{/.test(live));
