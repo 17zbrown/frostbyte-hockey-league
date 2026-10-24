@@ -2623,7 +2623,7 @@ CG._wrapHubDashboard = function(){
             it.href && it.cta ? '<a class="btn btn-chrome btn-sm" style="margin-left:auto" href="'+esc(it.href)+'"'+(it.ext?' target="_blank" rel="noopener"':'')+'>'+esc(it.cta)+'</a>' : "";
           return '<div style="display:flex;align-items:center;gap:12px">'+mark+'<span style="flex:1;'+(it.done?'color:var(--steel)':'font-weight:600')+'">'+esc(it.label)+'</span>'+cta+'</div>';
         }).join("")+'</div>'+
-        '<p class="caption" style="margin-top:12px">All three and you’re in the pool'+(CG.isBasic(s) ? ': register by the cutoff and you’re in the draft. ' : ': randomly assigned for the pre-season, then the draft. ')+'Leaving the Discord withdraws a pending sign-up (Rule 1.1).</p></div></div>';
+        '<p class="caption" style="margin-top:12px">All three and you’re in the pool'+(CG.isBasic(s) ? ': register by the cutoff and you’re in the draft. ' : ': randomly assigned for the pre-season, then the draft. ')+'Leaving the Discord withdraws a pending sign-up and brings a suspension through the next season (Rule 1.1).</p></div></div>';
     }
     /* 1 · registration status */
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Your registration</h3>'+
@@ -3542,7 +3542,7 @@ CG.ROUTES.register = function(){
     '<label class="fld"><span>Primary position</span></label><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px" role="group" aria-label="Primary position">'+
       ["C","LW","RW","LD","RD","G"].map(function(pos){ var on=(reg?reg.position:"C")===pos; return '<button type="button" class="chip '+(on?"chip-chrome":"")+'" data-regpos="'+pos+'" aria-pressed="'+on+'" style="cursor:pointer;padding:8px 14px">'+CG.POS_NAME[pos]+'</button>'; }).join("")+'</div>'+
     '<button class="btn btn-chrome" id="regSubmit"'+(detailsMissing.length?" disabled":"")+'>'+(reg?"Update registration":"Submit registration")+'</button>'+
-    '<p class="caption" style="margin-top:10px">You must be in the Chel Gaming Discord to register — after you sign in, we’ll send you the invite if you’re not in yet. Staying in the server keeps your sign-up alive: leave it and your registration is withdrawn automatically after about a day (Rule 1.1). By registering you agree to the <a href="#/legal" style="font-weight:700;border-bottom:2px solid var(--chrome)">Terms &amp; Privacy</a> and the rulebook.</p>'+
+    '<p class="caption" style="margin-top:10px">You must be in the Chel Gaming Discord to register. After you sign in, we’ll send you the invite if you’re not in yet. Staying in the server keeps your sign-up alive: leave it and your registration is withdrawn automatically after about a day (Rule 1.1), and you are suspended through the next season (Rule 7.2). Rejoining after that does not lift the suspension; only a granted appeal does. By registering you agree to the <a href="#/legal" style="font-weight:700;border-bottom:2px solid var(--chrome)">Terms &amp; Privacy</a> and the rulebook.</p>'+
   '</div></div>';
   return head + '<div class="shell" style="max-width:640px;padding-bottom:48px">'+statusCard+body+'</div>';
 };
@@ -6961,7 +6961,7 @@ CG.AFTER._preseason = function(){
           '<td class="tnum">'+d(reg.created_at)+'</td><td class="tnum">'+d(x.removed_at)+'</td>'+
           '<td class="tleft"><span class="caption">'+(x.reason==="left_discord"?"left the Discord (automatic, Rule 1.1)":esc(x.reason||"—"))+'</span></td></tr>'; }).join("")+
       '</tbody></table></div>'+
-      '<p class="caption" style="margin-top:10px">Withdrawn automatically after a day out of the server. The full registration is archived with its original sign-up date, so the office can restore one that was removed in error; otherwise the member simply rejoins and signs up again.</p>';
+      '<p class="caption" style="margin-top:10px">Withdrawn automatically a day after the member left the server, counted from the warning the site sends them. A member withdrawn after that warning is also suspended through the next season (Rule 1.1) and can sign up again only once an appeal lifts it. The full registration is archived with its original sign-up date, so the office can restore one that was removed in error, lifting the suspension first.</p>';
     card.style.display="";
   });
 };
@@ -9021,7 +9021,7 @@ CG.AFTER._admTeams = function(){
    ================================================================ */
 CG.ACTION_META = {
   complaint:       { label:"Complaint",               icon:"flag",  route:"commissioner", blurb:"Conduct, cheating, no-shows, harassment — anything that needs the league office." },
-  appeal:          { label:"Suspension / ban appeal", icon:"doc",   route:"commissioner", blurb:"Appeal a ruling within 48 hours (Rule 7.6)." },
+  appeal:          { label:"Suspension / ban appeal", icon:"doc",   route:"commissioner", blurb:"Appeal a ruling within 48 hours, or a suspension for leaving the Discord at any time while it runs (Rule 7.6)." },
   trade_request:   { label:"Trade request",           icon:"swap",  route:"manager",      blurb:"Ask your club’s front office for a move. It goes to your Owner, GM and AGM, and to nobody else (Rule 2.3)." },
   position_change: { label:"Position change",         icon:"users", route:"commissioner", blurb:"Request a switch to a new position." },
   /* v3.68 (commissioner, 2026-09-28, Q60): a club's front office asks the statistics department to correct
@@ -14351,7 +14351,7 @@ CG.renderDiscordAccounts = function(d){
      Rule 1.1 withdraws a pending sign-up after about a day out of the server, and a member who
      switches to an account that never joins is exactly the case that clock was built for. */
   if (!inGuild) h+='<div class="note red" style="margin-top:10px"><b>This account isn’t in the league Discord yet.</b> Your site roles have moved to it, but Discord roles can’t follow until it joins the server'+
-     ' — and a pending sign-up is withdrawn after about a day out of the server (Rule 1.1), so join now.'+
+     '. A pending sign-up is withdrawn after about a day out of the server (Rule 1.1) and you are suspended through the next season (Rule 7.2), so join now.'+
      '<div style="display:inline-flex;gap:8px;flex-wrap:wrap;margin-top:10px">'+
      (invite?'<a class="btn btn-sm" style="background:#5865F2;color:#fff" href="'+esc(invite)+'" target="_blank" rel="noopener">Join the server with this account</a>':'<span class="caption">Ask a commissioner for the invite.</span>')+
      '<button class="btn btn-ghost btn-sm" id="dcRecheck">I’ve joined — re-check</button></div></div>';

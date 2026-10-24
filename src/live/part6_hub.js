@@ -2138,7 +2138,7 @@ CG.playSuspensionOf = function(pid){
 CG.suspensionText = function(s){
   if (!s) return "";
   var len = s.mode==="games" ? (s.gamesServed||0)+" of "+s.games+" games served"
-    : s.mode==="seasons" ? "for the rest of Season "+(s.untilSeason||"")
+    : s.mode==="seasons" ? "for the "+CG.suspensionLen(s)   /* v4.30: one wording for a suspension that runs into the next season */
     : "through "+(s.endsAt ? CG.fmtDay(Date.parse(s.endsAt)) : "further notice")+" at 11:59 PM ET";
   /* v4.18 (commissioner, 2026-10-18: "Allow teams to be able to trade and trade for suspended players."): the lock is
      on the club's squad moves, never on a trade; the suspension travels with the player.

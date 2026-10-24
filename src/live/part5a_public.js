@@ -2545,7 +2545,9 @@ CG.ROUTES.player = function(pid, qs){
   /* Not a rostered league player, but may be a website account holder with pickup stats — render a
      minimal profile whose header + pickup section are filled async in AFTER.player. */
   if (!p) return CG.pageHead("Player", "Player profile", "") +
-    '<div class="shell" style="max-width:960px;padding-bottom:2px"><div id="acctHdr" class="note">Loading account…</div></div>' +
+    '<div class="shell" style="max-width:960px;padding-bottom:2px"><div id="acctHdr" class="note">Loading account…</div>'+
+    /* v4.30: a member off every roster keeps a public discipline record (Rules 1.1 and 7.2) */
+    CG.disciplineRecordHtml(lg.suspensions.find(function(x){ return x.playerId===pid && x.status!=="lifted"; }))+'</div>' +
     CG.formerLeagueHtml(pid) +
     '<section class="sec-tight" style="padding-top:10px"><div class="shell" style="max-width:960px"><div id="pickupSection"></div></div></section>';
   var seasonKey = (qs.season && CG.lg.archive && CG.lg.archive[qs.season]) ? qs.season : "cur";
@@ -2809,10 +2811,7 @@ CG.ROUTES.player = function(pid, qs){
         return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic("trophy",15)+'</span><span><b>Week '+x.week+': '+x.pk.role+' of the Week</b>'+
           '<p>'+esc(x.pk.blurb)+'</p></span></div>';
       }).join("")+'</div>':"")+
-      (sus?'<div class="note red" style="margin-top:18px"><b style="display:block;font-family:var(--f-disp)">Discipline record</b>'+
-        'Suspended '+esc(CG.suspensionLen(sus))+', '+CG.suspensionStateWord(sus)+'. '+esc(CG.suspensionHeadings(sus))+'. Issued '+CG.fmtDate(sus.issued)+'.'+
-        (sus.reason ? '<span class="caption" style="display:block;margin-top:6px">Reason (you and league staff only): '+esc(sus.reason)+'</span>' : '')+
-        ' <a href="#/rulebook?rule=7.2" style="font-weight:700;border-bottom:2px solid var(--chrome)">Rule 7.2 \u2192</a></div>':"")+
+      CG.disciplineRecordHtml(sus)+
       /* v4.13: once he has played, the Team history card is his season split by club (CG.clubHistoryHtml); the full
          season stays on the main page. Before his first game: the club he is on and how he got there. */
       (CG.clubHistoryHtml(p, s) ||
@@ -2913,16 +2912,39 @@ CG.posGroupLabel = function(grp){
 CG.suspensionLen = function(s){
   if (!s) return "";
   if (s.mode==="games") return s.games+" game"+(s.games===1?"":"s")+(s.status==="active" && s.gamesServed ? " ("+s.gamesServed+" served)" : "");
-  if (s.mode==="seasons") return "rest of Season "+(s.untilSeason||"");
+  /* v4.30: a suspension that runs into a later season ("rest of Season 1 and all of Season 2", the Rule 1.1 one and the
+     Rule 2.5 one) said "rest of Season 2". Worded the way public.notify_suspension words it, from the season it was
+     issued in (season_id, a raw column the record keeps). */
+  if (s.mode==="seasons"){
+    var se = s.season_id ? ((CG._seasonsRaw||[]).find(function(x){ return x.id===s.season_id; })||null) : null;
+    var from = se ? se.number : null;
+    /* issued between seasons, before its season began: the whole season, never "the rest" of one not yet started */
+    if (se && se.starts_at && s.issued && new Date(s.issued) < new Date(se.starts_at))
+      return "all of Season "+from+(s.untilSeason > from ? " through Season "+s.untilSeason : "");
+    return from && s.untilSeason > from ? "rest of Season "+from+" and all of Season "+s.untilSeason : "rest of Season "+(s.untilSeason||"");
+  }
   if (s.mode==="date") return "through "+(s.endsAt ? CG.fmtDay(Date.parse(s.endsAt)) : "further notice");
   return "warning";
 };
 CG.suspensionHeadings = function(s){
   var labels = {}; (CG.CONDUCT_REASONS||[]).forEach(function(r){ labels[r.code] = r.label; });
   var h = (s && (s.codes || s.reason_codes) || []).map(function(c){ return labels[c] || c; });
+  if (!h.length && s && s.grounds==="departure") return "Left the league Discord (Rule 1.1)";   /* v4.30: suspension_record.grounds */
   return h.length ? h.join(", ") : (s && s.venue==="discord" ? "Discord conduct" : "Conduct on the ice");
 };
 CG.suspensionStateWord = function(s){ return s.status==="active" ? "running" : s.status==="served" ? "served" : s.status; };
+/* v4.30: the public discipline record as one block. It was written inline on a rostered player's Honors tab only, so a
+   member removed from every roster, which is what a Rule 1.1 suspension does, had no public record anywhere. The
+   commissioner (2026-10-24) announces that suspension through "the site's public suspension record", so the profile of
+   a member who is no longer rostered shows the same block. The reason line appears only when suspension_record returned
+   it (the member and league staff). */
+CG.disciplineRecordHtml = function(sus){
+  if (!sus) return "";
+  return '<div class="note red" style="margin-top:18px"><b style="display:block;font-family:var(--f-disp)">Discipline record</b>'+
+    'Suspended '+esc(CG.suspensionLen(sus))+', '+CG.suspensionStateWord(sus)+'. '+esc(CG.suspensionHeadings(sus))+'. Issued '+CG.fmtDate(sus.issued)+'.'+
+    (sus.reason ? '<span class="caption" style="display:block;margin-top:6px">Reason (you and league staff only): '+esc(sus.reason)+'</span>' : '')+
+    ' <a href="#/rulebook?rule=7.2" style="font-weight:700;border-bottom:2px solid var(--chrome)">Rule 7.2 \u2192</a></div>';
+};
 /* How settled is a player's overall? The database rates a player at each position he plays (v3.74), from
    the games he played there, and shrinks each standard score toward zero (a rating of 70) while that
    sample is thin: 0.10 per game through five games, then gp/(gp+1.5) from the sixth
