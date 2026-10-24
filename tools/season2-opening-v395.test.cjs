@@ -5,6 +5,9 @@
    (Season 1's window closed); after it, an application the page stamps Season 1 is stamped Season 2, a second one is
    refused, an edit never moves it, a commissioner's early decision is refused with the Dec 12 date, the ballot
    resolver waits, and Season 1's 17 applications are untouched. This pins the record, the site and the rulebook. */
+/* v4.31 (commissioner, 2026-10-24): "Lets push the season 2 start up to what we discussed the other day where we play on vetrans day week so we can get season 2 week 1 in before christmas and the new year." Veterans Day week is played, Season 1's final moves to Nov 18 to 20, and
+   by the same rule owner applications close Nov 28 and the draft is Dec 12. Line 15 still pins the v3.95 SQL record as
+   written (history); the rulebook pin below follows the new dates (tools/season2-move-up-v431.test.cjs has them all). */
 const fs = require("fs"), path = require("path"), vm = require("vm");
 const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
 const sql = R("sql/2026-10-13-season2-opening-v395.sql"), live = R("src/live/part_live.js"), pub2 = R("src/live/part5b_public2.js"), pubA = R("src/live/part5a_public.js"), ui = R("src/live/part4_ui.js");
@@ -37,7 +40,7 @@ const rb = CG.CONTENT.rulebook;
 const s2 = rb.chapters.find((c) => c.num === "S2");
 A("Chapter S2 exists for Season 2 with seven sections", !!s2 && s2.upcomingSeason === 2 && s2.sections.length === 7 && s2.sections[0].id === "S2.1");
 const t = JSON.stringify(s2);
-A("...the calendar rule and its Season 2 dates", /close at 11:59 PM Eastern on the Saturday of the following week/.test(t) && /Saturday, December 12, 2026 at 11:59 PM/.test(t) && /Saturday, January 9, 2027 at 9:00 PM/.test(t));
+A("...the calendar rule and its Season 2 dates (v4.31: owner close Nov 28, draft Dec 12)", /close at 11:59 PM Eastern on the Saturday of the following week/.test(t) && /Saturday, November 28, 2026 at 11:59 PM/.test(t) && /Saturday, December 12, 2026 at 9:00 PM/.test(t));
 A("...every club decided again; none decided before the close", /Every club's ownership is decided again for Season 2/.test(t) && /No owner application is decided before applications close\./.test(t));
 A("...the format: 10 rounds, 12 then 15, 5/3/1, league-wide camp, Saturday bidding, no weekly limits, 16 (v4.01: 30% of the season, always)", /ten \(10\) rounds/.test(t) && /twelve \(12\) players until the draft concludes and fifteen \(15\)/.test(t) && /five \(5\) forwards, three \(3\) defensemen and one \(1\) goaltender/.test(t)
   && /one league-wide training camp pool/.test(t) && /every Saturday at 9:00 PM Eastern and runs for one hour/.test(t) && /There is no weekly limit/.test(t) && /sixteen \(16\) games while Season 2 is fifty-four \(54\) games long/.test(t));

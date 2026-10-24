@@ -6,7 +6,8 @@
 CG.ROUTES.awards = function(param, qs){
   var lg = CG.lg, C = CG.CONTENT;
   var tab = qs.tab||"stars";
-  var head = CG.pageHead("Hardware","Awards & honors","Three Stars every game night, Players of the Week every Monday, season hardware after the December finale.");
+  /* v4.31: no month here; Season 1's final moved to November and Season 2's falls in February */
+  var head = CG.pageHead("Hardware","Awards & honors","Three Stars every game night, Players of the Week every Monday, season hardware after the final.");
   if (CG.isPreseason && CG.isPreseason()){
     return head + '<div class="shell" style="padding-bottom:48px"><div class="card"><div class="empty" style="padding:70px 20px">'+
       '<div class="e-art">'+CG.ic("trophy",22)+'</div><b>Awards begin when the season does</b>'+

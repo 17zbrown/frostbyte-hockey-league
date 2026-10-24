@@ -27,7 +27,8 @@ A("the Control Center lists the deadline watch", /key:"owner-decision-watch", no
 console.log("— the rulebook and changelog");
 global.CG = {}; vm.runInThisContext(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook, s2 = rb.chapters.find((c) => c.num === "S2");
-A("Chapter S2 marks owners reapplying, and S2.2 says how", s2.ownersReapply === true && /hands the club over: the previous Owner's seat ends, and that member keeps their roster spot/.test(s2.sections[1].paragraphs[1]) && /by Saturday, December 19/.test(s2.sections[1].paragraphs[1]));
+/* v4.31 (commissioner, 2026-10-24): the decision deadline moved from December 19 to December 5 with the Season 2 calendar */
+A("Chapter S2 marks owners reapplying, and S2.2 says how", s2.ownersReapply === true && /hands the club over: the previous Owner's seat ends, and that member keeps their roster spot/.test(s2.sections[1].paragraphs[1]) && /by Saturday, December 5\./.test(s2.sections[1].paragraphs[1]));
 const cl = rb.changelog.find((c) => c.version === "3.96");
 A("changelog 3.96 is in the book", !!cl);
 A("no em dash in what v3.96 wrote", !/—/.test(JSON.stringify(cl)) && !/—/.test(sql) && !/—/.test(JSON.stringify(s2)));

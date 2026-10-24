@@ -27,8 +27,9 @@ A("Rule 1.1 (basic): each season's cutoff is the day before that season's draft 
   /Each season's sign-up cutoff is 11:59 PM Eastern Time on the day before that season's draft \(Chapter 0, Step two\);/.test(bound(basic, "1.1")));
 A("Rule 2.8 (basic): the draft pool sentence", /Every player who registers by the sign-up cutoff, 11:59 PM Eastern Time on the day before the draft \(Chapter 0, Step two\), enters the draft pool\./.test(bound(basic, "2.8")));
 A("Rule 2.9 (basic): position changes close at the same cutoff", /Position changes close at the sign-up cutoff, which is 11:59 PM Eastern Time on the day before the draft\./.test(bound(basic, "2.9")));
+/* v4.31 (commissioner, 2026-10-24): "Lets push the season 2 start up to what we discussed the other day where we play on vetrans day week so we can get season 2 week 1 in before christmas and the new year." The Season 2 draft moved up to Saturday, December 12. */
 A("Chapter S2.1 already says the same, so the general rule and Season 2 agree", /Player registration for the draft closes at 11:59 PM Eastern the day before the draft\./.test(bound(basic, "S2.1")) &&
-  /the draft is Saturday, January 9, 2027 at 9:00 PM and registration for it closes Friday, January 8 at 11:59 PM/.test(bound(basic, "S2.1")));
+  /registration for the draft closes Friday, December 11 at 11:59 PM; the draft is Saturday, December 12, 2026 at 9:00 PM;/.test(bound(basic, "S2.1")));
 A("the full format says it too: 0.3, 0.4, 1.1 and 2.8", /the sign-up deadline, 11:59 PM Eastern on the day before the draft, is a draft-eligibility cutoff/.test(bound(full, "0.3")) &&
   /sign-ups stay open right through it, until 11:59 PM Eastern on the day before the draft \(Rule 1\.1\)\./.test(bound(full, "0.4")) &&
   /Each season's draft-eligibility deadline is 11:59 PM Eastern on the day before that season's draft \(Chapter 0, Step two\)\./.test(bound(full, "1.1")) &&
@@ -89,7 +90,7 @@ function space(o){
 const w = space({ format: "basic", inputs: { ssDraft: "2027-01-09T21:00" } });
 A("winter Saturday: a January 9, 2027 draft closes sign-ups Friday, January 8 at 11:59 PM ET", w.ssRegDl === "2027-01-08T23:59", w.ssRegDl);
 A("...which Save stores as 04:59 UTC on January 9 (EST)", w.saved === "2027-01-09T04:59:00.000Z", w.saved);
-A("...the same instant Chapter S2 and the Season 2 row hold (Fri 2027-01-08 23:59 ET)", w.saved === new Date("2027-01-08T23:59:00-05:00").toISOString());
+A("...the same instant Chapter S2 and the Season 2 row held until v4.31 (Fri 2027-01-08 23:59 ET)", w.saved === new Date("2027-01-08T23:59:00-05:00").toISOString());
 A("...every other date is unchanged: draft 9 PM, puck drop the Wednesday after, six weeks, playoffs the week after",
   w.ssDraft === "2027-01-09T21:00" && w.ssStarts === "2027-01-13T21:00" && w.ssEnds === "2027-02-19T23:59" && w.ssPlayoffs === "2027-02-24T21:00", w);
 A("...and the owner-apps default keeps its old anchor, a week before the old Thursday (Thursday, December 31 at 8 PM)", w.ssOwnDl === "2026-12-31T20:00", w.ssOwnDl);
@@ -118,6 +119,12 @@ const hb = space({ format: "basic", inputs: { ssDraft: "2027-01-09T21:00" }, hol
 A("a skipped holiday week is named in the basic toast, not [object Object]", hb.toasts.length === 1 && /holiday week skipped: Test Day \(week of 2027-01-20\)$/.test(hb.toasts[0][1]) && !/object Object/.test(hb.toasts[0][1]), hb.toasts);
 const hf = space({ format: "full", inputs: { ssPre: "2027-08-04T21:00" }, holidays: Object.assign(hol("2027-09-01", "Day A"), hol("2027-09-08", "Day B")) });
 A("...and in the full toast, every week by name", hf.toasts.length === 1 && /holiday weeks skipped: Day A \(week of 2027-09-01\), Day B \(week of 2027-09-08\)$/.test(hf.toasts[0][1]), hf.toasts);
+/* v4.31: the Season 2 row now spaces from a Saturday, December 12, 2026 draft over the Christmas Eve and New Year's Eve
+   weeks; the owner close is typed in (Rule S2.1, Nov 28) and Auto-space keeps it */
+const d12 = space({ format: "basic", inputs: { ssDraft: "2026-12-12T21:00", ssOwnDl: "2026-11-28T23:59" }, holidays: Object.assign(hol("2026-12-23", "Christmas Eve"), hol("2026-12-30", "New Year's Eve")) });
+A("v4.31: a December 12, 2026 draft gives the Season 2 row: cutoff Fri Dec 11 11:59 PM ET (04:59 UTC Dec 12), puck drop Wed Dec 16, end Fri Feb 5, playoffs Wed Feb 10, owner close kept",
+  d12.ssRegDl === "2026-12-11T23:59" && d12.saved === "2026-12-12T04:59:00.000Z" && d12.ssStarts === "2026-12-16T21:00" && d12.ssEnds === "2027-02-05T23:59" &&
+  d12.ssPlayoffs === "2027-02-10T21:00" && d12.ssOwnDl === "2026-11-28T23:59" && /holiday weeks skipped: Christmas Eve \(week of 2026-12-23\), New Year's Eve \(week of 2026-12-30\)$/.test(d12.toasts[0][1]), d12);
 A("the schedule generator’s confirm uses the same label", /plan\.skipped\.map\(CG\.holidayWeekLabel\)/.test(live) && (live.match(/\.map\(CG\.holidayWeekLabel\)/g) || []).length === 3);
 A("Save writes both deadline columns from the one field", /registration_deadline:iso\("ssRegDl"\),\s*signup_deadline_at:iso\("ssRegDl"\)/.test(live));
 A("the generator comment quotes the ruling", (live.match(/v4\.24 \(commissioner, 2026-10-20\): "Yes say 'the day before the draft\.'"/g) || []).length >= 2);
