@@ -132,3 +132,11 @@ $mv$;
 -- and S2 C (both pending). The old profile is "SadlyiClxmp (old account)", banned with the reason above, and holds no
 -- roster spot, sign-up, contract or EA ID. The Discord sync bans the old Discord account and dresses the new one on its
 -- next pass.
+-- Verified (5:06 PM ET): the 5:04 PM discord-sync pass took the old account out of the server (guild_members present
+-- false at 5:04:05 PM, profile in_guild false, guild_departures noticed_by discord-sync), the run ok with no errors. The
+-- read-only role check (diag=rolecheck) lists no registered member missing Player or wearing Not Signed Up; the gateway
+-- bot's role sync reports no errors. The new account's census row had no profile (it joined the server at 4:41 PM,
+-- before signing in at 4:54 PM, so the bot's join-time link found nothing); linked by hand, the write the bot makes on a
+-- join:
+--   update public.guild_members set profile_id = '00b2b99c-6802-4e4c-a92b-40b465a0a618'
+--    where discord_id = '1564066735965995038' and profile_id is null;   -- 1 row, present true
