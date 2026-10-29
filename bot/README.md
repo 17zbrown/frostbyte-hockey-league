@@ -19,7 +19,8 @@ when Discord closes the connection unrecoverably, and the box-score import must 
 **The same unit answers the site's EA lookups (v4.34, `ea-lookup.mjs`).** EA refuses Netlify and
 Supabase, so the Stats Manager's "Add an EA game", the pickup import page and the club game stats
 desk file a request row in `public.ea_lookups`; this lane hears it through Supabase Realtime, asks
-EA once (one call at a time, 1.5 s apart, sharing the poller's 403 backoff), and writes EA's answer
+EA once (one call at a time, 1.5 s apart, standing back while the poller is backing off from a 403; a 403 on a
+lookup pauses only the lookups), and writes EA's answer
 onto the row. A catch-up every minute answers anything Realtime missed. Every 10 minutes it runs a
 self-test search end to end and stamps `rl_ea-lookup` / `rl_ea-lookup_result`: the Automations
 panel shows it as "EA club search (bot server)", each EA box on the site shows its status line, and

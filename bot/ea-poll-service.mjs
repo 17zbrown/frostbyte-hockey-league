@@ -16,8 +16,8 @@
 //
 // v4.34: this process also hosts the site's EA lookup lane (ea-lookup.mjs): the Stats Manager's "Add an EA game",
 // the pickup import page and the club game stats desk file a request row in public.ea_lookups and this lane asks EA
-// for them, because nothing but this VM can reach EA. It lives HERE, beside the poller, so the two share one 403
-// backoff in memory (poller.holdOff), and because this unit has no gateway to die with. It hears new requests through
+// for them, because nothing but this VM can reach EA. It lives HERE, beside the poller, so it can stand back while
+// the poller is backing off from EA (poller.blockedUntil), and because this unit has no gateway to die with. It hears new requests through
 // Supabase Realtime (the one dependency it takes, loaded on start); without Realtime its once-a-minute catch-up still
 // answers, and its self-test reports the missing subscription.
 //

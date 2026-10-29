@@ -32,6 +32,7 @@
 import { pathToFileURL } from "node:url";
 import { realpathSync } from "node:fs";
 import { openFixtureFilter, fixtureForMatch, describeWindow, GAME_WINDOW_BEFORE_MS, GAME_WINDOW_AFTER_MS, POLL_GRACE_MS } from "../shared/game-window.cjs";
+import { cleanArg } from "../shared/ea-relay.cjs";
 
 /* KEEP IN SYNC with EA_HEADERS in netlify/functions/ea-poll.js (and eaFetch in ingest-stats.js /
    pickup-import.js). EA blocks by CLIENT FINGERPRINT, not by address: this exact browser-shaped
@@ -47,20 +48,14 @@ export const EA_HEADERS = Object.freeze({
 });
 
 /* v4.34: the one place an EA Pro Clubs URL is built on this server: the score poller's club matches and the site
-   lookup lane (ea-lookup.mjs) both use it. Refuses anything that is not a club name or an EA club id, so a request
-   row can never steer the server to another EA path. */
+   lookup lane (ea-lookup.mjs) both use it. The argument must pass cleanArg (shared/ea-relay.cjs, the one definition
+   the Netlify side checks too): a club name of plain characters or an EA club id, so a request row can never steer
+   the server to another EA path or put attack-shaped text on the wire (v4.35). Throws cleanArg's plain sentence. */
 export function eaUrl(kind, arg, platform = "common-gen5") {
-  const a = String(arg == null ? "" : arg).trim();
+  const a = cleanArg(kind, arg);
   const plat = String(platform).replace(/[^a-z0-9-]/gi, "") || "common-gen5";
-  if (kind === "search") {
-    if (a.length < 2 || a.length > 40) throw new Error("a club name of 2 to 40 characters");
-    return `https://proclubs.ea.com/api/nhl/clubs/search?platform=${plat}&clubName=${encodeURIComponent(a)}`;
-  }
-  if (kind === "matches") {
-    if (!/^[0-9]{1,20}$/.test(a)) throw new Error("an EA club id (digits only)");
-    return `https://proclubs.ea.com/api/nhl/clubs/matches?matchType=club_private&platform=${plat}&clubIds=${a}`;
-  }
-  throw new Error("a lookup kind of search or matches");
+  if (kind === "search") return `https://proclubs.ea.com/api/nhl/clubs/search?platform=${plat}&clubName=${encodeURIComponent(a)}`;
+  return `https://proclubs.ea.com/api/nhl/clubs/matches?matchType=club_private&platform=${plat}&clubIds=${a}`;
 }
 
 export function createEaPoller(env, opts = {}) {
@@ -176,7 +171,7 @@ export function createEaPoller(env, opts = {}) {
           const t = Date.parse(r && r.value);
           if (!Number.isFinite(t)) continue;
           if (r.key === "rl_ea-poll") lastPollAt = t;
-          if (r.key === "rl_ea-poll_backoff" && t > t0) backoffUntil = Math.max(backoffUntil, t);
+          if (r.key === "rl_ea-poll_backoff" && t > t0) backoffUntil = t;
         }
       } catch (e) { log("ea-poll: could not read the ledgers, starting unseeded — " + String((e && e.message) || e)); }
       if (lastPollAt === -Infinity) lastPollAt = 0;
@@ -350,15 +345,13 @@ export function createEaPoller(env, opts = {}) {
     sum.live = false;
   }
 
-  /* v4.34: the 403 backoff is shared with the site lookup lane in the same process (ea-lookup.mjs): one address
-     leaves for EA, so a block either one draws pauses both, and a lookup can never be what stops box scores. */
-  function holdOff(untilMs) {
-    if (Number.isFinite(untilMs) && untilMs > backoffUntil) backoffUntil = untilMs;
-    sum.backoffUntil = backoffUntil > now() ? iso(backoffUntil) : null;
-  }
+  /* v4.34: the site lookup lane in the same process (ea-lookup.mjs) reads this. Box scores come first: while EA is
+     refusing the poller, no lookup is sent. The reverse never holds (v4.35): a lookup's 403 pauses only the lane, since
+     it may be Akamai refusing that one request rather than the address; if the address is blocked, this poller's own
+     next call draws its own 403 and backs off by itself. */
   const blockedUntil = () => (backoffUntil > now() ? backoffUntil : 0);
 
-  return { start, stop, runOnce, tick, sum, holdOff, blockedUntil };
+  return { start, stop, runOnce, tick, sum, blockedUntil };
 }
 
 /* ---- one-shot CLI, for the VM: prints the cycle's result as JSON on stdout, logs on stderr.

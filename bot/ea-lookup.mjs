@@ -14,10 +14,12 @@
 // about EA's payload (the normalizers stay in the Netlify functions), so a change in EA's format never needs a
 // deploy here.
 //
-// PACING: one EA call at a time, at least 1.5 s apart, at most 20 waiting, and the poller's 403 backoff is SHARED in
-// memory (both run in the chel-ea-poll process): the lane and the box-score poller leave from one address, and a
-// lookup burst that draws an Akamai 403 must never be what stops box scores on a game night. The database caps the
-// site's requests too (public.guard_ea_lookup).
+// PACING: one EA call at a time, at least 1.5 s apart, at most 20 waiting. Box scores come first: while the poller (in
+// the same chel-ea-poll process) is backing off from a 403, no lookup is sent. A 403 on a lookup pauses only this lane
+// for 5 minutes and never the poller (v4.35, adversarial review): Akamai may be refusing that one request, not the
+// address, and member text must never be what stops box scores on a game night. If the address really is blocked, the
+// poller's own next call finds out. Search text is held to plain characters (cleanArg, shared/ea-relay.cjs), and the
+// database caps the site's requests too (public.guard_ea_lookup).
 //
 // HEALTH: every 10 minutes the lane files its own self-test search and times it end to end (Realtime delivery, EA,
 // the write-back). Ledgers, in the shapes the Automations panel and automation_watchdog read:
@@ -76,11 +78,11 @@ export function createEaLookup(env, opts = {}) {
     return Array.isArray(rows) && rows.length > 0;
   }
 
-  /* ---- one EA call. The 403 is the poller's 403: it pauses both, and it is persisted for a restarted process ---- */
+  /* ---- one EA call. A 403 pauses this lane only (see PACING); the box-score poller is never told ---- */
   async function askEa(row) {
     let url;
     try { url = eaUrl(row.kind, row.arg, platform); }
-    catch (e) { return { ok: false, error: `This lookup needs ${msg(e)}.` }; }
+    catch (e) { return { ok: false, error: msg(e) }; }
     const r = await F(url, { headers: EA_HEADERS, signal: AbortSignal.timeout(EA_TIMEOUT_MS) });
     if (r.ok) {
       const data = await r.json().catch(() => undefined);
@@ -88,10 +90,9 @@ export function createEaLookup(env, opts = {}) {
     }
     const body = await r.text().catch(() => "");
     if (r.status === 403 || /Access Denied|edgesuite/i.test(body)) {
-      const until = now() + BACKOFF_MS;
-      if (poller && typeof poller.holdOff === "function") poller.holdOff(until);
-      try { await cfgSet("rl_ea-poll_backoff", iso(until)); } catch (e) { log("ea-lookup: could not persist the backoff: " + msg(e)); }
-      return { ok: false, error: `EA refused the bot server (Akamai 403). EA lookups and box-score imports pause until ${etTime(until)}.` };
+      laneBlockedUntil = Math.max(laneBlockedUntil, now() + BACKOFF_MS);
+      log(`ea-lookup: EA answered 403 to a ${row.kind} lookup; lookups pause until ${iso(laneBlockedUntil)} (box scores unaffected)`);
+      return { ok: false, error: `EA refused this lookup (Akamai 403). EA search pauses until ${etTime(laneBlockedUntil)}; box-score imports are not paused by it.` };
     }
     if (/CLUBS_ERR_INVALID_CLUB_ID/i.test(body)) return { ok: false, error: "EA says this club id no longer exists (an NHL title rollover resets club ids)." };
     return { ok: false, error: `EA answered ${r.status}. Try again in a minute.` };
@@ -103,7 +104,7 @@ export function createEaLookup(env, opts = {}) {
   /* self-test rows Realtime delivered. Keyed on the row's own source, not on an id the self-test registers: Realtime
      can deliver the INSERT before the insert's REST reply hands the self-test its id */
   const rtSelftests = new Set();
-  let working = false, lastEaAt = -Infinity;
+  let working = false, lastEaAt = -Infinity, laneBlockedUntil = 0;
 
   async function finish(row, res) {
     try {
@@ -121,7 +122,7 @@ export function createEaLookup(env, opts = {}) {
       while (waiting.length) {
         const row = waiting.shift();
         let res;
-        const until = poller && typeof poller.blockedUntil === "function" ? poller.blockedUntil() : 0;
+        const until = Math.max(laneBlockedUntil, poller && typeof poller.blockedUntil === "function" ? poller.blockedUntil() : 0);
         if (until > now()) res = { ok: false, error: `EA is refusing the bot server until ${etTime(until)} (Akamai 403). Try again after that.` };
         else {
           const gap = lastEaAt + GAP_MS - now();

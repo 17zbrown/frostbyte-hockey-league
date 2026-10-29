@@ -14,12 +14,19 @@
 
 const PENDING_REUSE_MS = 60 * 1000;   // a request this young, still unanswered, is joined rather than filed again
 
-/* the same shapes the bot's eaUrl and the database guard accept; checked here so a bad input is a plain sentence */
+/* The ONE definition of what a lookup may ask EA, used here (so a bad input is a plain sentence before any row is
+   filed) and by the bot's eaUrl (bot/ea-poll.mjs, so nothing else ever leaves the VM). v4.35: a search is letters,
+   numbers, spaces and a little punctuation. Member text reaches EA from the league's only address EA serves, and
+   Akamai's firewall may refuse a request whose text looks like an attack (<script>, quotes with =, semicolons); that
+   must never be something a member can type. The database guard checks only the length. */
+const CLUB_NAME_OK = /^[\p{L}\p{M}\p{N} .'\u2019&_!?#,:-]+$/u;
 function cleanArg(kind, arg) {
-  const a = String(arg == null ? "" : arg).trim();
+  /* any run of whitespace (a pasted non-breaking space, a tab) is one plain space, so it is never refused as a symbol */
+  const a = String(arg == null ? "" : arg).replace(/\s+/g, " ").trim();
   if (kind === "search") {
     if (a.length < 2) throw new Error("Enter at least 2 characters of the club name.");
     if (a.length > 40) throw new Error("A club name is at most 40 characters.");
+    if (!CLUB_NAME_OK.test(a)) throw new Error("Search with the club's name only: letters, numbers, spaces, hyphens and . ' & _ ! ? # , :");
     return a;
   }
   if (kind === "matches") {
@@ -76,4 +83,5 @@ async function eaRelay(db, kind, arg, opts) {
 
 exports.eaRelay = eaRelay;
 exports.cleanArg = cleanArg;
+exports.CLUB_NAME_OK = CLUB_NAME_OK;
 exports.PENDING_REUSE_MS = PENDING_REUSE_MS;

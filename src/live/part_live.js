@@ -3014,6 +3014,9 @@ CG.paintEaStatus = function(root){
   CG.sb.rpc("ea_lookup_health").then(function(r){
     var h = r && !r.error && r.data, color, text;
     if (!h){ color = "var(--chrome-deep)"; text = "EA search status is unavailable"+(r && r.error ? " ("+r.error.message+")" : "")+"."; }
+    /* v4.35: one failed self-test leaves the ledger ok (a second in a row turns it red and alerts), with lastError set;
+       the Automations panel shows that as amber "Check", so the box does too instead of a green "working" */
+    else if (h.state === "working" && h.error){ color = "var(--amber-ink)"; text = "The bot server's last EA test failed: "+h.error+" One more failure in a row turns this red and alerts the commissioners."; }
     else if (h.state === "working"){ color = "var(--green)"; text = "EA search is working. The bot server tested it "+CG.fmtAgo(Date.parse(h.at))+(h.latencyMs != null ? " (answered in "+(Math.round(h.latencyMs/100)/10)+" s)" : "")+"."; }
     else if (h.state === "failing"){ color = "var(--red)"; text = "EA search is not working right now: "+(h.error || "the bot server's last two tests failed.")+" The commissioners are alerted automatically."; }
     else { color = "var(--amber-ink)"; text = "EA search has not been tested in over 30 minutes, so the bot server may be down. The commissioners are alerted automatically."; }
@@ -14101,11 +14104,12 @@ CG._gsOne = function(el){
                   if (lr.error){ btn.disabled=false; btn.textContent="This is us"; CG.toast(lr.error,"err"); return; }
                   CG.toast(lr.teamCode+" linked to “"+cname+"”","ok");
                   btn.textContent = "Pulling sessions…";
+                  /* v4.35: the link is written by now, so a pull that fails (or waits past 25 s on the bot server)
+                     is told here and the desk still repaints as linked; only a failed link reaches the catch below */
                   return CG._smLeagueApi({ leagueEaFetch: { gameId: gid, teamId: tid } }).then(function(fr){
                     if (fr && fr.error) CG.toast(fr.error,"err");
                     else if (fr) CG.toast("Pulled "+fr.fetched+" recent session"+(fr.fetched===1?"":"s")+" from EA","ok");
-                    loadCands();
-                  });
+                  }, function(e){ CG.toast(e.message,"err"); }).then(loadCands);
                 }).catch(function(e){ btn.disabled=false; btn.textContent="This is us"; CG.toast(e.message,"err"); });
               }); });
             }).catch(function(e){ sOut.innerHTML = eb(e.message); });

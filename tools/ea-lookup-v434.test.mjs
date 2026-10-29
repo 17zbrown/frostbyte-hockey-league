@@ -79,17 +79,28 @@ console.log("— the shared URL builder (bot/ea-poll.mjs eaUrl): only a club sea
   A("the score poller builds its URL here too", /const url = eaUrl\("matches", c, platform\);/.test(read("../bot/ea-poll.mjs")));
 }
 
-console.log("\n— the poller's 403 backoff is shared with the lane (one address leaves for EA)");
+console.log("\n— box scores come first: the lane stands back while the poller is backing off from a 403");
 {
-  const calls = [];
-  const P = createEaPoller({ SB_URL: "https://sb.test", SB_KEY: "k" }, { now: () => 1_000_000, log: () => {},
-    fetch: async (u) => { calls.push(String(u)); return J([]); } });
-  A("nothing is blocked to begin with", P.blockedUntil() === 0);
-  P.holdOff(1_000_000 + 300_000);
-  A("holdOff blocks until the given time", P.blockedUntil() === 1_300_000 && P.sum.backoffUntil === new Date(1_300_000).toISOString());
-  P.holdOff(1_100_000);
-  A("an earlier holdOff never shortens a longer one", P.blockedUntil() === 1_300_000);
-  A("the first-cycle seed from the ledger keeps the longer of the two", /backoffUntil = Math\.max\(backoffUntil, t\)/.test(read("../bot/ea-poll.mjs")));
+  /* v4.35: the poller's own 403 is the only thing that sets its backoff (it no longer has holdOff); the lane reads it */
+  const T0 = Date.parse("2026-10-29T23:30:00Z");
+  const P = createEaPoller({ SB_URL: "https://sb.test", SB_KEY: "k" }, { now: () => T0, log: () => {}, sleep: async () => {},
+    fetch: async (u, o = {}) => {
+      u = String(u);
+      if (u.startsWith("https://proclubs.ea.com/")) return new Response("<HTML>Access Denied</HTML>", { status: 403 });
+      if (u.includes("/rest/v1/app_config?key=in.")) return J([]);
+      if (u.includes("/rest/v1/app_config")) return J(null, 201);
+      if (u.includes("/rest/v1/games?")) return J([{ id: "g", home_team_id: "A", away_team_id: "B", scheduled_at: new Date(T0).toISOString(), status: "scheduled" }]);
+      if (u.includes("/rest/v1/teams?")) return J([{ id: "A", ea_club_id: "111" }, { id: "B", ea_club_id: "222" }]);
+      return J([]);
+    } });
+  A("nothing is blocked to begin with, and nothing outside the poller can block it", P.blockedUntil() === 0 && typeof P.holdOff === "undefined");
+  await P.runOnce();
+  A("the poller's own 403 sets its five-minute backoff, which blockedUntil reports", P.blockedUntil() === T0 + 300_000);
+  const W = world();
+  const L = lane(W, { poller: fakePoller(W.T + 60_000) });
+  const row = W.add({});
+  await L.handle({ ...row }, "realtime");
+  A("while the poller is backing off, a lookup is answered without calling EA", W.eaCalls.length === 0 && row.ok === false && /refusing the bot server until/.test(row.error), row.error);
 }
 
 console.log("\n— the lane answers a site request with EA's raw answer");
@@ -126,19 +137,16 @@ console.log("\n— pacing: one EA call at a time, at least 1.5 s apart");
   A("all three answered", [a, b, c].every((r) => r.ok === true));
 }
 
-console.log("\n— an Akamai 403 pauses the lane AND the box-score poller, and says so in plain words");
+console.log("\n— an Akamai 403 on a lookup pauses the lookups for five minutes, and says so in plain words");
 {
   const W = world({ ea: () => new Response("<HTML>Access Denied</HTML>", { status: 403 }) });
-  const P = fakePoller();
-  const L = lane(W, { poller: P });
+  const L = lane(W, { poller: fakePoller() });
   const row = W.add({});
   await L.handle({ ...row }, "realtime");
-  A("the poller is told to hold off five minutes", P.held.length === 1 && P.held[0] === W.T + 0 + 300_000 - (W.T - W.eaCalls[0].at), String(P.held[0] - W.eaCalls[0].at));
-  A("...and the backoff is persisted for a restarted process", W.cfg["rl_ea-poll_backoff"] === new Date(P.held[0]).toISOString());
-  A("the row says EA refused the bot server, and until when", row.ok === false && /Akamai 403/.test(row.error) && / ET\./.test(row.error), row.error);
+  A("the row says EA refused the lookup, and until when", row.ok === false && /Akamai 403/.test(row.error) && / ET;/.test(row.error), row.error);
   const next = W.add({ arg: "Later" });
   await L.handle({ ...next }, "realtime");
-  A("while blocked, the next request is answered without calling EA", W.eaCalls.length === 1 && next.ok === false && /refusing the bot server until/.test(next.error), next.error);
+  A("while paused, the next request is answered without calling EA", W.eaCalls.length === 1 && next.ok === false && /refusing the bot server until/.test(next.error), next.error);
 }
 
 console.log("\n— other failures are sentences too, and never throw out of the lane");
@@ -226,7 +234,7 @@ console.log("\n— the service hosts the lane beside the poller and hands it the
   const S = createEaPollService({ SB_URL: "https://sb.invalid", SB_KEY: "k" }, { createPoller: fakeP, keepaliveMs: 10, log: () => {},
     createLookup: (env, o) => { seen.env = env; seen.o = o; return { start() { seen.l = (seen.l || 0) + 1; }, stop() { seen.ls = 1; } }; },
     subscribe: () => {} });
-  A("the lane gets the same env and the poller itself (the shared backoff)", seen.env.SB_KEY === "k" && seen.o.poller === S.poller && typeof seen.o.subscribe === "function");
+  A("the lane gets the same env and the poller itself (it stands back during the poller's backoff)", seen.env.SB_KEY === "k" && seen.o.poller === S.poller && typeof seen.o.subscribe === "function");
   S.start(); S.start(); S.stop();
   A("start starts both once; stop stops both", seen.p === 1 && seen.l === 1 && seen.ps === 1 && seen.ls === 1 && S.running() === false);
   const src = read("../bot/ea-poll-service.mjs");
