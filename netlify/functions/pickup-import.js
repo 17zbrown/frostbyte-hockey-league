@@ -405,6 +405,17 @@ export const handler = async (event) => {
       if (dup[0]) return reply({ error: matchIds.length > 1
         ? "One of those sessions is already part of an imported game." : "That game was already imported.", pickupGameId: dup[0].id }, 409);
 
+      /* v4.36: a league sitting is never imported as a pickup game (a struck one would put back stats the league removed).
+         Filed on a game, or in the league archive as anything but `ignored` (merged, struck, incomplete, or unmatched:
+         a possible league game still waiting for the statistics desk), refuses before EA is asked for anything. */
+      const [filedL, logL] = await Promise.all([
+        sbGet(`games?ea_match_id=in.(${idList})&select=id&limit=1`),
+        sbGet(`ea_ingest_log?ea_match_id=in.(${idList})&select=ea_match_id,status,game_id`)]);
+      const lg = filedL[0] ? { game_id: filedL[0].id } : (logL || []).find((r) => r.game_id || r.status !== "ignored");
+      if (lg) return reply({ error: lg.game_id
+        ? "That session is a filed league game. League games are kept by the statistics desk, never as pickup games."
+        : "The statistics desk has that session on its list as a possible league game. Ask them before importing it.", leagueGameId: lg.game_id || null }, 409);
+
       /* v4.34: the match list the bot fetched when the staffer listed this club's games (up to a day old) is the
          one they picked from; only when a picked session is missing from it is EA asked again, once */
       let got = await eaRelay(DB, "matches", clubId, { maxAgeMs: 24 * 3600 * 1000, answerId: body.eaLookup, requestedBy: uid });
@@ -453,7 +464,9 @@ export const handler = async (event) => {
       /* if this game came out of a Discord pickup lobby, thank the room and let the sweep clear it */
       let lobbyClosed = null;
       try { lobbyClosed = await closePlayedLobby(rows); } catch (e) { /* never fail an import over cleanup */ }
-      return reply({ ok: true, pickupGameId, players: preview, unmatched, lobbyClosed, sessions: matchIds.length });
+      /* v4.36: the club names, so the Stats manager's result line can say which game was imported */
+      return reply({ ok: true, pickupGameId, players: preview, unmatched, lobbyClosed, sessions: matchIds.length,
+        clubA: norm.clubs[0].name, clubB: norm.clubs[1].name });
     }
 
     return reply({ error: "Unknown action." }, 400);

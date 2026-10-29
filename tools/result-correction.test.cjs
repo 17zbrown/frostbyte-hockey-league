@@ -13,15 +13,19 @@ const flat = rec.replace(/\n--\s?/g, " ").replace(/\s+/g, " ");
 
 console.log("\n— the control exists and calls the RPC that was never called");
 {
-  A("the card is in the Stats Manager", /<h3>Correct a filed result<\/h3>/.test(live));
-  A("...between the merge and the forfeit cards",
-    /body\.innerHTML = addCard \+ leagueCard \+ fixCard \+ forfeitCard \+ listCard;/.test(live));
+  /* v4.36: every desk card is drawn by CG._smCard(id, title, ...), which writes the <h3> */
+  A("the card is in the Stats Manager", /CG\._smCard\("smFix", "Correct a filed result"/.test(live) && /<h3>'\+title\+'<\/h3>/.test(live));
+  /* v4.36 (commissioner, 2026-10-29: "move the forfeit function above the correct result function"): the order changed
+     on purpose; the lag-out merge now lives inside Find a game on EA */
+  A("...below the forfeit card, as the commissioner ordered",
+    /'<div class="sm" id="smDesk">'\+CG\._smTodoHtml\(st\)\+CG\._smFindHtml\(st\)\+CG\._smForfeitHtml\(st\)\+CG\._smFixHtml\(st\)\+CG\._smListHtml\(st\)\+'<\/div>'/.test(live));
   A("it calls stats_game_set_result", /rpc\("stats_game_set_result", \{ p_game:id, p_home:hs, p_away:as, p_final:true, p_ot:ot\.checked \}\)/.test(live));
   A("...which is the only CALL to it in the client (the other mention is the comment that explains it)",
     (live.match(/rpc\("stats_game_set_result"/g) || []).length === 1);
   A("it offers an overtime box", /id="smFixOt" type="checkbox"/.test(live));
-  A("only final games are listed", /lgGames\.filter\(function\(g\)\{ return g\.status==="final"; \}\)/.test(live));
-  A("picking one prefills from the record", /h\.value = o\.getAttribute\("data-h"\)/.test(live) && /ot\.checked = o\.getAttribute\("data-ot"\) === "1"/.test(live));
+  /* v4.36: the dropdown became the shared game picker; the two rules it carried are pinned where they live now */
+  A("only final games are listed", /if \(kind === "fix" && g\.status !== "final"\) return false;/.test(live));
+  A("picking one prefills from the record", /st\.fix\.h = String\(g\.homeScore\); st\.fix\.a = String\(g\.awayScore\); st\.fix\.ot = !!g\.ot;/.test(live));
   A("the standings are reloaded after", /if \(CG\.reloadLeague\) CG\.reloadLeague\(\);/.test(live.slice(live.indexOf("smFixGo"))));
 }
 

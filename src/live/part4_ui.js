@@ -393,7 +393,8 @@ CG.drawer = function(title, bodyHtml){
   var db = $(".drawer [data-close]"); if (db) db.focus();
 };
 CG.confirm = function(title, msg, okLabel, fn){
-  CG.modal(title, '<p style="color:var(--steel)">'+esc(msg)+'</p>',
+  var ps = Array.isArray(msg) ? msg : [msg];   /* v4.36: several facts, one escaped paragraph each (the Stats manager's confirms) */
+  CG.modal(title, ps.map(function(m, i){ return '<p style="color:var(--steel)'+(i < ps.length-1 ? ';margin:0 0 10px' : '')+'">'+esc(m)+'</p>'; }).join(""),
     '<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-ink" id="cfOk">'+esc(okLabel)+'</button>');
   $("#cfOk").addEventListener("click", function(){ CG.closeOverlay(); fn(); });
 };

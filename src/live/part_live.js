@@ -2895,12 +2895,8 @@ CG.AFTER["pickup-import"] = function(){
     api(payload).then(function(o){
       btn.disabled = false; btn.textContent = was;
       if (o.error){ CG.toast(o.error,"err"); return; }
-      var players = o.players||[], matched = players.filter(function(p){ return p.matched; }).length;
-      var mergedNote = (o.sessions||1) > 1 ? ' <b>'+o.sessions+' sessions merged into one game</b> — stats summed, score aggregated.' : '';
-      res.innerHTML = '<div class="note grn"><b style="font-family:var(--f-disp)">Imported.</b>'+mergedNote+' '+matched+' of '+players.length+' players matched to CGHL profiles'+(o.unmatched?' — '+o.unmatched+' unmatched (their EA name didn’t match a gamertag)':'')+'. Pickup stats now show on the matched profiles.</div>'+
-        '<div class="tasklist" style="margin-top:12px">'+players.map(function(p){
-          return '<div class="titem"><span class="t-dot '+(p.matched?"grn":"red")+'"></span><span style="flex:1">'+esc(p.name||"?")+' · Team '+esc(p.side)+' · '+p.goals+'G '+p.assists+'A'+(p.matched?'':' · <span class="caption">no profile</span>')+'</span></div>';
-        }).join("")+'</div>';
+      /* v4.36: the result block is one definition, shared with the Stats manager (CG._puResultHtml) */
+      res.innerHTML = CG._puResultHtml(o);
       CG.toast("Pickup game imported","ok");
     }).catch(function(e){ btn.disabled = false; btn.textContent = was; CG.toast("Import failed: "+e.message,"err"); });
   }
@@ -2937,23 +2933,6 @@ CG._smProfOpts = function(sel){
   });
   return o;
 };
-CG.hubStatsManager = function(qs){
-  if (!CG.isStatsStaff()) return CG.unauthorized("The stats manager is limited to statistics staff.");
-  return '<div style="margin-bottom:20px"><span class="eyebrow chr">Statistics desk</span>'+
-    '<h1 class="h-sec" style="margin-top:8px">Stats manager</h1>'+
-    '<p class="lede" style="margin-top:6px">Import an EA game by club search, fix an imported box score, or delete a game. '+
-    'These are the club-search EA games shown on player profiles &mdash; walled off from league standings, eligibility and ratings.</p></div>'+
-    '<div id="smBody"><p class="caption">Loading…</p></div>';
-};
-CG.AFTER._statsMgr = function(qs){
-  qs = qs || {};
-  var body = document.getElementById("smBody");
-  if (!body || !CG.sb || !CG.isStatsStaff()) return;
-  CG._smLoadProfiles().then(function(){
-    if (qs.game) CG._smRenderDetail(body, qs.game);
-    else CG._smRenderList(body);
-  });
-};
 /* v4.34 (2026-10-29): the site's EA lookups go through the bot's server, the only host EA serves (Akamai refuses
    Netlify and Supabase; CORS refuses a browser). Commissioner: "Also this box in the staff desk never works. Can you
    make sure you check regularly that it works and functions so I can use it so I dont need to ask you each time?"
@@ -2969,7 +2948,11 @@ CG.eaPost = function(url, payload){
       var tok = s && s.data && s.data.session && s.data.session.access_token;
       if (!tok) throw new Error("Sign in again: no session token");
       return fetch(url, { method:"POST", headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+tok },
-        body: JSON.stringify(p) }).then(function(r){ return r.json(); });
+        body: JSON.stringify(p) }).then(function(r){
+        /* v4.36: a crashed function answers non-2xx with no "error" key, which must never read as success */
+        return r.json().then(function(o){ return r.ok === false && !(o && o.error) ? { error:"The server failed (HTTP "+r.status+"). Nothing is confirmed: check before trying again." } : o; },
+          function(){ throw new Error(r.ok === false ? "The server failed (HTTP "+r.status+"). Check before trying again." : "The server’s answer was unreadable."); });
+      });
     });
   }
   function withLookup(id){
@@ -3028,342 +3011,1078 @@ CG._smLeagueApi = function(payload){ return CG.eaPost("/api/ingest-stats", paylo
 /* -- EA import API (same backend the pickup importer uses) -- */
 CG._smApi = function(payload){ return CG.eaPost("/api/pickup-import", payload); };
 /* -- LIST: add-by-club-search + the manage list -- */
-CG._smRenderList = function(body){
-  CG.sb.from("pickup_games").select("id,played_at,club_a,club_b,score_a,score_b,source,went_ot,pickup_stats(count)")
-    .order("played_at",{ascending:false}).limit(60).then(function(r){
-    var games = (r && r.data) || [];
-    var addCard = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Add an EA game</h3><span class="chip">Club search</span></div>'+
-      '<div class="card-b"><label class="fld" style="margin:0"><span>EASHL club name</span>'+
-        '<div style="display:flex;gap:8px;flex-wrap:wrap"><input id="smClub" placeholder="e.g. Chel Gaming Blades" autocomplete="off" style="flex:1;min-width:200px">'+
-        '<button class="btn btn-chrome" id="smSearch">Search EA</button></div></label>'+
-        CG.eaStatusLine()+
-        '<div id="smSearchOut" style="margin-top:14px"></div>'+
-        '<p class="caption" style="margin-top:12px">EA keeps only each club’s last few private matches, so import soon after the game. The box score attaches to matched profiles by their EA ID. If a game lagged out, tick every session it was played across and use <b>Import as one game</b>.</p>'+
-      '</div></div>';
-    /* league lag-out merge: pick the fixture, pick its sittings, rebuild the box score as one.
-       Candidates come from the poller's archive, so this works even after EA's history ages out. */
-    var lgGames = (CG.lg && CG.lg.schedule || []).filter(function(g){
-      return !g.voided && Math.abs(g.at - CG.now()) < 5*86400000;
-    }).sort(function(x,y){ return Math.abs(x.at-CG.now()) - Math.abs(y.at-CG.now()); }).slice(0,40)
-      .sort(function(x,y){ return x.at - y.at; });
-    var leagueCard = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>League lag-out merge</h3><span class="chip chip-warn">Rebuilds a box score</span></div>'+
-      '<div class="card-b">'+
-        '<p class="caption" style="margin:0 0 12px;max-width:78ch">A disconnected league game merges on its own when the resumed sitting arrives back-to-back. When it can\u2019t \u2014 sittings too far apart, a missed poll, or a wrong call \u2014 pick the fixture, select every sitting that belongs to it, and the box score is rebuilt as one game: stats summed, score aggregated, overtime from the deciding sitting.</p>'+
-        '<label class="fld" style="margin:0"><span>Fixture</span><div style="display:flex;gap:8px;flex-wrap:wrap">'+
-        '<select id="smLgGame" style="flex:1;min-width:240px"><option value="">Pick a game\u2026</option>'+lgGames.map(function(g){
-          return '<option value="'+esc(g.id)+'">'+esc((g.stage==="preseason"?"PRE ":"Wk "+g.week+" \u00b7 ")+g.away+" @ "+g.home+" \u00b7 "+CG.fmtDay(g.at)+" \u00b7 "+(g.status==="final"?"final":"scheduled"))+'</option>';
-        }).join("")+'</select>'+
-        '<button class="btn btn-chrome" id="smLgLoad">Load sittings</button></div></label>'+
-        '<div id="smLgOut" style="margin-top:14px"></div>'+
-      '</div></div>';
-    /* v3.42: correct a filed league result. public.stats_game_set_result has taken p_ot since it was
-       written and NOTHING called it, so a wrong score or a missing overtime flag on a league game had
-       no door on the site at all: the PIT 4-3 UTA game of Sep 25 was an overtime win and had to be
-       corrected by hand. The importer reads overtime from EA's result code (5 or 6), and a MERGED
-       lag-out does not carry one: that game's two sittings reported 16385 and 10. So the human who
-       rebuilds a merged game is the only one who knows, and until now there was nowhere to say it. */
-    var fixCard = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Correct a filed result</h3><span class="chip">Score and overtime</span></div>'+
-      '<div class="card-b">'+
-      '<p class="caption" style="margin:0 0 12px;max-width:78ch">For a game already filed: a wrong score, or an overtime finish the importer could not see. '+
-      'A merged lag-out game is the usual case, because EA reports overtime in a result code the resumed sittings do not carry, '+
-      'so the flag has to come from whoever rebuilt the game. Correcting a score announces it in the scores channel; the standings follow either change at once.</p>'+
-      '<label class="fld" style="margin:0"><span>Fixture</span><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
-      '<select id="smFixGame" style="flex:1;min-width:240px"><option value="">Pick a game\u2026</option>'+lgGames.filter(function(g){ return g.status==="final"; }).map(function(g){
-        return '<option value="'+esc(g.id)+'" data-h="'+(g.homeScore==null?"":g.homeScore)+'" data-a="'+(g.awayScore==null?"":g.awayScore)+'" data-ot="'+(g.ot?1:0)+'">'+
-          esc((g.stage==="preseason"?"PRE ":"Wk "+g.week+" \u00b7 ")+g.away+" @ "+g.home+" \u00b7 "+CG.fmtDay(g.at)+" \u00b7 "+
-              (g.homeScore==null?"no score":g.home+" "+g.homeScore+"-"+g.awayScore+" "+g.away+(g.ot?" (OT)":"")))+'</option>';
-      }).join("")+'</select>'+
-      '<input id="smFixH" type="number" min="0" max="30" placeholder="home" style="width:88px">'+
-      '<input id="smFixA" type="number" min="0" max="30" placeholder="away" style="width:88px">'+
-      '<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input id="smFixOt" type="checkbox"><span>Ended in overtime</span></label>'+
-      '<button class="btn btn-chrome" id="smFixGo">Correct it</button></div></label>'+
-      '<div id="smFixOut" style="margin-top:10px"></div>'+
-      '</div></div>';
-    /* forfeit rulings: the staff act for no-shows and before-game forfeits (Rule 3.2) */
-    var forfeitCard = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Forfeit a game</h3><span class="chip chip-warn">Rule 3.2</span></div>'+
-      '<div class="card-b">'+
-      '<p class="caption" style="margin:0 0 12px;max-width:78ch">For a club that didn’t show, couldn’t ice six, or forfeited before the scheduled time. Recorded as a 1–0 regulation win for the club that showed, with no individual player statistics, and it counts toward nobody’s weekly game cap on either club, because nobody took the ice (Rule 5.2). If the game was actually played after a disconnect, use the lag-out merge instead: that one keeps its statistics and does count. By convention the winning club’s management enters it themselves from Team HQ.</p>'+
-      '<label class="fld" style="margin:0"><span>Fixture</span><div style="display:flex;gap:8px;flex-wrap:wrap">'+
-      '<select id="smFfGame" style="flex:1;min-width:240px"><option value="">Pick a game…</option>'+lgGames.map(function(g){
-        return '<option value="'+esc(g.id)+'" data-home="'+esc(g.home)+'" data-away="'+esc(g.away)+'">'+esc((g.stage==="preseason"?"PRE ":"Wk "+g.week+" · ")+g.away+" @ "+g.home+" · "+CG.fmtDay(g.at)+" · "+(g.status==="final"?"final":"scheduled"))+'</option>';
-      }).join("")+'</select>'+
-      '<select id="smFfTeam" style="min-width:170px"><option value="">Who forfeited?</option></select>'+
-      '<select id="smFfKind" style="min-width:230px">'+
-        '<option value="noshow">No-show / late (Rule 3.2) — 1–0, stats deleted</option>'+
-        '<option value="dc3">Three disconnections, or abandoned (Rule 4.3): keep the played result</option></select>'+
-      '<input id="smFfWhy" placeholder="Reason (no-show, couldn’t ice six…)" style="flex:1;min-width:180px">'+
-      '<button class="btn btn-chrome" id="smFfGo">Rule forfeit</button>'+
-      /* v3.52: only a commissioner reverses a ruling; staff report a mistake to them */
-      (CG.auth && CG.auth.role === "commish"
-        ? '<button class="btn btn-ghost" id="smFfUndo">Undo a forfeit</button>'
-        : '<button class="btn btn-ghost" id="smFfReport" title="Only a commissioner can reverse a forfeit">Report a mistake</button>')+
-      '</div></label>'+
-      '<p class="caption" style="margin-top:10px">The three-disconnections kind needs the game’s sittings in first, merged or held (League lag-out merge above): it keeps the played score and every stat line, marks the club as forfeiting, and publishes as an FFL even if they scored more. Use it too for a game abandoned before it finished (Rule 4.3.9), charging the club that was behind: a held game is ruled on the score its box score adds up to. Forfeits are ruled the same way in the playoffs, and the series count reads them. Once a forfeit is recorded, only a commissioner can reverse it: if one was entered in error, pick the fixture and report the mistake, and the commissioners are told.</p>'+
-      '</div></div>';
-    /* v3.73 (commissioner, 2026-09-29): the game-incident log was retired; disconnections and late starts
-       are ruled from the clubs' reports and the game record (Rules 3.2, 4.3). */
-    var listCard = '<div class="card"><div class="card-h"><h3>EA games</h3><span class="chip">'+games.length+' game'+(games.length===1?"":"s")+'</span></div>';
-    if (!games.length){
-      listCard += '<div class="card-b"><div class="empty" style="padding:34px 20px"><div class="e-art">'+CG.ic("chart",20)+'</div><b>No EA games yet</b><p>Import one above and it will appear here to manage.</p></div></div>';
-    } else {
-      listCard += '<div class="tblwrap"><table class="tbl keepcols"><thead><tr><th class="tleft">Game</th><th>Date</th><th>Lines</th><th class="tright">Manage</th></tr></thead><tbody>'+
-        games.map(function(g){
-          var cnt = (g.pickup_stats && g.pickup_stats[0] && g.pickup_stats[0].count) || 0;
-          var when = g.played_at ? CG.fmtDate(g.played_at) : "—";
-          return '<tr><td class="tleft"><b>'+esc(g.club_a||"?")+" "+(g.score_a==null?"–":g.score_a)+"–"+(g.score_b==null?"–":g.score_b)+" "+esc(g.club_b||"?")+'</b>'+(g.went_ot?' <span class="chip" style="font-size:9px">OT</span>':'')+(g.source?' <span class="caption">'+esc(g.source)+'</span>':'')+'</td>'+
-            '<td class="mono" style="font-size:11px">'+esc(when)+'</td><td>'+cnt+'</td>'+
-            '<td class="tright" style="white-space:nowrap"><a class="btn btn-ghost btn-sm" href="#/hub/statsmgr?game='+g.id+'">Edit</a> '+
-            '<button class="btn btn-ghost btn-sm" data-smdel="'+g.id+'" data-lbl="'+esc((g.club_a||"?")+" vs "+(g.club_b||"?"))+'" style="color:var(--red)">Delete</button></td></tr>';
-        }).join("")+'</tbody></table></div>';
-    }
-    listCard += '</div>';
-    body.innerHTML = addCard + leagueCard + fixCard + forfeitCard + listCard;
+/* ================================================================
+   STATS MANAGER v4.36. Commissioner, 2026-10-29: "I want you to overhaul that stats manager staff desk to feel easier
+   to use and understand for someone who doesn't go in there all the time The search function is a must work feature,
+   and tie the lag-out merge function into the search feature similar to how the pickup game inputs work. The dropdown
+   in the correct a filed result and the forfeit games are also sort of hard to understand and read at a glance. Can you
+   freshen those up and move the forfeit function above the correct result function?"
+   One desk, top to bottom: Needs attention (only when a game waits), Find a game on EA (pick a club; its sittings come
+   from the league archive and from EA, grouped under the game each belongs to; tick the sittings of one game and merge
+   them into it, or import them as a pickup game, the way #/pickup-import selects sessions), Forfeit a game, Correct a
+   filed result (both on one game picker, grouped by night, with the time, the crests, the score and the state), and the
+   pickup games on file. The fixture-dropdown "League lag-out merge" card is retired: the search covers it.
+   The desk draws from ONE state object (CG._smS), never from the DOM: handlers write state and repaint one section by
+   id, and a live-pulse repaint, CG.reloadLeague or the update pill redraws the same page (seamless-interactions rule).
+   ================================================================ */
 
-    /* v3.42: correct a filed result. stats_game_set_result is gated to statistics staff in the
-       database; this is the first thing on the site to call it. */
-    (function(){
-      var sel = document.getElementById("smFixGame"), h = document.getElementById("smFixH"),
-          a = document.getElementById("smFixA"), ot = document.getElementById("smFixOt"),
-          go = document.getElementById("smFixGo"), out = document.getElementById("smFixOut");
-      if (!sel || !go) return;
-      sel.addEventListener("change", function(){
-        var o = this.options[this.selectedIndex];
-        h.value = o.getAttribute("data-h") || ""; a.value = o.getAttribute("data-a") || "";
-        ot.checked = o.getAttribute("data-ot") === "1";
-      });
-      go.addEventListener("click", function(){
-        var id = sel.value;
-        if (!id){ CG.toast("Pick the game","err"); return; }
-        var hs = parseInt(h.value,10), as = parseInt(a.value,10);
-        if (!(hs>=0) || !(as>=0)){ CG.toast("Enter both scores","err"); return; }
-        if (hs === as){ CG.toast("A league game cannot end level \u2014 check the score","err"); return; }
-        if (ot.checked && Math.abs(hs-as) !== 1){
-          CG.toast("An overtime game is decided by one goal \u2014 check the score or the overtime box","err"); return;
-        }
-        var btn = this; btn.disabled = true;
-        CG.sb.rpc("stats_game_set_result", { p_game:id, p_home:hs, p_away:as, p_final:true, p_ot:ot.checked })
-          .then(function(r){
-            btn.disabled = false;
-            if (r.error){ out.innerHTML = '<span class="chip chip-warn">'+esc(r.error.message||"Couldn\u2019t correct it")+'</span>'; return; }
-            out.innerHTML = '<span class="chip chip-win">Corrected \u2014 the standings already read it</span>';
-            CG.toast("Result corrected","ok");
-            if (CG.reloadLeague) CG.reloadLeague();
-          });
-      });
-    })();
+/* -- Stats manager desk v4.36: state -- */
+CG._smS = function(){
+  var uid = CG.auth && CG.auth.user && CG.auth.user.id;
+  if (!CG._sm || CG._sm.uid !== uid) CG._sm = { uid:uid, seq:0, qseq:0, ptr:0, focusNext:null,
+    find:{ club:null, q:"", clubs:null, clubsErr:null, searching:0, searchT0:0, sess:null, ea:null, from:null, loading:null,
+           loadErr:null, err:null, picked:{}, restart:false, moved:{}, open:{}, focus:null, busy:null, res:null },
+    ff:{ game:null, picking:true, q:"", nights:2, kind:null, who:null, why:"", busy:false, res:null },
+    fix:{ game:null, picking:true, q:"", nights:2, a:"", h:"", ot:false, busy:false, res:null },
+    list:{ rows:null, err:null, at:0, req:0, res:null } };
+  return CG._sm;
+};
 
-    /* --- wire the forfeit ruling --- */
-    (function(){
-      var gSel = document.getElementById("smFfGame"), tSel = document.getElementById("smFfTeam");
-      var go = document.getElementById("smFfGo"), undo = document.getElementById("smFfUndo");
-      if (!gSel || !tSel) return;
-      gSel.addEventListener("change", function(){
-        var opt = gSel.options[gSel.selectedIndex] || {};
-        var h = opt.getAttribute && opt.getAttribute("data-home"), a = opt.getAttribute && opt.getAttribute("data-away");
-        tSel.innerHTML = '<option value="">Who forfeited?</option>'+
-          (h&&a ? [a,h].map(function(code){
-            var id = (CG.lg && CG.lg._codeToId && CG.lg._codeToId[code]) || "";
-            return '<option value="'+esc(id)+'">'+esc(code)+' forfeited</option>';
-          }).join("") : '');
-      });
-      if (go) go.addEventListener("click", function(){
-        var gid2 = gSel.value, tid2 = tSel.value, why = (document.getElementById("smFfWhy").value||"").trim();
-        if (!gid2 || !tid2){ CG.toast("Pick the fixture and who forfeited","err"); return; }
-        var loser = (tSel.options[tSel.selectedIndex]||{}).textContent || "that club";
-        var keep = (document.getElementById("smFfKind")||{}).value === "dc3";
-        CG.confirm("Rule this game a forfeit?",
-          keep
-            ? loser.replace(" forfeited","")+" takes the forfeit loss, but the game WAS played: the merged score and every stat line stay exactly as entered, and the result publishes as an FFL (Rule 4.3)."
-            : loser.replace(" forfeited","")+" takes the forfeit loss. Recorded 1–0 with no player statistics (Rule 3.2); standings update immediately. Only a commissioner can reverse it, so check the fixture and the club before you record it.",
-          "Rule forfeit", function(){
-            go.disabled = true;
-            CG.sb.rpc("forfeit_game", { p_game: gid2, p_forfeiting_team: tid2, p_reason: why || null, p_keep_result: keep }).then(function(r){
-              go.disabled = false;
-              if (r.error){ CG.toast(r.error.message||"Couldn’t rule the forfeit","err"); return; }
-              CG.toast("Forfeit ruled — 1–0","ok");
-              CG.reloadLeague && CG.reloadLeague();
-            });
-          });
-      });
-      var rep = document.getElementById("smFfReport");
-      if (rep) rep.addEventListener("click", function(){
-        if (!gSel.value){ CG.toast("Pick the fixture first","err"); return; }
-        CG.reportRulingPrompt(gSel.value);
-      });
-      if (undo) undo.addEventListener("click", function(){
-        var gid2 = gSel.value;
-        if (!gid2){ CG.toast("Pick the fixture first","err"); return; }
-        CG.confirm("Undo the forfeit on this game?",
-          "The game returns to scheduled with no result. Use this only for a ruling made in error — a game that was actually played should get a lag-out merge instead.",
-          "Undo forfeit", function(){
-            undo.disabled = true;
-            CG.sb.rpc("unforfeit_game", { p_game: gid2 }).then(function(r){
-              undo.disabled = false;
-              if (r.error){ CG.toast(r.error.message||"Couldn’t undo it","err"); return; }
-              CG.toast("Forfeit undone — game back to scheduled","ok");
-              CG.reloadLeague && CG.reloadLeague();
-            });
-          });
-      });
-    })();
-
-    /* --- wire the league lag-out merge --- */
-    (function(){
-      var loadBtn = document.getElementById("smLgLoad"), out = document.getElementById("smLgOut");
-      if (!loadBtn || !out) return;
-      var eb = function(m){ return '<div class="note red">'+esc(m)+'</div>'; };
-      loadBtn.addEventListener("click", function(){
-        var gid = (document.getElementById("smLgGame")||{}).value;
-        if (!gid){ CG.toast("Pick a fixture first","err"); return; }
-        out.innerHTML = '<p class="caption">Loading the archived sittings\u2026</p>';
-        CG._smLeagueApi({ leagueCandidates: { gameId: gid } }).then(function(o){
-          if (o.error){ out.innerHTML = eb(o.error); return; }
-          var cs = o.candidates||[];
-          if (!cs.length){ out.innerHTML = '<div class="note">No archived EA sittings between these clubs around this fixture. The poller archives everything it sees \u2014 nothing here means EA never reported a game.</div>'; return; }
-          out.innerHTML = '<div class="caption" style="margin-bottom:8px">'+esc(o.game.away+" @ "+o.game.home)+(o.game.score?' \u00b7 currently '+esc(o.game.score):'')+' \u2014 select every sitting of this game:</div>'+
-            cs.map(function(c){
-              var dis = c.usedElsewhere;
-              return '<div class="card" style="margin-bottom:8px'+(dis?';opacity:.55':'')+'"><div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
-                '<button type="button" class="chip'+(c.attached?' chip-chrome':'')+'" data-lgsel="'+esc(c.matchId)+'" aria-pressed="'+(c.attached?"true":"false")+'"'+(dis?' disabled':'')+' style="cursor:pointer">'+(c.attached?'\u2713':'\u2014')+'</button>'+
-                '<div style="flex:1;min-width:0"><b>'+c.homeScore+' \u2013 '+c.awayScore+'</b> <span class="caption">('+esc(o.game.home)+' first)</span>'+
-                  (c.minutes?' <span class="chip'+(c.minutes<10?' chip-warn':'')+'" style="font-size:9px">~'+c.minutes+' min</span>':'')+
-                  '<span class="chip" style="font-size:9px">'+esc(c.status)+'</span>'+
-                  (c.attached?' <span class="chip chip-win" style="font-size:9px">on this game</span>':'')+
-                  (dis?' <span class="chip chip-loss" style="font-size:9px">another game\u2019s</span>':'')+
-                  '<div class="caption">'+(c.ts?CG.fmtFull(c.ts*1000):'')+'</div></div>'+
-              '</div></div>';
-            }).join("")+
-            /* v3.53: a restart re-files the game from the selected sittings and strikes the rest (Rules 4.3, 4.5) */
-            '<label class="fld" style="margin:6px 0 0;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="smLgRestart"><span style="margin:0">Restarted from the beginning: strike every sitting I leave out, with its statistics (an illegal loadout under Rule 4.5, or a stop inside the first ten minutes under Rule 4.3)</span></label>'+
-            '<button class="btn btn-chrome" id="smLgMerge" style="margin-top:6px">Merge selected into this game</button>';
-          out.querySelectorAll("[data-lgsel]").forEach(function(b2){ b2.addEventListener("click", function(){
-            var on = this.getAttribute("aria-pressed")!=="true";
-            this.setAttribute("aria-pressed", on?"true":"false");
-            this.classList.toggle("chip-chrome", on);
-            this.textContent = on ? "\u2713" : "\u2014";
-          }); });
-          var mgo = document.getElementById("smLgMerge");
-          if (mgo) mgo.addEventListener("click", function(){
-            var ids = [].slice.call(out.querySelectorAll('[data-lgsel][aria-pressed="true"]')).map(function(x){ return x.getAttribute("data-lgsel"); });
-            if (!ids.length){ CG.toast("Select at least one sitting","err"); return; }
-            var btn2 = this;
-            var restart = !!(document.getElementById("smLgRestart")||{}).checked;
-            CG.confirm((restart ? "Re-file this game from " : "Rebuild this game from ")+ids.length+" sitting"+(ids.length===1?"":"s")+"?",
-              (restart
-                ? "Every sitting on this game that you did NOT select is struck from the record, with its statistics, and the game is re-filed from the selected sittings alone. "
-                : "The existing box score is REPLACED by the merge: stats summed, score aggregated. ")+
-              "It is published only if the sittings make a full game with a decided score; past sixty minutes by one goal is an overtime result, and past sixty by more than a goal is flagged (Rule 4.3). Standings and profiles update immediately.",
-              restart ? "Re-file" : "Merge", function(){
-              btn2.disabled = true; btn2.textContent = "Merging\u2026";
-              CG._smLeagueApi({ leagueMerge: { gameId: gid, matchIds: ids, restart: restart } }).then(function(r2){
-                btn2.disabled = false; btn2.textContent = "Merge selected into this game";
-                if (r2.error){ CG.toast(r2.error,"err"); return; }
-                out.innerHTML = r2.held
-                  ? '<div class="note"><b style="font-family:var(--f-disp)">Merged and held.</b> '+r2.sittings+' sitting'+(r2.sittings===1?"":"s")+', '+esc(r2.score)+' so far. '+esc(r2.heldWhy||"")+(r2.struck?' '+r2.struck+' sitting'+(r2.struck===1?"":"s")+' struck.':'')+'</div>'
-                  : '<div class="note grn"><b style="font-family:var(--f-disp)">Merged.</b> '+r2.sittings+' sitting'+(r2.sittings===1?"":"s")+' \u2192 final '+esc(r2.score)+(r2.wentOt?(r2.inferredOt?" (OT, read from the clock)":" (OT)"):"")+' \u00b7 '+r2.players+' player lines ('+r2.linked+' linked to profiles).'+(r2.struck?' '+r2.struck+' sitting'+(r2.struck===1?"":"s")+' struck.':'')+(r2.overlong?' It ran past sixty minutes by more than a goal, so statistics staff were flagged.':'')+'</div>';
-                CG.toast(r2.held ? "Merged and held: not yet a full game" : "Game rebuilt from "+r2.sittings+" sittings","ok");
-                CG.reloadLeague && CG.reloadLeague();
-              }).catch(function(e2){ btn2.disabled = false; btn2.textContent = "Merge selected into this game"; CG.toast(e2.message,"err"); });
-            });
-          });
-        }).catch(function(e){ out.innerHTML = eb(e.message); });
-      });
-    })();
-
-    /* --- wire the search flow --- */
-    var out = document.getElementById("smSearchOut");
-    var errBox = function(m){ return '<div class="note red">'+esc(m)+'</div>'; };
-    function doSearch(){
-      var name = (document.getElementById("smClub").value||"").trim();
-      if (name.length < 2){ CG.toast("Enter a club name","err"); return; }
-      out.innerHTML = '<p class="caption">Searching EA…</p>';
-      CG._smApi({ action:"search", clubName:name }).then(function(o){
-        if (o.error){ out.innerHTML = errBox(o.error); return; }
-        var clubs = o.clubs||[];
-        if (!clubs.length){ out.innerHTML = '<div class="note">No clubs found for “'+esc(name)+'”. Check the spelling.</div>'; return; }
-        out.innerHTML = '<div class="caption" style="margin-bottom:8px">Pick the club:</div>'+clubs.map(function(c){
-          return '<button class="btn btn-ghost" data-club="'+esc(c.clubId)+'" data-cn="'+esc(c.name)+'" style="display:block;width:100%;text-align:left;margin-bottom:6px">'+esc(c.name)+
-          '<span class="caption" style="display:block;margin-top:2px">EA club id <b class="mono" style="font-size:13px;color:var(--ink)">'+esc(c.clubId)+'</b>'+(c.memberCount?' · '+c.memberCount+' members':'')+'</span></button>';
-        }).join("");
-        out.querySelectorAll("[data-club]").forEach(function(b){ b.addEventListener("click", function(){ loadMatches(this.getAttribute("data-club"), this.getAttribute("data-cn")); }); });
-      }).catch(function(e){ out.innerHTML = errBox(e.message); });
-    }
-    function loadMatches(cid, cn){
-      out.innerHTML = '<p class="caption">Loading '+esc(cn)+'’s recent games…</p>';
-      CG._smApi({ action:"matches", clubId:cid }).then(function(o){
-        if (o.error){ out.innerHTML = errBox(o.error); return; }
-        var ms = o.matches||[];
-        if (!ms.length){ out.innerHTML = '<div class="note">No recent private matches for '+esc(cn)+'.</div>'; return; }
-        /* Selection toggles mirror #/pickup-import: one game imports on its own button, or tick
-           several sessions of a lagged-out game and combine them into one. KEEP IN SYNC. */
-        out.innerHTML = '<div class="caption" style="margin-bottom:8px">Pick the game to import — or <b>select several sessions</b> of a lagged-out game and import them as one:</div>'+ms.map(function(m){
-          var when = m.playedAt ? CG.fmtFull(Date.parse(m.playedAt)) : "";
-          var shortChip = (m.minutes && m.minutes < 45) ? ' <span class="chip chip-warn" title="Well under a full game — likely one session of a lagged-out game">~'+m.minutes+' min</span>' : '';
-          return '<div class="card" style="margin-bottom:8px"><div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
-            '<button type="button" class="chip" data-smsel="'+esc(m.matchId)+'" aria-pressed="false" style="cursor:pointer" title="Select this session to merge with another">—</button>'+
-            '<div style="flex:1;min-width:0"><b>'+esc(m.a.name||"?")+' '+(+m.a.score||0)+' – '+(+m.b.score||0)+' '+esc(m.b.name||"?")+'</b>'+(m.wentOt?' <span class="chip">OT</span>':'')+shortChip+'<div class="caption">'+esc(when)+'</div></div>'+
-            '<button class="btn btn-chrome btn-sm" data-import="'+esc(m.matchId)+'" data-cid="'+esc(cid)+'">Import</button></div></div>';
-        }).join("")+
-        '<div id="smMergeBar" style="display:none;position:sticky;bottom:12px;margin-top:10px"><div class="card"><div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
-          '<span style="flex:1"><b id="smMergeCount" style="font-family:var(--f-disp)"></b><span class="caption" style="display:block">Lagged out mid-game? Selected sessions combine into ONE game — stats summed, score aggregated, overtime from the deciding session only.</span></span>'+
-          '<button class="btn btn-chrome btn-sm" id="smMergeGo" data-cid="'+esc(cid)+'">Import as one game</button></div></div></div>';
-        var picked = {};
-        function syncBar(){
-          var ids = Object.keys(picked), bar = document.getElementById("smMergeBar");
-          if (bar) bar.style.display = ids.length >= 2 ? "" : "none";
-          var c = document.getElementById("smMergeCount");
-          if (c) c.textContent = ids.length + " sessions selected";
-        }
-        out.querySelectorAll("[data-smsel]").forEach(function(b){ b.addEventListener("click", function(){
-          var id = this.getAttribute("data-smsel");
-          var on = this.getAttribute("aria-pressed") !== "true";
-          if (on && Object.keys(picked).length >= 4){ CG.toast("Four sessions is the limit for one merge","err"); return; }
-          this.setAttribute("aria-pressed", on ? "true" : "false");
-          this.classList.toggle("chip-chrome", on);
-          this.textContent = on ? "\u2713" : "\u2014";
-          if (on) picked[id] = 1; else delete picked[id];
-          syncBar();
-        }); });
-        var mg = document.getElementById("smMergeGo");
-        if (mg) mg.addEventListener("click", function(){
-          var ids = Object.keys(picked);
-          if (ids.length < 2){ CG.toast("Select at least two sessions to merge","err"); return; }
-          doImport(this, ids);
-        });
-        out.querySelectorAll("[data-import]").forEach(function(b){ b.addEventListener("click", function(){ doImport(this); }); });
-      }).catch(function(e){ out.innerHTML = errBox(e.message); });
-    }
-    function doImport(btn, mergeIds){
-      var cid = btn.getAttribute("data-cid");
-      var payload = mergeIds && mergeIds.length
-        ? { action:"import", clubId:cid, matchIds:mergeIds }
-        : { action:"import", clubId:cid, matchId:btn.getAttribute("data-import") };
-      var was = btn.textContent;
-      btn.disabled = true; btn.textContent = "Importing…";
-      CG._smApi(payload).then(function(o){
-        btn.disabled = false; btn.textContent = was;
-        if (o.error){ CG.toast(o.error,"err"); return; }
-        var players = o.players||[], matched = players.filter(function(p){ return p.matched; }).length;
-        var sessions = o.sessions||1;
-        CG.toast(sessions > 1
-          ? sessions+" sessions merged into one game — "+matched+"/"+players.length+" players matched"
-          : "Imported — "+matched+"/"+players.length+" players matched", "ok");
-        CG.router();
-      }).catch(function(e){ btn.disabled = false; btn.textContent = was; CG.toast("Import failed: "+e.message,"err"); });
-    }
-    var sbtn = document.getElementById("smSearch"); if (sbtn) sbtn.addEventListener("click", doSearch);
-    CG.paintEaStatus(body);
-    var sinp = document.getElementById("smClub"); if (sinp) sinp.addEventListener("keydown", function(e){ if (e.key==="Enter"){ e.preventDefault(); doSearch(); } });
-    body.querySelectorAll("[data-smdel]").forEach(function(b){ b.addEventListener("click", function(){
-      var id=this.getAttribute("data-smdel"), lbl=this.getAttribute("data-lbl");
-      CG.confirm("Delete "+lbl+"?", "The game and every stat line are removed and stop showing on player profiles. This can’t be undone.", "Delete game", function(){
-        CG.sb.rpc("stats_pickup_delete",{ p_game:id }).then(function(r){
-          if(r.error){ CG.toast("Couldn’t delete: "+r.error.message,"err"); return; }
-          CG.toast("Game deleted","ok"); CG.router();
-        });
-      });
-    }); });
+/* -- Stats manager desk v4.36: pure helpers (no DOM) -- */
+CG.SM_TICK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l5 5L20 6"/></svg>';
+CG._smEtDay = function(ts){ return new Intl.DateTimeFormat("en-CA", { timeZone:"America/New_York" }).format(ts); };
+/* "Dallas Stars", not the bare nickname the teams row stores */
+CG._smName = function(code){
+  var t = CG.TEAM && CG.TEAM[code]; if (!t) return String(code || "");
+  return t.city && String(t.name).indexOf(t.city) !== 0 ? t.city+" "+t.name : t.name;
+};
+CG._smFx = function(g){ return g.away+" @ "+g.home; };
+CG._smCommish = function(){ return !!(CG.auth && CG.auth.role === "commish"); };
+/* every score on the desk reads away first, the way every scoreboard on the site does: "DAL 2, PIT 3" */
+CG._smScoreText = function(away, home, a, h){ return away+" "+a+", "+home+" "+h; };
+/* leagueMerge and forfeit_game answer "H-A", home first */
+CG._smHA = function(s){ var m = /^(\d+)-(\d+)$/.exec(String(s || "")); return m ? { h:+m[1], a:+m[2] } : null; };
+CG._smGame = function(id){ return id ? (((CG.lg && CG.lg.schedule) || []).find(function(g){ return g.id === id; }) || null) : null; };
+CG._smResult = function(g){ var lg = CG.lg || {}; return (lg.allResults || lg.results || []).find(function(r){ return r.id === g.id; }) || null; };
+/* box-score LINES, not entries: a player with a line in each role counts twice, as game_stats does (v4.11) */
+CG._smLines = function(g){
+  var n = 0;
+  CG.boxSides(g, CG._smResult(g)).forEach(function(side){ Object.keys(side).forEach(function(k){ n += CG.boxLines(side[k]).length; }); });
+  return n;
+};
+/* the goals a club's box score adds up to, keyed by club code (box[g.home], never box.home: v3.30) */
+CG._smBoxGoals = function(g){
+  var res = CG._smResult(g), box = res && res.box; if (!box || !box[g.home] || !box[g.away]) return null;
+  var sum = function(side){ var n = 0; Object.keys(side).forEach(function(k){ CG.boxLines(side[k]).forEach(function(b){ n += +b.g || 0; }); }); return n; };
+  var h = sum(box[g.home]), a = sum(box[g.away]);
+  return (h || a || CG._smLines(g)) ? { h:h, a:a } : null;
+};
+CG._smStage = function(g){
+  return (g.stage === "playoff" ? "Playoffs" : g.stage === "preseason" ? "Pre-season" : "Week "+g.week)+(CG.isMakeUp && CG.isMakeUp(g) ? " · Make-up" : "");
+};
+CG._smGameState = function(g){
+  var commish = CG._smCommish();
+  if (g.voided) return { key:"void", label:"Voided", chip:"", lock:!commish };
+  if (g.forfeit) return { key:"forfeit", label:"Forfeit: "+g.forfeit, chip:"", lock:!commish };
+  if (g.status === "final") return { key:"final", label:g.ot ? "Final, OT" : "Final", chip:"", lock:false };
+  if (g.eaMatchId) return { key:"held", label:"Held", chip:"chip-warn", lock:false };
+  if (g.at < CG.now()) return { key:"awaiting", label:"No result yet", chip:"chip-warn", lock:false };
+  return { key:"scheduled", label:"Scheduled", chip:"", lock:false };
+};
+CG._smMeta = function(g){
+  var lines = CG._smLines(g), bits = [CG.fmtTime(g.at), CG._smStage(g)];
+  if (lines) bits.push(lines+" box-score line"+(lines === 1 ? "" : "s"));
+  if (g.forfeit) bits.push(CG.forfeitNoIce(g, CG._smResult(g)) ? "no-show, 1-0" : "result kept");
+  return bits.join(" · ");
+};
+CG._smPickable = function(kind, g){
+  if (g.voided) return false;
+  if (kind === "fix" && g.status !== "final") return false;
+  return true;
+};
+CG._smNightLabel = function(day, ts){
+  var now = CG.now(), D = 86400000;
+  if (day === CG._smEtDay(now)) return "Tonight · "+CG.fmtDay(ts);
+  if (day === CG._smEtDay(now - D)) return "Last night · "+CG.fmtDay(ts);
+  if (day === CG._smEtDay(now + D)) return "Tomorrow · "+CG.fmtDay(ts);
+  return CG.fmtDay(ts);
+};
+/* the game picker's list: the two most recent nights with games by default, or, with a query, any game this season whose
+   clubs, names, date or week hold every word typed, nearest to today first. No five-day wall: "Show earlier nights"
+   pages back, and a later night is one search away ("Oct 30"). */
+CG._smPickerGames = function(kind, k){
+  var all = ((CG.lg && CG.lg.schedule) || []).filter(function(g){ return CG._smPickable(kind, g); });
+  var q = String(k.q || "").trim().toLowerCase(), list, capped = false, more = false;
+  if (q){
+    var toks = q.split(/\s+/);
+    list = all.filter(function(g){
+      var hay = [g.away, g.home, CG._smName(g.away), CG._smName(g.home), CG.fmtDay(g.at), "week "+g.week,
+        g.stage === "playoff" ? "playoffs" : g.stage === "preseason" ? "pre-season preseason" : ""].join(" ").toLowerCase();
+      return toks.every(function(t){ return hay.indexOf(t) >= 0; });
+    }).sort(function(a, b){ var n = CG.now(); return Math.abs(a.at - n) - Math.abs(b.at - n); });
+    if (list.length > 30){ list = list.slice(0, 30); capped = true; }
+  } else {
+    var limit = CG._smEtDay(CG.now()), days = [];
+    all.forEach(function(g){ var d = CG._smEtDay(g.at); if (d <= limit && days.indexOf(d) < 0) days.push(d); });
+    days.sort().reverse();
+    more = days.length > k.nights;
+    var keep = days.slice(0, k.nights);
+    list = all.filter(function(g){ return keep.indexOf(CG._smEtDay(g.at)) >= 0; });
+  }
+  var by = {}, nights = [];
+  list.forEach(function(g){
+    var d = CG._smEtDay(g.at);
+    if (!by[d]){ by[d] = { day:d, label:CG._smNightLabel(d, g.at), games:[] }; nights.push(by[d]); }
+    by[d].games.push(g);
   });
+  nights.sort(function(a, b){ return a.day < b.day ? 1 : -1; });
+  nights.forEach(function(n){
+    n.games.sort(function(a, b){ return a.at - b.at; });
+    /* the night's stage from a game that is not a make-up: one rescheduled game must not label the whole night (a make-up
+       is marked on its own row) */
+    var base = n.games.filter(function(x){ return !(CG.isMakeUp && CG.isMakeUp(x)); })[0] || n.games[0];
+    n.label += " · "+(base.stage === "playoff" ? "Playoffs" : base.stage === "preseason" ? "Pre-season" : "Week "+base.week);
+  });
+  return { nights:nights, capped:capped, more:more };
+};
+/* the two forfeit kinds a game allows. forfeit_game refuses a no-show on a game that was played, and a kept result on
+   a game with nothing filed; the desk says so before the click instead of after it. */
+CG._smKinds = function(g){
+  var lines = CG._smLines(g);
+  var noshow = (g.eaMatchId || lines > 0)
+    ? { ok:false, why:"Not possible: this game has a box score, so it was played. Use the option below." } : { ok:true, why:null };
+  var dc3 = (g.status !== "final" && !g.eaMatchId)
+    ? { ok:false, why:"Not possible yet: no sitting of this game is on file. If it was played, merge its sittings first." } : { ok:true, why:null };
+  return { noshow:noshow, dc3:dc3, pre:noshow.ok && !dc3.ok ? "noshow" : (!noshow.ok && dc3.ok ? "dc3" : null), lines:lines };
+};
+/* what #game-scores will show, so the confirm can say it (a kept result on a final posts nothing: backend gap G1) */
+CG._smFfPosts = function(g, kind){
+  if (kind === "noshow") return g.status === "final" ? "The score changes, so a Corrected line posts in #game-scores." : "Final (forfeit) posts in #game-scores.";
+  if (g.status !== "final" && g.eaMatchId) return "Final (forfeit) posts in #game-scores, with the score its box score adds up to.";
+  return "Nothing is posted in #game-scores and neither club is notified, because the score does not change.";
+};
+CG._smFfWill = function(g, kind, code){
+  if (!kind || !code) return "";
+  var other = code === g.home ? g.away : g.home;
+  if (kind === "noshow") return "Will record: "+other+" wins 1-0 by forfeit, with no player stats.";
+  if (g.status === "final") return "Will record: "+CG._smScoreText(g.away, g.home, g.awayScore, g.homeScore)+" stands with every stat line, and "+code+" takes the forfeit loss (FFL).";
+  return "Will record: the score its box score adds up to stands with every stat line, and "+code+" takes the forfeit loss (FFL).";
+};
+CG._smFixCheck = function(g, f){
+  var hs = String(f.h == null ? "" : f.h).trim(), as = String(f.a == null ? "" : f.a).trim();
+  if (!/^\d{1,2}$/.test(hs) || !/^\d{1,2}$/.test(as)) return { ok:false, bad:false, msg:"Enter both scores." };
+  var h = +hs, a = +as;
+  if (h === a) return { ok:false, bad:true, msg:"A league game cannot end level. Check the score." };
+  if (f.ot && Math.abs(h - a) !== 1) return { ok:false, bad:true, msg:"An overtime game is decided by one goal. Check the score or the overtime box." };
+  var same = h === g.homeScore && a === g.awayScore, txt = CG._smScoreText(g.away, g.home, a, h);
+  if (same && !!f.ot === !!g.ot) return { ok:false, bad:false, msg:"Change the score or the overtime box to correct it." };
+  if (!same) return { ok:true, bad:false, msg:"Will read: "+txt+(f.ot ? " in overtime" : "")+". A Corrected line posts in #game-scores, and the standings update at once." };
+  return { ok:true, bad:false, msg:"Will read: "+txt+(f.ot ? " in overtime" : " in regulation")+". Only the overtime mark changes, so nothing is posted in #game-scores. The standings update at once." };
+};
+/* Rule 7.1: an official does not rule on a game of a club they play for or manage, but "the league's tools do not stop
+   an official mechanically", so this only WARNS. Not CG.myClub(), which falls back to the first club and the preview. */
+CG._smInvolved = function(g){
+  var uid = CG.auth && CG.auth.user && CG.auth.user.id, me = CG.me && CG.me(), mine = [];
+  if (me && me.team) mine.push(me.team);
+  (CG.TEAMS || []).forEach(function(t){ if (uid && (t.owner === uid || t.gm === uid || t.agm === uid)) mine.push(t.code); });
+  return [g.away, g.home].filter(function(c){ return mine.indexOf(c) >= 0; })[0] || null;
+};
+/* the newer answer wins per sitting; a sitting only the earlier answer had (EA's, after an archive-only reload) stays */
+CG._smUnion = function(prev, next){
+  var old = {}, by = {}, out = [];
+  (prev || []).forEach(function(s){ old[s.matchId] = s; });
+  (next || []).forEach(function(s){
+    var p = old[s.matchId];
+    /* an archive-only reload does not know EA still lists it: keep that, and with it the pickup door (the rule is the
+       server's: an EA sitting the archive holds only as ignored, nothing else) */
+    if (p && s.source === "archive" && (p.source === "ea" || p.source === "both")){
+      s.source = "both";
+      if (s.kind === "not-league" && !s.pickupGameId && !s.struck && s.archive && s.archive.status === "ignored"){ s.canPickup = true; s.why = null; }
+    }
+    by[s.matchId] = 1; out.push(s);
+  });
+  (prev || []).forEach(function(s){ if (!by[s.matchId]) out.push(s); });
+  return out.sort(function(a, b){ return (Date.parse(b.endedAt) || 0) - (Date.parse(a.endedAt) || 0); });
+};
+CG._smWith = function(req, extra){
+  var m = {}, k;
+  for (k in req.leagueMerge) if (Object.prototype.hasOwnProperty.call(req.leagueMerge, k)) m[k] = req.leagueMerge[k];
+  for (k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) m[k] = extra[k];
+  return { leagueMerge:m };
+};
+/* a server fixture { gameId, home, away, at, status, held, forfeit } as a schedule row, for a game CG.lg does not hold */
+CG._smFxGame = function(fx){
+  return CG._smGame(fx.gameId) || { id:fx.gameId, home:fx.home, away:fx.away, at:Date.parse(fx.at) || 0, status:fx.status,
+    forfeit:fx.forfeit || null, eaMatchId:fx.held ? "held" : null, homeScore:null, awayScore:null, week:null, stage:"regular" };
+};
+/* sittings grouped under the game they belong to: one group is one game, so "one game per merge" needs no words */
+CG._smGroups = function(sessions, st){
+  var groups = {}, order = [], f = st.find;
+  (sessions || []).forEach(function(s){
+    var key, kind = s.kind, gid = null, ended = Date.parse(s.endedAt) || 0;
+    if (kind === "league" && s.fixture){ gid = f.moved[s.matchId] || s.fixture.gameId; key = "g:"+gid; }
+    else if (kind === "needs-substitution" && s.fixture){ gid = s.fixture.gameId; key = "s:"+gid; }
+    else { kind = "not-league"; key = "p:"+(s.clubs || []).map(function(c){ return c.eaId; }).sort().join("-")+":"+CG._smEtDay(ended || CG.now()); }
+    var gr = groups[key];
+    if (!gr){ gr = groups[key] = { key:key, kind:kind, gameId:gid, fx:null, sessions:[], latest:0 }; order.push(gr); }
+    if (gid && !gr.fx) gr.fx = [s.fixture].concat(s.alternatives || []).filter(function(x){ return x && x.gameId === gid; })[0] || null;
+    gr.sessions.push(s);
+    gr.latest = Math.max(gr.latest, ended);
+  });
+  order.forEach(function(gr){
+    gr.sessions.sort(function(a, b){ return (Date.parse(a.endedAt) || 0) - (Date.parse(b.endedAt) || 0); });
+    gr.sessions.forEach(function(s, i){ s._k = i + 1; });
+    gr.game = gr.gameId ? (CG._smGame(gr.gameId) || (gr.fx ? CG._smFxGame(gr.fx) : null)) : null;
+    gr.focus = !!(gr.gameId && f.focus === gr.gameId);
+    gr.locked = !!(gr.kind === "league" && gr.game && gr.game.forfeit && !CG._smCommish());
+    gr.complete = gr.kind === "league" && !!gr.game && (gr.game.status === "final" || !!gr.game.forfeit) &&
+      gr.sessions.every(function(s){ return s.onGame || s.struck; });
+  });
+  return order.sort(function(a, b){ return (b.focus - a.focus) || (b.latest - a.latest); });
+};
+/* what is ticked, and in which groups. The sitting already on a game is part of every merge of that game (the merge
+   REPLACES the box score), so it counts as ticked unless the game is being re-filed from a restart. */
+CG._smSelection = function(st, groups){
+  var f = st.find, byId = {}, ticked = [], grs = [];
+  groups.forEach(function(gr){ gr.sessions.forEach(function(s){ byId[s.matchId] = { s:s, gr:gr }; }); });
+  Object.keys(f.picked).forEach(function(id){ if (f.picked[id] && byId[id]){ ticked.push(id); if (grs.indexOf(byId[id].gr) < 0) grs.push(byId[id].gr); } });
+  var one = grs.length === 1 ? grs[0] : null, reFile = false;
+  /* a game opened from Needs attention whose every sitting is already on it but no result is published (held, or put back
+     to scheduled by a forfeit undo): it can be filed again from those sittings with nothing ticked */
+  if (!ticked.length){
+    var fg = groups.filter(function(gr){ return gr.focus && gr.kind === "league" && gr.game && gr.game.status !== "final" && !gr.game.forfeit && !gr.locked &&
+      gr.sessions.some(function(s){ return s.onGame && !s.struck; }); })[0];
+    if (fg){ one = fg; grs = [fg]; reFile = true; }
+  }
+  var locked = one && one.kind === "league" && !f.restart ? one.sessions.filter(function(s){ return s.onGame && !s.struck; }).map(function(s){ return s.matchId; }) : [];
+  var sel = locked.concat(ticked.filter(function(id){ return locked.indexOf(id) < 0; }));
+  return { ticked:ticked, groups:grs, one:one, locked:locked, sel:sel, byId:byId, reFile:reFile,
+    restartable: !!(one && one.kind === "league" && one.sessions.some(function(s){ return s.onGame && !s.struck; })) };
+};
+CG._smLengthText = function(s){
+  return s.length === "full" ? "Full game" : s.length === "full-ot" ? "Full game, overtime" : s.length === "level" ? "60 min, tied"
+    : (s.minutes != null ? s.minutes+" of 60 min" : "Part of a game");
+};
+/* a sitting's score in its game's order (away first), or by club name for a game outside the league */
+CG._smSitScore = function(s, g){
+  var cl = s.clubs || [];
+  if (g){
+    var a = cl.filter(function(c){ return c.team === g.away; })[0], h = cl.filter(function(c){ return c.team === g.home; })[0];
+    if (a && h) return CG._smScoreText(g.away, g.home, a.score, h.score);
+  }
+  return cl.map(function(c){ return (c.team || c.name || "EA club "+c.eaId)+" "+c.score; }).join(", ");
+};
+/* the action bar: one button, worded for exactly what the ticks will do */
+CG._smBar = function(st, groups, sel){
+  var f = st.find;
+  if (!sel.sel.length || (!sel.ticked.length && !sel.reFile)) return null;
+  var max = sel.sel.length >= 4 ? " Four sittings is the most one game can take." : "";
+  if (sel.groups.length > 1){
+    var nm = function(gr){ return gr.game ? CG._smFx(gr.game) : (gr.sessions[0].clubs || []).map(function(c){ return c.name || c.team; }).join(" vs "); };
+    return { err:true, title:"Tick sittings from one game only", caption:"You have ticks under "+nm(sel.groups[0])+" and under "+nm(sel.groups[1])+".", btn:"Clear ticks", act:"clear" };
+  }
+  var gr = sel.one, n = sel.sel.length;
+  if (gr.kind === "not-league"){
+    return n === 1
+      ? { mode:"pickup", title:"Import 1 sitting as a pickup game", caption:"Player profiles only. It never touches standings, eligibility or ratings."+max, btn:"Import as a pickup game", busy:"Importing…" }
+      : { mode:"pickup", title:"Import "+n+" sittings as one pickup game", caption:"Stats are added up and the scores combined. Player profiles only."+max, btn:"Import as one pickup game", busy:"Importing…" };
+  }
+  var G = gr.game ? CG._smFx(gr.game) : "this game";
+  if (sel.reFile && !f.restart) return { mode:"league", title:"File "+G+" from its "+n+" sitting"+(n === 1 ? "" : "s"),
+    caption:"Its sittings are on file, but no result is published. Filing them again publishes the game if they make a full game with a decided score; otherwise it stays held (Rule 4.3).",
+    btn:"File the game", busy:"Checking…" };
+  if (f.restart) return { mode:"league", restart:true, title:"Re-file "+G+" from "+n+" sitting"+(n === 1 ? "" : "s"), caption:"Every other sitting on this game is struck, with its stats, for good."+max, btn:"Re-file the game", busy:"Checking…" };
+  if (n === 1 && !sel.locked.length) return { mode:"league", title:"File 1 sitting into "+G, caption:"It publishes only as a full game with a decided score (Rule 4.3)."+max, btn:"File the sitting", busy:"Checking…" };
+  var k = sel.locked.length, m = n - k;
+  return { mode:"league", title:"Merge "+n+" sittings into "+G,
+    caption:(k ? k+" already on the game, "+m+" you ticked. " : "")+"Stats are added up into one game (Rule 4.3)."+max,
+    btn:"Merge "+n+" sittings", busy:"Checking…" };
+};
+
+/* -- Stats manager desk v4.36: render -- */
+CG._smBoard = function(g){
+  var s8 = CG._smGameState(g), scored = g.status === "final" && g.homeScore != null && g.awayScore != null;
+  var aLose = scored && (g.forfeit ? g.forfeit === g.away : g.awayScore < g.homeScore);
+  var hLose = scored && (g.forfeit ? g.forfeit === g.home : g.homeScore < g.awayScore);
+  return '<span class="sm-line">'+CG.crest(g.away, 10, { decorative:true })+'<b>'+esc(g.away)+'</b>'+
+    (scored ? '<span class="sm-sc'+(aLose ? ' lose' : '')+'">'+g.awayScore+'</span>' : '')+
+    '<span class="sm-at">@</span>'+CG.crest(g.home, 10, { decorative:true })+'<b>'+esc(g.home)+'</b>'+
+    (scored ? '<span class="sm-sc'+(hLose ? ' lose' : '')+'">'+g.homeScore+'</span>' : '')+
+    '<span class="chip'+(s8.chip ? ' '+s8.chip : '')+'">'+esc(s8.label)+'</span>'+
+    (s8.lock ? '<span class="sm-lock">'+CG.ic("lock", 13)+'<span class="sr-only">Commissioner only</span></span>' : '')+'</span>';
+};
+CG._smCard = function(id, title, chip, one, body){
+  return '<section class="card" id="'+id+'"><div class="card-h"><h3>'+title+'</h3>'+(chip || "")+'</div>'+
+    '<div class="card-b"><p class="caption sm-one">'+one+'</p>'+body+'</div></section>';
+};
+CG._smTodoHtml = function(st){
+  var now = CG.now(), all = ((CG.lg && CG.lg.schedule) || []).filter(function(g){
+    if (g.status === "final" || g.forfeit || g.voided) return false;
+    return !!g.eaMatchId || g.at < now - 2 * 3600000;
+  }).sort(function(a, b){ return a.at - b.at; });
+  if (!all.length) return "";
+  var rows = all.slice(0, 8).map(function(g){
+    var held = !!g.eaMatchId;
+    return '<div class="titem"><span class="t-dot'+(held ? '' : ' red')+'"></span>'+
+      '<span style="flex:1;min-width:0"><b>'+esc(CG._smFx(g))+'</b> · '+esc(CG.fmtFull(g.at))+
+      '<small class="caption" style="display:block">'+(held ? 'Held: its sittings are on file, but no result is published. Find its sittings to see why.' : 'No result two hours after puck drop.')+'</small></span>'+
+      '<span class="sm-go" style="margin:0"><button type="button" class="btn btn-ghost btn-sm" data-sm-act="focus" data-game="'+esc(g.id)+'">Find its sittings</button>'+
+      '<button type="button" class="btn btn-ghost btn-sm" data-sm-act="ffpick" data-game="'+esc(g.id)+'">Rule a forfeit</button></span></div>';
+  }).join("");
+  return CG._smCard("smTodo", "Needs attention", '<span class="chip chip-warn">'+all.length+'</span>',
+    "Games waiting on this desk: held short of a full game, or with no result two hours after puck drop.",
+    '<div class="tasklist">'+rows+'</div>'+(all.length > 8 ? '<p class="caption" style="margin-top:8px">and '+(all.length - 8)+' more</p>' : ''));
+};
+CG._smClubsHtml = function(st){
+  var f = st.find, h = '';
+  if (f.searching) h += '<p class="caption">Searching EA for “'+esc(f.q)+'”. This can take up to 25 seconds. <span id="smWaitQ" aria-hidden="true"></span></p>';
+  else if (f.clubsErr) h += '<div class="note red">'+esc(f.clubsErr)+' <button type="button" class="btn btn-ghost btn-sm" data-sm-act="search">Try again</button></div>';
+  else if (f.clubs && !f.clubs.length) h += '<div class="note">EA found no club named “'+esc(f.q)+'”. Check the spelling.</div>';
+  else if (f.clubs && f.clubs.length){
+    h += '<p class="caption" style="margin:10px 0 8px">Pick the club:</p>'+f.clubs.map(function(c){
+      var lt = (CG.TEAMS || []).filter(function(t){ return t.eaClubId && t.eaClubId === String(c.clubId); })[0];
+      return '<button type="button" class="btn btn-ghost sm-ea" data-sm-act="eaclub" data-id="'+esc(c.clubId)+'" data-name="'+esc(c.name)+'">'+
+        (lt ? CG.crest(lt.code, 12, { decorative:true }) : '')+
+        '<span><b>'+esc(c.name)+'</b><small class="caption">'+(lt ? esc(lt.name)+'’s EA club · EA club '+esc(c.clubId) : (c.memberCount ? esc(String(c.memberCount))+' members · ' : '')+'EA club '+esc(c.clubId))+'</small></span></button>';
+    }).join("");
+  }
+  return h;
+};
+CG._smClubsPaint = function(){
+  var o = document.getElementById("smClubsOut"); if (!o) return;
+  var lost = o.contains(document.activeElement);
+  o.innerHTML = CG._smClubsHtml(CG._smS());
+  if (lost){ var inp = document.getElementById("smClub"); if (inp) inp.focus({ preventScroll:true }); }
+};
+CG._smEaLineHtml = function(st){
+  var e = st.find.ea;
+  if (!e) return '<p class="caption" id="smEaLine" hidden></p>';
+  if (e.state === "wait") return '<p class="caption" id="smEaLine">Checking EA for newer sittings. This can take up to 25 seconds. <span id="smWaitE" aria-hidden="true"></span></p>';
+  if (e.state === "fail") return '<div class="note red" id="smEaLine">EA didn’t answer, so this list shows only what the league archive holds. Sittings from the last few minutes, and pickup games, may be missing. '+
+    esc(e.error || "")+' <button type="button" class="btn btn-ghost btn-sm" data-sm-act="eaagain">Check EA again</button></div>';
+  return '<p class="caption" id="smEaLine">'+(e.added ? 'EA checked just now: '+e.added+' newer sitting'+(e.added === 1 ? '' : 's')+' added.' : 'EA checked just now: nothing newer.')+'</p>';
+};
+CG._smFindResHtml = function(st){
+  var res = st.find.res; if (!res) return "";
+  if (res.kind === "merge"){
+    var r = res.r, g = CG._smGame(res.gid), G = g ? CG._smFx(g) : "The game", sc = CG._smHA(r.score);
+    var score = g && sc ? CG._smScoreText(g.away, g.home, sc.a, sc.h) : String(r.score || "");
+    var n = r.sittings+" sitting"+(r.sittings === 1 ? "" : "s");
+    return r.held
+      ? '<div class="note sm-res" id="smFindRes" role="status" tabindex="-1"><b style="font-family:var(--f-disp)">Merged and held.</b> '+esc(n+", "+score+" so far. "+(r.heldWhy || ""))+
+        (r.struck ? ' '+r.struck+' sitting'+(r.struck === 1 ? '' : 's')+' struck.' : '')+'</div>'
+      : '<div class="note grn sm-res" id="smFindRes" role="status" tabindex="-1"><b style="font-family:var(--f-disp)">Merged.</b> '+
+        esc(G+" is final: "+score+(r.wentOt ? (r.inferredOt ? ", in overtime, read from the clock" : ", in overtime") : "")+". "+n+", "+r.players+" player lines, "+r.linked+" matched to profiles.")+
+        (r.struck ? ' '+r.struck+' sitting'+(r.struck === 1 ? '' : 's')+' struck.' : '')+
+        (r.overlong ? ' The sittings run past sixty minutes by more than a goal, so statistics staff were flagged (Rule 4.3).' : '')+
+        '<div class="sm-go" style="margin-top:8px"><a class="btn btn-ghost btn-sm" href="#/matchup/'+esc(res.gid)+'">Open the game</a></div></div>';
+  }
+  if (res.kind === "pickup") return '<div class="sm-res" id="smFindRes" role="status" tabindex="-1">'+CG._puResultHtml(res.o)+
+    '<div class="sm-go" style="margin-top:8px"><a class="btn btn-ghost btn-sm" href="#/hub/statsmgr?game='+esc(res.o.pickupGameId)+'">Edit this game</a></div></div>';
+  return '<div class="note red sm-res" id="smFindRes" role="status" tabindex="-1">'+esc(res.error)+
+    (res.pickupGameId ? ' <a class="btn btn-ghost btn-sm" href="#/hub/statsmgr?game='+esc(res.pickupGameId)+'">Open it</a>' : '')+'</div>';
+};
+/* one sitting row: a real checkbox (a game-night repaint sees it as unsaved, CG._pageDirty, and waits) */
+CG._smSitRowHtml = function(s, gr, st, sel){
+  var f = st.find, g = gr.game, checked = false, disabled = false, state;
+  var restartOn = f.restart && sel.one === gr;
+  if (s.onGame && !s.struck && !restartOn){ checked = true; disabled = true; state = "On this game. Every merge keeps it."; }
+  else if (s.struck){ disabled = true; state = "Struck when the game restarted. A struck sitting stays struck."; }
+  else if (s.onGame && restartOn){ checked = !!f.picked[s.matchId]; state = "On this game. Leave it unticked to strike it."; }
+  else if (gr.kind === "league" ? !s.canMerge : !s.canPickup){
+    disabled = true;
+    state = s.why || (s.pickupGameId ? "Imported as a pickup game." : gr.kind !== "not-league" ? "EA’s record of this sitting can’t be read."
+      : s.source === "archive" && !(st.find.ea && st.find.ea.state === "ok" && !st.find.paged) ? "Only in the league archive so far. It can be imported once EA lists it." : "EA no longer lists it, so it can’t be imported.");
+  }
+  else { checked = !!f.picked[s.matchId]; state = gr.kind === "not-league" ? "Not imported yet." : "Not on any game yet."; }
+  if (gr.locked){ disabled = true; }
+  if (!checked && !disabled && sel.sel.length >= 4) disabled = true;
+  if (s.fixture && s.fixture.inWindow === false && gr.kind === "league") state += " Ended outside this game’s window.";
+  var ended = Date.parse(s.endedAt) || 0, score = CG._smSitScore(s, g);
+  var b = (gr.kind === "league" ? "Sitting "+s._k+" · " : "")+CG._smLengthText(s)+(score ? " · "+score : "");
+  /* an unreadable sitting can come with no end time: say so rather than print the epoch */
+  var small = (ended ? "Ended "+(gr.kind === "league" ? CG.fmtTime(ended) : CG.fmtFull(ended)) : "No end time from EA")+" · "+state;
+  return '<label class="sv-opt sm-sit"><input type="checkbox" name="smSess" value="'+esc(s.matchId)+'"'+(checked ? ' checked' : '')+(disabled ? ' disabled' : '')+'>'+
+    '<span class="sv-box">'+CG.SM_TICK+'</span><span class="sv-lbl"><span><b>'+esc(b)+'</b><small>'+esc(small)+'</small></span></span></label>';
+};
+CG._smGroupHtml = function(gr, st, sel){
+  var f = st.find, g = gr.game;
+  var open = f.open[gr.key] != null ? f.open[gr.key] : (gr.focus || !gr.complete);
+  var head, notes = "";
+  if (gr.kind === "league" && g){
+    var onFile = gr.complete ? " · "+gr.sessions.length+" sitting"+(gr.sessions.length === 1 ? "" : "s")+" on file" : "";
+    head = CG._smBoard(g)+'<small>'+esc(CG.fmtFull(g.at)+(g.week ? " · "+CG._smStage(g) : "")+onFile)+'</small>';
+    if (g.forfeit) notes = gr.locked
+      ? '<div class="note" style="margin-bottom:10px">Forfeit on record against '+esc(g.forfeit)+'. Only a commissioner can change this game. <button type="button" class="btn btn-ghost btn-sm" data-sm-act="report" data-game="'+esc(g.id)+'">Report a mistake</button></div>'
+      : '<div class="note" style="margin-bottom:10px">The forfeit against '+esc(g.forfeit)+' stays on record. Undo it in Forfeit a game if it should not stand.</div>';
+  } else if (gr.kind === "needs-substitution" && g){
+    var s0 = gr.sessions[0], other = (s0.clubs || []).filter(function(c){ return !c.team; })[0], ours = (s0.clubs || []).filter(function(c){ return c.team; })[0];
+    head = '<span class="sm-line">'+(ours ? CG.crest(ours.team, 10, { decorative:true })+'<b>'+esc(ours.team)+'</b>' : '')+'<span class="sm-at">vs</span><b>'+esc(other ? (other.name || "EA club "+other.eaId) : "an outside club")+'</b></span>'+
+      '<small>'+esc("Near "+CG._smFx(g)+" · "+CG.fmtFull(g.at))+'</small>';
+    notes = '<div class="note" style="margin-bottom:10px">One EA club in these sittings is not linked to a league club. If '+esc(ours ? ours.team : "the club")+' played this game under a borrowed EA club, the league office records the substitution and files it (Rule 4.6); this desk can’t.</div>';
+  } else {
+    var cl = gr.sessions[0].clubs || [];
+    head = '<span class="sm-line"><b>'+esc((cl[0] && (cl[0].name || cl[0].team)) || "?")+'</b><span class="sm-at">vs</span><b>'+esc((cl[1] && (cl[1].name || cl[1].team)) || "?")+'</b></span>'+
+      '<small>'+esc(CG.fmtDay(gr.latest || CG.now())+" · Not a league game")+'</small>';
+  }
+  var alts = "";
+  if (gr.kind === "league") gr.sessions.forEach(function(s){
+    if (!(s.ambiguous || (s.fixture && s.fixture.inWindow === false)) || s.onGame || s.struck) return;
+    (s.alternatives || []).concat(f.moved[s.matchId] && s.fixture ? [s.fixture] : []).filter(function(x){ return x && x.gameId !== gr.gameId; }).slice(0, 2).forEach(function(x){
+      alts += '<p class="sm-alt">'+esc("Sitting "+s._k+" could also be "+x.away+" @ "+x.home+", "+CG.fmtFull(Date.parse(x.at) || 0)+".")+
+        ' <button type="button" class="btn btn-ghost btn-sm" data-sm-act="move" data-match="'+esc(s.matchId)+'" data-to="'+esc(x.gameId)+'">Move it there</button></p>';
+    });
+  });
+  return '<details class="sm-grp'+(gr.focus ? ' is-focus' : '')+'" data-key="'+esc(gr.key)+'" data-open="'+(open ? 1 : 0)+'"'+(open ? ' open' : '')+'>'+
+    '<summary class="sm-gh">'+head+'</summary>'+notes+
+    '<div class="sv-grid c1">'+gr.sessions.map(function(s){ return CG._smSitRowHtml(s, gr, st, sel); }).join("")+'</div>'+alts+'</details>';
+};
+/* the restart fold and the action bar share one slot: both change with every tick */
+CG._smBarSlotHtml = function(st, groups, sel){
+  var f = st.find, h = '<div id="smBarSlot">';
+  if (sel.restartable){
+    var G = sel.one.game ? CG._smFx(sel.one.game) : "This game";
+    h += '<details class="sm-adv" id="smAdv"'+(f.restart || f.adv ? ' open' : '')+'><summary>'+CG.ic("down", 14)+' Restarted game?</summary>'+
+      '<label class="check"><input type="checkbox" id="smLgRestart"'+(f.restart ? ' checked' : '')+'><span><b>'+esc(G)+' was restarted from 0:00</b>'+
+      '<small class="caption" style="display:block">Only for an illegal loadout (Rule 4.5) or a stop in the first ten minutes (Rule 4.3). Every sitting on this game you leave unticked is struck, with its stats, for good.</small></span></label></details>';
+  }
+  if (f.err) h += '<div class="note red" id="smFindErr" style="margin-top:10px">'+esc(f.err)+'</div>';
+  var bar = CG._smBar(st, groups, sel);
+  if (bar){
+    var busy = !!f.busy;
+    h += '<div class="sm-bar" id="smBar" role="region" aria-label="Selected sittings"><p class="sm-bar-t'+(bar.err ? ' err' : '')+'"><b>'+esc(bar.title)+'</b>'+esc(bar.caption)+'</p>'+
+      (bar.err
+        ? '<button type="button" class="btn btn-ghost" data-sm-act="clear">'+esc(bar.btn)+'</button>'
+        : '<button type="button" class="btn btn-chrome" id="smBarGo" data-sm-act="go"'+(busy ? ' disabled' : '')+'>'+esc(busy ? (f.busy === "merge" ? "Merging…" : bar.busy) : bar.btn)+'</button>')+'</div>';
+  }
+  return h + '</div>';
+};
+CG._smSessHtml = function(st){
+  var f = st.find, h = '<div id="smSess">';
+  var errNote = f.err ? '<div class="note red" id="smFindErr" style="margin-top:10px">'+esc(f.err)+'</div>' : '';
+  if (!f.club) return h + errNote + '</div>';
+  h += '<div class="sm-q" role="group" aria-labelledby="smQ2"><p class="sm-ql" id="smQ2" tabindex="-1">2. Tick the sittings of one game'+
+    '<small>A sitting is one EA game record. A game that lagged out and was resumed has two or more.</small></p>';
+  h += CG._smEaLineHtml(st) + CG._smFindResHtml(st);
+  if (f.loadErr && !f.sess) return h + '<div class="note red">'+esc(f.loadErr)+' <button type="button" class="btn btn-ghost btn-sm" data-sm-act="retry">Try again</button></div>'+errNote+'</div></div>';
+  if (!f.sess) return h + '<p class="caption">Loading '+esc(f.club.name)+'’s sittings from the league archive…</p>'+
+    '<div class="skel sm-skel"></div><div class="skel sm-skel"></div><div class="skel sm-skel"></div>'+errNote+'</div></div>';
+  var groups = CG._smGroups(f.sess, st), sel = CG._smSelection(st, groups);
+  var since = f.from ? CG.fmtDate(f.from) : null;
+  if (f.focus && !groups.some(function(gr){ return gr.gameId === f.focus; })){
+    var fg = CG._smGame(f.focus);
+    var eaSaid = f.ea && f.ea.state === "ok" && !f.paged ? " or on EA" : f.ea && f.ea.state === "wait" ? " (EA is still being checked)" : " for these dates (EA was not checked)";
+    h += '<div class="note" style="margin-bottom:10px">'+esc("No sittings for "+(fg ? CG._smFx(fg)+" ("+CG.fmtFull(fg.at)+")" : "that game")+" are in the league archive"+eaSaid+". If a club played it under another EA club, the league office files it once the substitution is on record (Rule 4.6).")+'</div>';
+  }
+  if (!groups.length) h += '<div class="note">'+esc("No sittings for "+f.club.name+(since ? " since "+since : "")+". EA keeps only a club’s last few private games; the league archive keeps every sitting the poller saw.")+'</div>';
+  h += '<div class="sm-grps">'+groups.map(function(gr){ return CG._smGroupHtml(gr, st, sel); }).join("")+'</div>';
+  if (f.loadErr) h += '<div class="note red" style="margin-top:10px">'+esc(f.loadErr)+' <button type="button" class="btn btn-ghost btn-sm" data-sm-act="retry">Try again</button></div>';
+  h += '<p class="caption" style="margin-top:10px">'+(since ? 'Showing sittings since '+esc(since)+'.' : '')+(f.paged ? ' Older sittings come from the league archive only.' : '')+'</p>'+
+    '<button type="button" class="btn btn-ghost btn-sm" data-sm-act="older"'+(f.loading ? ' disabled' : '')+'>'+(f.loading === "older" ? "Loading…" : "Show older sittings")+'</button>';
+  return h + CG._smBarSlotHtml(st, groups, sel) + '</div></div>';
+};
+CG._smFindHtml = function(st){
+  var f = st.find, q1;
+  if (f.club){
+    var lt = f.club.team ? CG.TEAM[f.club.team] : null;
+    q1 = '<div class="sm-picked">'+(lt ? CG.crest(lt.code, 14, { decorative:true }) : '')+'<span style="flex:1;min-width:0"><b>'+esc(f.club.name)+'</b>'+
+      '<small class="caption" style="display:block">EA club '+esc(f.club.eaId)+'</small></span>'+
+      '<button type="button" class="btn btn-ghost btn-sm" data-sm-act="club-change">Change club</button></div>';
+  } else {
+    var nolink = [];
+    q1 = '<div class="sm-crests">'+(CG.TEAMS || []).map(function(t){
+      if (!t.eaClubId) nolink.push(t.code);
+      return '<button type="button" class="sm-crest" data-sm-act="club" data-code="'+esc(t.code)+'" aria-label="'+esc(t.name)+'"'+
+        (t.eaClubId ? '' : ' disabled title="No EA club on file"')+'>'+CG.crest(t.code, 16, { decorative:true })+'<span>'+esc(t.code)+'</span></button>';
+    }).join("")+'</div>'+
+      nolink.map(function(c){ return '<p class="caption" style="margin:6px 0 0">'+esc(c)+' has no EA club on file yet, so its sittings can’t be listed here.</p>'; }).join("");
+  }
+  var body = '<div class="sm-q" role="group" aria-labelledby="smQ1"><p class="sm-ql" id="smQ1" tabindex="-1">1. Which club played?'+
+      '<small>For a league game either club works: both clubs’ EA records hold it.</small></p>'+q1+
+    '<label class="fld" for="smClub" style="margin:18px 0 6px"><span>Or search EA for any club</span></label>'+
+    '<p class="caption" style="margin:-2px 0 8px">Pickup games and scrims, or a club playing under another EA name.</p>'+
+    '<div style="display:flex;gap:8px"><input type="search" id="smClub" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false"'+
+      ' placeholder="EA club name, e.g. Chel Gaming Blades" value="'+esc(f.q)+'" style="flex:1;min-width:0">'+
+      '<button type="button" class="btn btn-ghost" id="smSearch" data-sm-act="search">Search</button></div>'+
+    CG.eaStatusLine()+'<div id="smClubsOut" aria-live="polite">'+CG._smClubsHtml(st)+'</div></div>'+CG._smSessHtml(st);
+  return '<section class="card sm-sticky" id="smFind"><div class="card-h"><h3>Find a game on EA</h3></div><div class="card-b">'+
+    '<p class="caption sm-one">For a league game that lagged out, or a pickup game: pick a club, tick the sittings that make up one game, then merge or import them. '+
+    'A merge adds up every sitting into one game, with overtime from the deciding sitting.</p>'+body+'</div></section>';
+};
+/* the one game picker, shared by the forfeit and correction cards: grouped by night, newest first, every game a radio
+   row drawn as a scoreboard. The filter box sits outside the repainted list, so typing is never re-rendered. */
+/* one line per game in the list (the night header carries the date and week); the picked game carries its full meta */
+CG._smGameRow = function(g, name, checked, full){
+  return '<label class="sv-opt sv-one sm-game'+(full ? ' is-full' : '')+'"><input type="radio" name="'+name+'" value="'+esc(g.id)+'"'+(checked ? ' checked' : '')+'><span class="sv-box"></span>'+
+    '<span class="sv-lbl">'+(full ? '' : '<span class="sm-t">'+esc(CG.fmtTime(g.at).replace(/ ET$/, ""))+(CG.isMakeUp && CG.isMakeUp(g) ? '<small>Make-up</small>' : '')+'</span>')+CG._smBoard(g)+
+    (full ? '<small>'+esc(CG.fmtDay(g.at)+" · "+CG._smMeta(g))+'</small>' : '')+'</span></label>';
+};
+CG._smPickListHtml = function(kind, st){
+  var k = st[kind], name = kind === "ff" ? "smFfGame" : "smFixGame", id = kind === "ff" ? "smFfPick" : "smFixPick";
+  var pg = CG._smPickerGames(kind, k), h = '<div id="'+id+'">';
+  if (k.gone) h += '<div class="note" style="margin-bottom:10px">That game is no longer on the schedule.</div>';
+  if (!pg.nights.length) h += '<div class="note">'+(k.q ? 'No game matches “'+esc(k.q)+'”.' : (kind === "fix" ? 'No filed results yet.' : 'No games yet.'))+'</div>';
+  pg.nights.forEach(function(n){
+    h += '<p class="sv-grp">'+esc(n.label)+'</p><div class="sv-grid c1">'+n.games.map(function(g){ return CG._smGameRow(g, name, g.id === k.game); }).join("")+'</div>';
+  });
+  if (pg.capped) h += '<p class="caption" style="margin-top:8px">Showing the newest 30 matches.</p>';
+  if (!k.q && pg.more) h += '<button type="button" class="btn btn-ghost btn-sm" data-sm-act="earlier" data-k="'+kind+'" style="margin-top:10px">Show earlier nights</button>';
+  return h + '</div>';
+};
+CG._smPickerHtml = function(kind, st){
+  var k = st[kind], q1 = kind === "ff" ? "smFfQ1" : "smFixQ1", find = kind === "ff" ? "smFfFind" : "smFixFind";
+  var g = CG._smGame(k.game);
+  if (k.game && !g){ k.game = null; k.picking = true; k.gone = true; }
+  var h = '<div class="sm-q" role="radiogroup" aria-labelledby="'+q1+'"><p class="sm-ql" id="'+q1+'" tabindex="-1">1. Which game?</p>';
+  if (g && !k.picking){
+    return h + '<div class="sv-grid c1">'+CG._smGameRow(g, kind === "ff" ? "smFfGame" : "smFixGame", true, true)+'</div>'+
+      '<button type="button" class="btn btn-ghost btn-sm" data-sm-act="change" data-k="'+kind+'" style="margin-top:8px">Change game</button></div>';
+  }
+  return h + '<div class="filters" style="margin-bottom:10px"><input type="search" id="'+find+'" placeholder="Club or date, e.g. DAL or Oct 28" aria-label="Find a game" value="'+esc(k.q)+'" autocomplete="off"></div>'+
+    CG._smPickListHtml(kind, st)+'</div>';
+};
+CG._smR71Html = function(g){
+  var c = CG._smInvolved(g);
+  return c ? '<div class="note chr" style="margin:12px 0">This game involves your club ('+esc(c)+'). Under Rule 7.1 an official does not rule on a forfeit or correct a result in a game involving a club they play for or manage: hand it to another statistics staffer or a commissioner.</div>' : '';
+};
+CG._smFfFormHtml = function(g, st){
+  var f = st.ff, res = CG._smResult(g), h = '<div id="smFfForm">'+CG._smR71Html(g);
+  if (f.res) h += CG._smResNote("smFfRes", f.res);
+  if (g.forfeit){
+    var noIce = CG.forfeitNoIce(g, res), winner = g.forfeit === g.home ? g.away : g.home;
+    h += '<div class="note chr"><b style="font-family:var(--f-disp)">Forfeit on record: '+esc(g.forfeit)+'</b><br>'+
+      esc(noIce ? "No-show, ruled 1-0 to "+winner+"." : "Result kept: "+(g.homeScore != null ? CG._smScoreText(g.away, g.home, g.awayScore, g.homeScore) : "the played score")+" stands, and "+g.forfeit+" takes the forfeit loss (FFL).")+'</div>';
+    if (!CG._smCommish()) h += '<p class="caption" style="margin-top:8px">Only a commissioner can change or undo a forfeit. If this one is wrong, report it and every commissioner is told at once.</p>';
+    else if (!noIce) h += '<p class="caption" style="margin-top:8px">Undo erases the played score too: the game goes back to scheduled with no score.</p>';
+    /* v3.52: only a commissioner reverses a ruling; staff report a mistake to them */
+    h += '<div class="sm-go">'+(CG.auth && CG.auth.role === "commish"
+        ? '<button class="btn btn-ghost" id="smFfUndo">Undo a forfeit</button>'
+        : '<button class="btn btn-ghost" id="smFfReport" title="Only a commissioner can reverse a forfeit">Report a mistake</button>')+'</div>';
+    return h + '</div>';
+  }
+  var kd = CG._smKinds(g), kind = f.kind && kd[f.kind] && kd[f.kind].ok ? f.kind : kd.pre;
+  var opt = function(v, b, s, ko){
+    return '<label class="sv-opt sv-one"><input type="radio" name="smFfKind" value="'+v+'"'+(kind === v ? ' checked' : '')+(ko.ok ? '' : ' disabled')+'><span class="sv-box"></span>'+
+      '<span class="sv-lbl"><b>'+b+'</b><small>'+s+'</small>'+(ko.why ? '<small class="sm-why">'+esc(ko.why)+'</small>' : '')+'</span></label>';
+  };
+  h += '<div class="sm-q" role="radiogroup" aria-labelledby="smFfQ2"><p class="sm-ql" id="smFfQ2" tabindex="-1">2. What happened?</p><div class="sv-grid c1">'+
+    opt("noshow", "No-show or late", "Didn’t show, wasn’t ready ten minutes after puck drop, or conceded ahead of time (Rule 3.2). The other club wins 1-0 with no player stats, and the game counts toward no one’s weekly games.", kd.noshow)+
+    opt("dc3", "Three disconnections, or abandoned", "The game was played. The score and every stat line stand; the club charged takes a forfeit loss, marked FFL, and the game counts toward weekly games (Rule 4.3).", kd.dc3)+'</div>'+
+    (!kd.dc3.ok ? '<div class="sm-go" style="margin-top:8px"><button type="button" class="btn btn-ghost btn-sm" data-sm-act="focus" data-game="'+esc(g.id)+'">Find its sittings</button></div>' : '')+
+    '<p class="caption" style="margin-top:8px">Neither club showed? That is a void, not a forfeit (Rule 3.2): the officiating department or a commissioner voids it from the Officials desk.</p></div>';
+  var final = g.status === "final" && g.homeScore != null;
+  var who = function(code, side){
+    var id = (CG.lg && CG.lg._codeToId && CG.lg._codeToId[code]) || "", mine = side === "Away" ? g.awayScore : g.homeScore, theirs = side === "Away" ? g.homeScore : g.awayScore;
+    var lead = final ? (mine > theirs ? " · ahead "+mine+"-"+theirs : mine < theirs ? " · behind "+mine+"-"+theirs : " · level "+mine+"-"+theirs) : "";
+    return '<label class="sv-opt sv-one sm-club"><input type="radio" name="smFfWho" value="'+esc(id)+'"'+(f.who && f.who === id ? ' checked' : '')+'><span class="sv-box"></span>'+
+      '<span class="sv-lbl">'+CG.crest(code, 16, { decorative:true })+'<span><b>'+esc(code+" · "+CG._smName(code))+'</b><small>'+esc(side+lead)+'</small></span></span></label>';
+  };
+  h += '<div class="sm-q" role="radiogroup" aria-labelledby="smFfQ3"><p class="sm-ql" id="smFfQ3" tabindex="-1">'+(kind === "dc3" ? "3. Which club is charged?" : "3. Which club didn’t show?")+
+    (kind === "dc3" ? '<small>The club with the third disconnection. For an abandoned game, the club that was behind when play stopped (Rule 4.3).</small>' : '')+'</p>'+
+    '<div class="sv-grid">'+who(g.away, "Away")+who(g.home, "Home")+'</div></div>';
+  h += '<label class="fld"><span>Note for the record (optional)</span><input id="smFfWhy" maxlength="300" placeholder="e.g. DAL had four players at 9:45 PM" value="'+esc(f.why)+'">'+
+    '<span class="hint">Kept in the league’s audit log. Not posted anywhere.</span></label>'+CG._smFfStateHtml(g, st);
+  return h + '</div>';
+};
+/* the part of the forfeit form a kind or club change repaints: never the inputs being used */
+CG._smFfStateHtml = function(g, st){
+  var f = st.ff, kd = CG._smKinds(g), kind = f.kind && kd[f.kind] && kd[f.kind].ok ? f.kind : kd.pre;
+  var code = f.who ? (CG.TEAMS || []).filter(function(t){ return t.id === f.who; }).map(function(t){ return t.code; })[0] : null;
+  var need = !kind ? "Pick what happened." : !code ? "Pick the club." : "";
+  return '<div id="smFfState"><p class="caption" style="margin-top:12px">'+esc(CG._smFfWill(g, kind, code))+'</p>'+
+    '<div class="sm-go"><button type="button" class="btn btn-ink" id="smFfGo"'+(need || f.busy ? ' disabled' : '')+'>'+(f.busy ? "Ruling…" : "Rule the forfeit")+'</button>'+
+    (need ? '<span class="caption">'+esc(need)+'</span>' : '')+'</div></div>';
+};
+CG._smResNote = function(id, res){
+  return '<div class="note '+(res.ok ? 'grn' : 'red')+' sm-res" id="'+id+'" role="status" tabindex="-1">'+(res.b ? '<b style="font-family:var(--f-disp)">'+esc(res.b)+'</b> ' : '')+esc(res.text)+'</div>';
+};
+CG._smForfeitHtml = function(st){
+  var g = CG._smGame(st.ff.game);
+  return CG._smCard("smForfeit", "Forfeit a game", '<span class="chip chip-warn">Changes standings</span>',
+    "For a club that didn’t show, or a played game that ended on a third disconnection or was abandoned.",
+    CG._smPickerHtml("ff", st)+(g ? CG._smFfFormHtml(g, st) : (st.ff.res ? CG._smResNote("smFfRes", st.ff.res) : "")));
+};
+CG._smFixFormHtml = function(g, st){
+  var f = st.fix, h = '<div id="smFixForm">'+CG._smR71Html(g);
+  if (f.res) h += CG._smResNote("smFixRes", f.res);
+  if (g.forfeit && !CG._smCommish()){
+    return h + '<div class="note">This game carries a forfeit ruling ('+esc(g.forfeit)+'). Only a commissioner can change its score.</div>'+
+      '<div class="sm-go"><button type="button" class="btn btn-ghost" id="smFixReport">Report a mistake</button></div></div>';
+  }
+  var box = CG._smBoxGoals(g), chk = CG._smFixCheck(g, f);
+  var row = function(code, side, id, val){
+    return '<div class="sm-sc-row"><label for="'+id+'">'+CG.crest(code, 15, { decorative:true })+'<span><b>'+esc(CG._smName(code))+'</b><small>'+side+'</small></span></label>'+
+      '<input id="'+id+'" type="number" inputmode="numeric" min="0" max="30" value="'+esc(val)+'" aria-describedby="smFixWas"></div>';
+  };
+  h += (g.forfeit ? '<p class="caption">The forfeit ruling stays on the game.</p>' : '')+
+    '<p class="sm-ql" style="margin-top:14px">2. The right result</p><div class="sm-sc-rows">'+row(g.away, "Away", "smFixA", f.a)+row(g.home, "Home", "smFixH", f.h)+'</div>'+
+    '<p class="caption" id="smFixWas" style="margin-top:8px">'+esc("On record: "+CG._smScoreText(g.away, g.home, g.awayScore, g.homeScore)+(g.ot ? " in overtime." : " in regulation.")+
+      (box ? " The box score adds up to "+CG._smScoreText(g.away, g.home, box.a, box.h)+"." : ""))+'</p>'+
+    '<label class="check"><input id="smFixOt" type="checkbox"'+(f.ot ? ' checked' : '')+'><span>Ended in overtime<small class="caption" style="display:block">A one-goal game decided after sixty minutes.</small></span></label>'+
+    '<p class="caption sm-msg'+(chk.bad ? ' bad' : '')+'" id="smFixMsg">'+esc(chk.msg)+'</p>'+
+    '<div class="sm-go"><button type="button" class="btn btn-ink" id="smFixGo"'+(chk.ok && !f.busy ? '' : ' disabled')+'>'+(f.busy ? "Correcting…" : "Correct the result")+'</button></div>';
+  return h + '</div>';
+};
+CG._smFixHtml = function(st){
+  var g = CG._smGame(st.fix.game);
+  return CG._smCard("smFix", "Correct a filed result", '<span class="chip chip-warn">Changes standings</span>',
+    "Fixes the final score or the overtime mark of a league game. Player stats are not changed here.",
+    '<p class="caption" style="margin:-6px 0 12px">A sitting missing from the game? Merge it in Find a game on EA instead: that rebuilds the score and the stats together.</p>'+
+    CG._smPickerHtml("fix", st)+(g ? CG._smFixFormHtml(g, st) : (st.fix.res ? CG._smResNote("smFixRes", st.fix.res) : "")));
+};
+CG._smListHtml = function(st){
+  var L = st.list, body;
+  if (L.err) body = '<div class="note red">Could not load the pickup games: '+esc(L.err)+'. <button type="button" class="btn btn-ghost btn-sm" data-sm-act="listretry">Try again</button></div>';
+  else if (!L.rows) body = '<div class="skel sm-skel"></div><div class="skel sm-skel"></div>';
+  else if (!L.rows.length) body = '<div class="note">No pickup games yet. Import one in Find a game on EA, above.</div>';
+  else body = '<div class="tblwrap"><table class="tbl keepcols"><thead><tr><th class="tleft">Game</th><th>Date</th><th>Lines</th><th><span class="sr-only">Manage</span></th></tr></thead><tbody>'+
+    L.rows.map(function(g){
+      var cnt = (g.pickup_stats && g.pickup_stats[0] && g.pickup_stats[0].count) || 0;
+      return '<tr><td class="tleft"><b>'+esc((g.club_a || "?")+" "+(g.score_a == null ? "?" : g.score_a)+", "+(g.club_b || "?")+" "+(g.score_b == null ? "?" : g.score_b))+'</b>'+(g.went_ot ? ' <span class="caption">· OT</span>' : '')+'</td>'+
+        '<td class="mono" style="font-size:11px">'+esc(g.played_at ? CG.fmtDate(g.played_at) : "")+'</td><td>'+cnt+'</td>'+
+        '<td style="white-space:nowrap"><a class="btn btn-ghost btn-sm" href="#/hub/statsmgr?game='+esc(g.id)+'">Edit</a> '+
+        '<button type="button" class="btn btn-ghost btn-sm" data-sm-act="pudel" data-id="'+esc(g.id)+'" data-a="'+esc(g.club_a || "?")+'" data-b="'+esc(g.club_b || "?")+'" data-n="'+cnt+'" style="color:var(--red-ink)">Delete</button></td></tr>';
+    }).join("")+'</tbody></table></div>'+(L.rows.length >= 60 ? '<p class="caption" style="margin-top:8px">Showing the newest 60.</p>' : '');
+  return CG._smCard("smList", "Pickup games on file", '<span class="chip">Profiles only</span>',
+    "Pickup games imported from EA. They show on player profiles and never count toward league standings, eligibility or ratings.",
+    (L.res ? CG._smResNote("smListRes", L.res) : '')+body);
+};
+/* the pickup import's result, one definition for this desk and #/pickup-import */
+CG._puResultHtml = function(o){
+  var players = (o.players || []).slice().sort(function(a, b){ return (a.matched ? 1 : 0) - (b.matched ? 1 : 0); });
+  var matched = players.filter(function(p){ return p.matched; }).length, unmatched = players.length - matched;
+  var club = function(p){ return p.side === "A" ? (o.clubA || "Club A") : p.side === "B" ? (o.clubB || "Club B") : ("Club "+(p.side || "?")); };
+  return '<div class="note grn"><b style="font-family:var(--f-disp)">Imported.</b> '+
+    esc(((o.sessions || 1) > 1 ? o.sessions+" sittings merged into one pickup game. " : "")+matched+" of "+players.length+" players matched to CGHL profiles"+
+      (unmatched ? ", "+unmatched+" unmatched (their EA name didn’t match a gamertag)" : "")+". Pickup stats now show on the matched profiles.")+'</div>'+
+    '<div class="tasklist" style="margin-top:12px">'+players.map(function(p){
+      return '<div class="titem"><span class="t-dot '+(p.matched ? "grn" : "red")+'"></span><span style="flex:1">'+
+        esc((p.name || "?")+" · "+club(p)+" · "+(+p.goals || 0)+" G, "+(+p.assists || 0)+" A"+(p.matched ? "" : " · no profile"))+'</span></div>';
+    }).join("")+'</div>';
+};
+CG.hubStatsManager = function(qs){
+  if (!CG.isStatsStaff()) return CG.unauthorized("The stats manager is limited to statistics staff.");
+  qs = qs || {};
+  var head = CG.deskHead("Statistics desk", "Stats manager", esc("Merge a lagged-out game’s sittings, rule a forfeit, correct a filed result, or import a pickup game from EA. "+
+    "Merges, forfeits and corrections change league results; a pickup game never touches standings, eligibility or ratings."));
+  if (qs.game) return head + '<div id="smBody"><p class="caption">Loading…</p></div>';
+  if (!CG.lg) return head + '<p class="caption">Loading the league…</p>';
+  var st = CG._smS();
+  return head + '<div class="sm" id="smDesk">'+CG._smTodoHtml(st)+CG._smFindHtml(st)+CG._smForfeitHtml(st)+CG._smFixHtml(st)+CG._smListHtml(st)+'</div>'+
+    CG.deskCeiling(esc("Statistics staff merge sittings, rule forfeits and correct results. Only a commissioner can change or undo a game that carries a forfeit: Report a mistake tells every commissioner at once. "+
+      "A game neither club played is voided by the officiating department or a commissioner, not forfeited (Rule 3.2)."));
+};
+
+/* -- Stats manager desk v4.36: wiring -- */
+/* repaint ONE section by id from state, keeping focus on the same control and the EA status line's last reading */
+CG._smPaint = function(id, html){
+  var el = document.getElementById(id); if (!el) return null;
+  var a = document.activeElement, key = null;
+  if (a && a !== document.body && el.contains(a))
+    key = a.id ? "#"+a.id : (a.name && a.value ? 'input[name="'+a.name+'"][value="'+a.value+'"]' : (a.getAttribute("data-sm-act") ? '[data-sm-act="'+a.getAttribute("data-sm-act")+'"]' : null));
+  var oldEa = el.querySelector("[data-ea-status]");
+  el.outerHTML = html;
+  var nu = document.getElementById(id);
+  if (nu && oldEa){ var ne = nu.querySelector("[data-ea-status]"); if (ne) ne.innerHTML = oldEa.innerHTML; }
+  if (nu && key){ var back = nu.querySelector(key) || (nu.matches && nu.matches(key) ? nu : null); if (back) try { back.focus({ preventScroll:true }); } catch(e){} }
+  CG._smFocusNext();
+  return nu;
+};
+/* keep the thing the user is looking at still while the content above it changes height (no layout animation).
+   behavior "instant": the site sets html{scroll-behavior:smooth}. */
+CG._smAnchor = function(find, paint){
+  var a = find(), y = a && a.getBoundingClientRect().top; paint();
+  var b = find(); if (a && b){ var d = b.getBoundingClientRect().top - y; if (d) window.scrollBy({ top:d, left:0, behavior:"instant" }); }
+};
+/* v4.36: the only enter motion on this desk, for things that appear because the user acted (sittings after a lookup, the
+   form under a picked game, a result). Never called from a render, so a pulse repaint has no motion. */
+CG._smEnter = function(el){
+  if (!el || !el.animate) return;
+  var rm = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  el.animate(rm ? [{ opacity:0 }, { opacity:1 }] : [{ opacity:0, transform:"translateY(6px)" }, { opacity:1, transform:"none" }],
+    { duration:rm ? 120 : 180, easing:"cubic-bezier(.22,.9,.3,1)" });
+};
+CG._smFocusNext = function(){
+  var st = CG._smS(); if (!st.focusNext) return;
+  var el = document.getElementById(st.focusNext);
+  if (el){ try { el.focus({ preventScroll:true }); } catch(e){} st.focusNext = null; }
+};
+CG._smTick = function(){
+  if (CG._smTimer) return;
+  CG._smTimer = setInterval(function(){
+    var f = CG._smS().find, done = true;
+    if (f.searching){ done = false; var q = document.getElementById("smWaitQ"); if (q) q.textContent = "("+Math.round((Date.now() - f.searchT0) / 1000)+" s)"; }
+    if (f.ea && f.ea.state === "wait"){ done = false; var e = document.getElementById("smWaitE"); if (e) e.textContent = "("+Math.round((Date.now() - f.ea.t0) / 1000)+" s)"; }
+    if (done){ clearInterval(CG._smTimer); CG._smTimer = null; }
+  }, 1000);
+};
+CG._smPaintSess = function(){
+  var st = CG._smS();
+  CG._smAnchor(function(){ return document.querySelector("#smSess .sm-grp.is-focus") || document.querySelector('#smSess input[name="smSess"]:checked:not(:disabled)'); },
+    function(){ CG._smPaint("smSess", CG._smSessHtml(st)); });
+};
+/* a club's sittings, in two phases: the league archive at once (no EA call, so a dead bot server never blocks a merge),
+   then EA through the bot server for anything newer. Every reply for a club that is no longer picked is dropped. */
+CG._smLoad = function(opts){
+  opts = opts || {};
+  var st = CG._smS(), f = st.find; if (!f.club) return;
+  var req = opts.before ? st.seq : ++st.seq, club = f.club.eaId, first = !f.sess;
+  if (opts.keep && !opts.before && f.ea && f.ea.state === "wait") opts.ea = true;   /* the old EA reply is dropped with the old sequence */
+  f.loadErr = null;
+  if (opts.before){ f.loading = "older"; f.paged = true; }
+  else if (!opts.keep){ f.sess = null; f.ea = null; f.from = null; f.paged = false; }
+  CG._smPaint("smSess", CG._smSessHtml(st));
+  var p1 = { clubId:club, ea:false }; if (opts.before) p1.before = opts.before;
+  CG._smLeagueApi({ leagueSessions:p1 }).then(function(o){
+    if (req !== st.seq || !f.club || f.club.eaId !== club) return;
+    f.loading = null;
+    if (!o || o.error){ f.loadErr = (o && o.error) || "The server did not answer."; CG._smPaint("smSess", CG._smSessHtml(st)); return; }
+    f.sess = CG._smUnion(f.sess, o.sessions || []);
+    if (o.archiveFrom && (!f.from || o.archiveFrom < f.from)) f.from = o.archiveFrom;
+    if (opts.before) CG._smPaintSess();
+    else { var el = CG._smPaint("smSess", CG._smSessHtml(st)); if (first && el) CG._smEnter(el.querySelector(".sm-grps")); }
+    if (opts.ea) CG._smLoadEa(req);
+  }).catch(function(e){
+    if (req !== st.seq) return;
+    f.loading = null; f.loadErr = e.message; CG._smPaint("smSess", CG._smSessHtml(st));
+  });
+};
+CG._smLoadEa = function(req){
+  var st = CG._smS(), f = st.find; if (!f.club) return;
+  var club = f.club.eaId;
+  f.ea = { state:"wait", t0:Date.now() }; CG._smPaint("smEaLine", CG._smEaLineHtml(st)); CG._smTick();
+  CG._smLeagueApi({ leagueSessions:{ clubId:club, ea:true } }).then(function(o){
+    if (req !== st.seq || !f.club || f.club.eaId !== club) return;
+    if (!o || o.error){ f.ea = { state:"fail", error:(o && o.error) || "The server did not answer." }; CG._smPaint("smEaLine", CG._smEaLineHtml(st)); return; }
+    var seen = {}; (f.sess || []).forEach(function(s){ seen[s.matchId] = 1; });
+    var added = (o.sessions || []).filter(function(s){ return !seen[s.matchId]; }).length;
+    f.sess = CG._smUnion(f.sess, o.sessions || []);
+    f.ea = o.ea && o.ea.ok === false && !o.ea.skipped ? { state:"fail", error:o.ea.error || "" } : { state:"ok", added:added };
+    CG._smPaintSess();
+  }).catch(function(e){
+    if (req !== st.seq) return;
+    f.ea = { state:"fail", error:e.message }; CG._smPaint("smEaLine", CG._smEaLineHtml(st));
+  });
+};
+CG._smPickClub = function(club){
+  var st = CG._smS(), f = st.find;
+  f.club = club; f.focus = null; f.focusBefore = null; f.picked = {}; f.moved = {}; f.restart = false; f.adv = false; f.res = null; f.err = null; f.open = {}; f.clubs = null; f.clubsErr = null;
+  st.focusNext = "smQ2";
+  CG._smPaint("smFind", CG._smFindHtml(st));
+  CG._smLoad({ ea:true });
+};
+/* jump from a game (Needs attention, the forfeit card) to its sittings, through either club's EA records */
+CG._smFocusGame = function(id){
+  var st = CG._smS(), f = st.find, g = CG._smGame(id); if (!g) return;
+  var t = [g.home, g.away].map(function(c){ return CG.TEAM[c]; }).filter(function(x){ return x && x.eaClubId; })[0];
+  if (!t){ f.err = "Neither "+g.away+" nor "+g.home+" has an EA club on file, so this game’s sittings can’t be listed."; CG._smPaint("smFind", CG._smFindHtml(st)); var e0 = document.getElementById("smFindErr"); if (e0) e0.scrollIntoView({ block:"center" }); return; }
+  var older = CG.now() - g.at >= 9 * 86400000;
+  f.club = { eaId:t.eaClubId, name:t.name, team:t.code }; f.focus = id; f.focusBefore = older ? CG._smEtDay(g.at + 2 * 86400000) : null;
+  f.picked = {}; f.moved = {}; f.restart = false; f.adv = false; f.res = null; f.err = null; f.open = {};
+  st.focusNext = "smQ2";
+  CG._smPaint("smFind", CG._smFindHtml(st));
+  var el = document.getElementById("smFind"); if (el) el.scrollIntoView({ block:"start" });
+  if (!older) CG._smLoad({ ea:true });
+  /* an older game: the archive only, from the two days after it back (EA keeps only a club's last few games) */
+  else { ++st.seq; f.sess = null; f.ea = null; f.from = null; CG._smLoad({ before:f.focusBefore }); }
+};
+CG._smSearch = function(){
+  var st = CG._smS(), f = st.find, inp = document.getElementById("smClub");
+  if (inp) f.q = inp.value;
+  var q = String(f.q || "").trim();
+  if (q.length < 2){ f.clubs = null; f.clubsErr = "Type at least two letters of the club’s EA name."; CG._smClubsPaint(); return; }
+  var req = ++st.qseq;
+  f.searching = req; f.searchT0 = Date.now(); f.clubsErr = null; f.clubs = null;
+  CG._smClubsPaint(); CG._smTick();
+  CG._smApi({ action:"search", clubName:q }).then(function(o){
+    if (req !== st.qseq) return;
+    f.searching = 0;
+    if (!o || o.error) f.clubsErr = (o && o.error) || "The server did not answer.";
+    else f.clubs = o.clubs || [];
+    CG._smClubsPaint();
+  }).catch(function(e){
+    if (req !== st.qseq) return;
+    f.searching = 0; f.clubsErr = e.message; CG._smClubsPaint();
+  });
+};
+/* the bar's button: a league group is previewed (nothing written), confirmed with exactly what will happen and what
+   gets posted, then merged in ONE call (one box score, one notice: never one leagueMerge per sitting) */
+CG._smGo = function(){
+  var st = CG._smS(), f = st.find; if (f.busy || !f.sess) return;
+  var groups = CG._smGroups(f.sess, st), sel = CG._smSelection(st, groups), bar = CG._smBar(st, groups, sel);
+  if (!bar || bar.err) return;
+  var paintBar = function(){ CG._smPaint("smBarSlot", CG._smBarSlotHtml(st, CG._smGroups(f.sess, st), CG._smSelection(st, CG._smGroups(f.sess, st)))); };
+  f.err = null;
+  if (bar.mode === "pickup"){
+    f.busy = "import"; paintBar();
+    CG._smApi({ action:"import", clubId:f.club.eaId, matchIds:sel.sel }).then(function(o){
+      f.busy = null;
+      /* an error belongs beside the button that was pressed (the bar is sticky, the result note is at the top) */
+      if (!o || o.error){ f.err = (o && o.error) || "The import did not answer."; paintBar(); return; }
+      f.res = { kind:"pickup", o:o }; f.picked = {};
+      (f.sess || []).forEach(function(s){ if (sel.sel.indexOf(s.matchId) >= 0){ s.pickupGameId = o.pickupGameId; s.canPickup = false; } });
+      st.list.at = 0; CG._smLoadList();
+      st.focusNext = "smFindRes"; CG._smPaintSess();
+      var note = document.getElementById("smFindRes"); if (note) note.scrollIntoView({ block:"start" });
+    }).catch(function(e){ f.busy = null; f.err = "Import failed: "+e.message; paintBar(); });
+    return;
+  }
+  var gr = sel.one, g = gr.game, gid = gr.gameId, ids = sel.sel.slice(), restart = !!f.restart;
+  var fromEa = ids.filter(function(id){ var s = sel.byId[id] && sel.byId[id].s; return s && s.source === "ea"; });
+  var req = { leagueMerge: { gameId: gid, matchIds: ids, restart: restart } };
+  if (fromEa.length) req.leagueMerge.eaClubId = f.club.eaId;
+  var G = g ? CG._smFx(g) : "this game", n = ids.length;
+  f.busy = "preview"; paintBar();
+  CG._smLeagueApi(CG._smWith(req, { preview:true })).then(function(r){
+    f.busy = null;
+    if (!r || r.error || !r.ok){ f.err = (r && r.error) || "The server did not confirm the preview. Nothing was changed."; paintBar(); return; }
+    var sc = CG._smHA(r.score), score = g && sc ? CG._smScoreText(g.away, g.home, sc.a, sc.h) : String(r.score || "");
+    var cur = r.current && r.current.score ? CG._smHA(r.current.score) : null, curT = g && cur ? CG._smScoreText(g.away, g.home, cur.a, cur.h) : "";
+    var ps = [];
+    if (r.unpublish) ps.push(G+" is final now ("+curT+"). "+(r.heldWhy || "These sittings add up to only "+r.minutes+" of 60 minutes.")+" Going ahead takes that result off the standings and holds the game. Nothing is posted, so #game-scores keeps the old final until the game is published again.");
+    else if (r.held) ps.push(G+" is held, and no result is published. "+(r.heldWhy || ""));
+    else ps.push(G+" files as final: "+score+(r.wentOt ? (r.inferredOt ? " in overtime, read from the clock." : " in overtime.") : " in regulation.")+" The box score is rebuilt from these sittings, each player’s stats added up.");
+    if (!r.unpublish) ps.push(r.posts === "final" ? "The final score posts in #game-scores." : r.posts === "corrected" ? "The score changes from "+curT+", so a Corrected line posts in #game-scores." : "Nothing is posted in #game-scores.");
+    var label = function(id){ var s = sel.byId[id] && sel.byId[id].s, t = s && Date.parse(s.endedAt); return s ? "Sitting "+s._k+" ("+(s.minutes != null ? s.minutes+" min" : "length unknown")+(t ? ", ended "+CG.fmtTime(t) : "")+")" : "sitting "+id; };
+    if ((r.strike || []).length) ps.push("Struck for good, with their stats: "+r.strike.map(label).join(", ")+".");
+    if ((r.outsideWindow || []).length) ps.push(r.outsideWindow.map(label).join(" and ")+" ended outside this game’s window.");
+    if ((r.fromEa || []).length) ps.push(r.fromEa.length === 1 ? "1 sitting is taken from EA and saved to the league archive." : r.fromEa.length+" sittings are taken from EA and saved to the league archive.");
+    if (r.overlong) ps.push("The sittings run past sixty minutes and the margin is more than one goal, so statistics staff will be flagged (Rule 4.3).");
+    if (r.links) ps.push("This also links "+r.links.team+"’s EA club to “"+(r.links.name || "EA club "+r.links.eaId)+"” ("+r.links.eaId+"), so its games import on their own from now on. Make sure that is "+r.links.team+"’s own club.");
+    if (g && g.forfeit) ps.push("The forfeit stays on record. Undo it in Forfeit a game if it should not stand.");
+    var title = restart ? "Re-file "+G+" from "+n+" sitting"+(n === 1 ? "" : "s")+"?" : sel.reFile ? "File "+G+" from its "+n+" sitting"+(n === 1 ? "" : "s")+"?"
+      : n === 1 ? "File 1 sitting into "+G+"?" : "Merge "+n+" sittings into "+G+"?";
+    var ok = r.unpublish ? "Hold the game" : restart ? "Strike and re-file" : n === 1 || sel.reFile ? "File it" : "Merge";
+    CG.confirm(title, ps, ok, function(){
+      f.busy = "merge"; paintBar();
+      CG._smLeagueApi(r.unpublish ? CG._smWith(req, { unpublish:true }) : req).then(function(r2){
+        f.busy = null;
+        if (!r2 || r2.error || !r2.ok){ f.err = (r2 && r2.error) || "The server did not confirm the merge. Check the game before trying again."; paintBar(); return; }
+        f.res = { kind:"merge", gid:gid, r:r2 }; f.picked = {}; f.restart = false; f.adv = false; st.focusNext = "smFindRes"; st.refocus = "smFindRes";
+        /* the merged rows read right at once, whichever archive page they came from; then that page is reloaded */
+        (f.sess || []).forEach(function(s){
+          if (ids.indexOf(s.matchId) >= 0){ s.onGame = true; s.struck = false; s.archive = { status:"merged", gameId:gid }; }
+          else if ((r.strike || []).indexOf(s.matchId) >= 0){ s.onGame = false; s.struck = true; s.canMerge = false; }
+        });
+        CG._smLoad(g && CG.now() - g.at >= 9 * 86400000 ? { before:CG._smEtDay(g.at + 2 * 86400000) } : { ea:false, keep:true });
+        if (CG.reloadLeague) CG.reloadLeague();
+      }).catch(function(e2){ f.busy = null; f.err = e2.message; paintBar(); });
+    });
+  }).catch(function(e){ f.busy = null; f.err = e.message; paintBar(); });
+};
+CG._smFfGo = function(){
+  var st = CG._smS(), f = st.ff, g = CG._smGame(f.game); if (!g || f.busy) return;
+  var kd = CG._smKinds(g), kind = f.kind && kd[f.kind] && kd[f.kind].ok ? f.kind : kd.pre, who = f.who;
+  var code = (CG.TEAMS || []).filter(function(t){ return t.id === who; }).map(function(t){ return t.code; })[0];
+  if (!kind || !code) return;
+  var inv = CG._smInvolved(g), id = g.id;
+  CG.confirm("Rule a forfeit against "+code+"?", [CG._smFfWill(g, kind, code), CG._smFfPosts(g, kind), "Only a commissioner can undo a forfeit."].concat(inv ? ["This game involves your club ("+inv+") (Rule 7.1)."] : []),
+    "Rule the forfeit", function(){
+      f.busy = true; CG._smPaint("smFfState", CG._smFfStateHtml(g, st));
+      Promise.resolve(CG.sb.rpc("forfeit_game", { p_game:id, p_forfeiting_team:who, p_reason:f.why || null, p_keep_result:kind === "dc3" })).then(function(r){
+        f.busy = false;
+        if (r.error){ f.res = { ok:false, text:r.error.message || "Couldn’t rule the forfeit." }; }
+        else if (!r.data || !r.data.ok){ f.res = { ok:false, text:"The server did not confirm the ruling. Check the game before trying again." }; }
+        else {
+          var d = r.data, wcode = (CG.TEAMS || []).filter(function(t){ return t.id === d.winner; }).map(function(t){ return t.code; })[0] || (code === g.home ? g.away : g.home);
+          var sc = CG._smHA(d.score), txt = d.kept_result
+            ? CG._smFx(g)+": "+(sc ? CG._smScoreText(g.away, g.home, sc.a, sc.h) : "the played score")+" stands with every stat line, and "+code+" takes the forfeit loss (FFL)."
+            : CG._smFx(g)+": "+wcode+" wins 1-0 by forfeit (no-show). It counts toward no one’s weekly games.";
+          f.res = { ok:true, b:"Forfeit ruled.", text:txt+(d.was_held ? " It was held; it is final now." : "") };
+          f.kind = null; f.who = null; f.why = "";
+        }
+        st.focusNext = "smFfRes"; st.refocus = f.res.ok ? "smFfRes" : null;
+        CG._smPaint("smForfeit", CG._smForfeitHtml(st));
+        if (f.res.ok && CG.reloadLeague) CG.reloadLeague();
+      }, function(e){ f.busy = false; f.res = { ok:false, text:e.message }; st.focusNext = "smFfRes"; CG._smPaint("smForfeit", CG._smForfeitHtml(st)); });
+    });
+};
+CG._smFfUndo = function(){
+  var st = CG._smS(), f = st.ff, g = CG._smGame(f.game); if (!g || !g.forfeit) return;
+  var noIce = CG.forfeitNoIce(g, CG._smResult(g)), id = g.id;
+  CG.confirm("Undo the forfeit on "+CG._smFx(g)+"?",
+    noIce ? ["The game goes back to scheduled with no score, and a Reversed line posts in #game-scores."]
+      : ["The game goes back to scheduled and its played score "+(g.homeScore != null ? CG._smScoreText(g.away, g.home, g.awayScore, g.homeScore)+" " : "")+"is cleared too. A Reversed line posts in #game-scores. The game is then held until its sittings are filed again in Find a game on EA.",
+         "If the club appealed a Rule 5.2 over-limit forfeit, decide the appeal in the Action Center instead: that lifts the forfeit and keeps the result."],
+    "Undo the forfeit", function(){
+      Promise.resolve(CG.sb.rpc("unforfeit_game", { p_game:id })).then(function(r){
+        f.res = r.error ? { ok:false, text:r.error.message || "Couldn’t undo it." } : { ok:true, b:"Forfeit undone.", text:CG._smFx(g)+" is back to scheduled with no score. A Reversed line posts in #game-scores." };
+        st.focusNext = "smFfRes"; st.refocus = r.error ? null : "smFfRes"; CG._smPaint("smForfeit", CG._smForfeitHtml(st));
+        if (!r.error){ if (CG.reloadLeague) CG.reloadLeague(); }
+      }, function(e){ f.res = { ok:false, text:e.message }; st.focusNext = "smFfRes"; CG._smPaint("smForfeit", CG._smForfeitHtml(st)); });
+    });
+};
+/* v3.42: stats_game_set_result returns nothing, so the game row is read back before the desk says it worked */
+CG._smFixGo = function(){
+  var st = CG._smS(), f = st.fix, g = CG._smGame(f.game); if (!g || f.busy) return;
+  var id = st.fix.game, hs = +st.fix.h, as = +st.fix.a, ot = document.getElementById("smFixOt");
+  if (!CG._smFixCheck(g, f).ok) return;
+  if (hs === as){ CG.toast("A league game cannot end level. Check the score.","err"); return; }
+  if (ot.checked && Math.abs(hs-as) !== 1){ CG.toast("An overtime game is decided by one goal.","err"); return; }
+  var was = CG._smScoreText(g.away, g.home, g.awayScore, g.homeScore)+(g.ot ? " in overtime" : ""), now = CG._smScoreText(g.away, g.home, as, hs)+(ot.checked ? " in overtime" : "");
+  var scoreChanged = hs !== g.homeScore || as !== g.awayScore, inv = CG._smInvolved(g);
+  CG.confirm("Correct "+CG._smFx(g)+"?", ["Now: "+was+".", "After: "+now+".",
+      scoreChanged ? "A Corrected line posts in #game-scores." : "Only the overtime mark changes, so nothing is posted in #game-scores.",
+      "The standings update at once."+(g.stage === "playoff" ? " The playoff series updates too." : "")].concat(inv ? ["This game involves your club ("+inv+") (Rule 7.1)."] : []),
+    "Correct the result", function(){
+      f.busy = true; CG._smPaint("smFix", CG._smFixHtml(st));
+      Promise.resolve(CG.sb.rpc("stats_game_set_result", { p_game:id, p_home:hs, p_away:as, p_final:true, p_ot:ot.checked })).then(function(r){
+        if (r.error){ f.busy = false; f.res = { ok:false, text:r.error.message || "Couldn’t correct it." }; st.focusNext = "smFixRes"; CG._smPaint("smFix", CG._smFixHtml(st)); return; }
+        return Promise.resolve(CG.sb.from("games").select("status,home_score,away_score,went_ot").eq("id", id).maybeSingle()).then(function(b){
+          f.busy = false;
+          var row = b && b.data, good = row && row.status === "final" && row.home_score === hs && row.away_score === as && !!row.went_ot === !!ot.checked;
+          var unread = !row || (b && b.error);
+          f.res = good ? { ok:true, b:"Corrected.", text:CG._smFx(g)+" now reads "+now+"." }
+            : unread ? { ok:false, text:"The correction was sent, but the desk could not read "+CG._smFx(g)+" back to confirm it"+(b && b.error && b.error.message ? " ("+b.error.message+")" : "")+". Check the game before trying again." }
+            : { ok:false, text:"The correction did not save: "+CG._smFx(g)+" still reads "+CG._smScoreText(g.away, g.home, row.away_score, row.home_score)+". Nothing was posted. Try again, or tell a commissioner." };
+          st.focusNext = "smFixRes"; st.refocus = good || unread ? "smFixRes" : null; CG._smPaint("smFix", CG._smFixHtml(st));
+          if (good || unread){ if (CG.reloadLeague) CG.reloadLeague(); }
+        });
+      }).catch(function(e){ f.busy = false; f.res = { ok:false, text:e.message }; st.focusNext = "smFixRes"; CG._smPaint("smFix", CG._smFixHtml(st)); });
+    });
+};
+CG._smLoadList = function(){
+  var st = CG._smS(), L = st.list, req = ++L.req;
+  Promise.resolve(CG.sb.from("pickup_games").select("id,played_at,club_a,club_b,score_a,score_b,went_ot,pickup_stats(count)")
+    .order("played_at", { ascending:false }).limit(60)).then(function(r){
+    if (req !== L.req) return;
+    if (r.error) L.err = r.error.message; else { L.err = null; L.rows = r.data || []; L.at = Date.now(); }
+    CG._smPaint("smList", CG._smListHtml(st));
+  }, function(e){ if (req !== L.req) return; L.err = e.message; CG._smPaint("smList", CG._smListHtml(st)); });
+};
+/* a picked game in the forfeit or correction card: a pointer pick collapses the list to that game; a keyboard pick
+   keeps the radio group open, so arrow keys still move through it */
+CG._smPickGame = function(kind, id){
+  var st = CG._smS(), k = st[kind], g = CG._smGame(id); if (!g) return;
+  var changed = k.game !== id;
+  k.game = id; k.gone = false;
+  if (changed){
+    k.res = null;
+    if (kind === "fix"){ st.fix.h = String(g.homeScore); st.fix.a = String(g.awayScore); st.fix.ot = !!g.ot; }
+    else { k.kind = null; k.who = null; }
+  }
+  var pointer = Date.now() - st.ptr < 600, card = kind === "ff" ? "smForfeit" : "smFix";
+  if (pointer) k.picking = false;
+  CG._smAnchor(function(){ return document.querySelector('#'+card+' input[name="'+(kind === "ff" ? "smFfGame" : "smFixGame")+'"]:checked'); },
+    function(){ CG._smPaint(card, kind === "ff" ? CG._smForfeitHtml(st) : CG._smFixHtml(st)); });
+  if (changed){ var form = document.getElementById(kind === "ff" ? "smFfForm" : "smFixForm"); if (form) CG._smEnter(form); }
+};
+CG._smOnClick = function(e){
+  var st = CG._smS(), t = e.target.closest("[data-sm-act], #smFfGo, #smFfUndo, #smFfReport, #smFixGo, #smFixReport");
+  if (!t || t.disabled) return;
+  if (t.id === "smFfGo") return CG._smFfGo();
+  if (t.id === "smFfUndo") return CG._smFfUndo();
+  if (t.id === "smFfReport") CG.reportRulingPrompt(st.ff.game);
+  if (t.id === "smFixGo") return CG._smFixGo();
+  if (t.id === "smFixReport") return CG.reportRulingPrompt(st.fix.game);
+  var act = t.getAttribute("data-sm-act"), f = st.find;
+  if (act === "club"){ var tm = CG.TEAM[t.getAttribute("data-code")]; if (tm && tm.eaClubId) CG._smPickClub({ eaId:tm.eaClubId, name:tm.name, team:tm.code }); }
+  else if (act === "eaclub"){
+    var eid = t.getAttribute("data-id"), lt = (CG.TEAMS || []).filter(function(x){ return x.eaClubId === eid; })[0];
+    CG._smPickClub({ eaId:eid, name:t.getAttribute("data-name") || ("EA club "+eid), team:lt ? lt.code : null });
+  }
+  else if (act === "club-change"){ ++st.seq; f.club = null; f.sess = null; f.ea = null; f.focus = null; f.focusBefore = null; f.picked = {}; f.res = null; f.err = null; CG._smPaint("smFind", CG._smFindHtml(st)); var c0 = document.querySelector("#smFind .sm-crest:not(:disabled)"); if (c0) c0.focus(); }
+  else if (act === "search") CG._smSearch();
+  else if (act === "retry") CG._smLoad(f.focusBefore ? { before:f.focusBefore } : { ea:true });
+  else if (act === "eaagain") CG._smLoadEa(st.seq);
+  else if (act === "older"){ if (f.from) CG._smLoad({ before:f.from }); }
+  else if (act === "move"){ f.moved[t.getAttribute("data-match")] = t.getAttribute("data-to"); delete f.picked[t.getAttribute("data-match")]; CG._smPaintSess(); }
+  else if (act === "clear"){ f.picked = {}; f.restart = false; f.adv = false; f.err = null; CG._smPaint("smSess", CG._smSessHtml(st)); }
+  else if (act === "go") CG._smGo();
+  else if (act === "report") CG.reportRulingPrompt(t.getAttribute("data-game"));
+  else if (act === "change"){
+    var kk = t.getAttribute("data-k"), card = kk === "ff" ? "smForfeit" : "smFix";
+    st[kk].picking = true;
+    CG._smAnchor(function(){ return document.getElementById(card); }, function(){ CG._smPaint(card, kk === "ff" ? CG._smForfeitHtml(st) : CG._smFixHtml(st)); });
+    var ck = document.querySelector('#'+card+' input[name="'+(kk === "ff" ? "smFfGame" : "smFixGame")+'"]:checked'); if (ck) ck.focus({ preventScroll:true });
+  }
+  else if (act === "earlier"){ var ke = t.getAttribute("data-k"); st[ke].nights += 3; CG._smPaint(ke === "ff" ? "smFfPick" : "smFixPick", CG._smPickListHtml(ke, st)); }
+  else if (act === "focus") CG._smFocusGame(t.getAttribute("data-game"));
+  else if (act === "ffpick"){
+    st.ff.game = t.getAttribute("data-game"); st.ff.picking = false; st.ff.kind = null; st.ff.who = null; st.ff.res = null;
+    CG._smPaint("smForfeit", CG._smForfeitHtml(st));
+    var fc = document.getElementById("smForfeit"); if (fc) fc.scrollIntoView({ block:"start" });
+    var q2 = document.getElementById("smFfQ2"); if (q2) q2.focus({ preventScroll:true });
+  }
+  else if (act === "listretry") CG._smLoadList();
+  else if (act === "pudel"){
+    var pid = t.getAttribute("data-id"), A = t.getAttribute("data-a"), B = t.getAttribute("data-b"), nl = t.getAttribute("data-n");
+    CG.confirm("Delete "+A+" vs "+B+"?", "The pickup game and its "+nl+" player line"+(nl === "1" ? "" : "s")+" come off player profiles. League results are not affected.", "Delete", function(){
+      Promise.resolve(CG.sb.rpc("stats_pickup_delete", { p_game:pid })).then(function(r){
+        if (r.error) st.list.res = { ok:false, text:"Couldn’t delete it: "+r.error.message };
+        else { st.list.res = { ok:true, text:A+" vs "+B+" was deleted." }; st.list.rows = (st.list.rows || []).filter(function(x){ return x.id !== pid; }); }
+        st.focusNext = "smListRes"; CG._smPaint("smList", CG._smListHtml(st));
+      });
+    });
+  }
+};
+/* every control writes state, then marks itself drawn as it is (defaultChecked, defaultValue), so CG._pageDirty reads the
+   page clean and a live-pulse repaint, which redraws the same state, can land */
+CG._smOnChange = function(e){
+  var st = CG._smS(), t = e.target, f = st.find;
+  if (t.name === "smSess"){
+    f.picked[t.value] = t.checked; t.defaultChecked = t.checked; f.err = null;
+    var groups = CG._smGroups(f.sess, st), sel = CG._smSelection(st, groups);
+    if (!sel.restartable) f.restart = false;
+    if (!sel.ticked.length) f.restart = false;
+    /* the four-sitting limit and a restart change other rows' state: repaint the list, anchored on this row */
+    CG._smAnchor(function(){ return document.querySelector('#smSess input[name="smSess"][value="'+t.value+'"]'); }, function(){ CG._smPaint("smSess", CG._smSessHtml(st)); });
+    var bar = document.getElementById("smBar"); if (bar && sel.ticked.length === 1 && t.checked) CG._smEnter(bar);
+  }
+  else if (t.id === "smLgRestart"){
+    f.restart = t.checked; f.adv = true; t.defaultChecked = t.checked;
+    if (f.restart){ var g2 = CG._smGroups(f.sess, st), s2 = CG._smSelection(st, g2); if (s2.one) s2.one.sessions.forEach(function(s){ if (s.onGame) delete f.picked[s.matchId]; }); }
+    CG._smAnchor(function(){ return document.getElementById("smLgRestart"); }, function(){ CG._smPaint("smSess", CG._smSessHtml(st)); });
+  }
+  else if (t.name === "smFfGame" || t.name === "smFixGame"){
+    document.querySelectorAll('input[name="'+t.name+'"]').forEach(function(r){ r.defaultChecked = r.checked; });
+    CG._smPickGame(t.name === "smFfGame" ? "ff" : "fix", t.value);
+  }
+  else if (t.name === "smFfKind"){
+    document.querySelectorAll('input[name="smFfKind"]').forEach(function(r){ r.defaultChecked = r.checked; });
+    st.ff.kind = t.value;
+    var g = CG._smGame(st.ff.game); if (g) CG._smPaint("smFfForm", CG._smFfFormHtml(g, st));
+  }
+  else if (t.name === "smFfWho"){
+    document.querySelectorAll('input[name="smFfWho"]').forEach(function(r){ r.defaultChecked = r.checked; });
+    st.ff.who = t.value;
+    var g3 = CG._smGame(st.ff.game); if (g3) CG._smPaint("smFfState", CG._smFfStateHtml(g3, st));
+  }
+  else if (t.id === "smFixOt"){ st.fix.ot = t.checked; t.defaultChecked = t.checked; CG._smFixPatch(); }
+};
+CG._smFixPatch = function(){
+  var st = CG._smS(), g = CG._smGame(st.fix.game); if (!g) return;
+  var chk = CG._smFixCheck(g, st.fix), m = document.getElementById("smFixMsg"), go = document.getElementById("smFixGo");
+  if (m){ m.textContent = chk.msg; m.classList.toggle("bad", !!chk.bad); }
+  if (go) go.disabled = !chk.ok || st.fix.busy;
+};
+CG._smOnInput = function(e){
+  var st = CG._smS(), t = e.target;
+  if (t.id === "smClub") st.find.q = t.value;
+  else if (t.id === "smFfFind" || t.id === "smFixFind"){ var k = t.id === "smFfFind" ? "ff" : "fix"; st[k].q = t.value; CG._smPaint(k === "ff" ? "smFfPick" : "smFixPick", CG._smPickListHtml(k, st)); }
+  else if (t.id === "smFfWhy") st.ff.why = t.value;
+  else if (t.id === "smFixA" || t.id === "smFixH"){ st.fix[t.id === "smFixA" ? "a" : "h"] = t.value; CG._smFixPatch(); }
+  else return;
+  t.defaultValue = t.value;
+};
+CG._smOnKey = function(e){ if (e.key === "Enter" && e.target && e.target.id === "smClub"){ e.preventDefault(); CG._smSearch(); } };
+CG._smOnToggle = function(e){
+  var d = e.target;
+  if (d && d.id === "smAdv"){ CG._smS().find.adv = d.open; return; }
+  if (!d || !d.classList || !d.classList.contains("sm-grp")) return;
+  if (d.open === (d.getAttribute("data-open") === "1")) return;   /* fired by drawing it, not by the user */
+  d.setAttribute("data-open", d.open ? "1" : "0");
+  CG._smS().find.open[d.getAttribute("data-key")] = d.open;
+};
+CG.AFTER._statsMgr = function(qs){
+  qs = qs || {};
+  if (!CG.sb || !CG.isStatsStaff()) return;
+  if (qs.game){ var db = document.getElementById("smBody"); if (db) CG._smLoadProfiles().then(function(){ CG._smRenderDetail(db, qs.game); }); return; }
+  var body = document.getElementById("smDesk"); if (!body) return;
+  body.addEventListener("click", CG._smOnClick);
+  body.addEventListener("change", CG._smOnChange);
+  body.addEventListener("input", CG._smOnInput);
+  body.addEventListener("keydown", CG._smOnKey);
+  body.addEventListener("pointerdown", function(){ CG._smS().ptr = Date.now(); });
+  body.addEventListener("toggle", CG._smOnToggle, true);   /* toggle does not bubble */
+  CG.paintEaStatus(body);
+  var st = CG._smS(); if (!st.list.rows || Date.now() - st.list.at > 60000) CG._smLoadList();
+  if (st.find.searching || (st.find.ea && st.find.ea.state === "wait")) CG._smTick();
+  CG._smFocusNext();
+  /* the router focuses #app as its last step; after a write, put focus back on the result it was on */
+  var rf = st.refocus;
+  if (rf){ st.refocus = null; setTimeout(function(){ var n2 = document.getElementById(rf), a2 = document.activeElement;
+    if (n2 && (!a2 || a2 === document.body || a2.id === "app")) try { n2.focus({ preventScroll:true }); } catch(e){} }, 0); }
 };
 /* -- DETAIL: edit one game's box score -- */
 CG._smRenderDetail = function(body, gid){
@@ -11891,7 +12610,7 @@ CG.AUTOMATIONS = [
   { key:"ea-poll-vm", staleAfterMin:10, name:"EA score poller (bot server)", every:"Every minute from the bot server; asks EA only while a fixture’s game window is open", desc:"The primary lane. Runs on the always-on bot server, whose address EA serves. It asks EA only while a fixture’s game window is open (10 minutes before puck drop to 3 hours after, plus a short grace so a game that ends at the buzzer is still collected), only for the clubs in those fixtures, and hands everything it finds to the importer — which files only a match between the two scheduled clubs that ended inside that window, merges a lag-out replay into the game it continues (Rule 4.3), and archives the rest. A stale stamp here means the bot server is down; the Netlify lane below takes over automatically.", noRun:true },
   { key:"ea-poll", noRun:true, staleAfterMin:function(){ return CG.inGameWindowET && CG.inGameWindowET() ? 20 : 1440; }, name:"EA stats poller (Netlify fallback)", every:"Every 5 min; same fixture-window rule; stands down while the bot server lane is fresh", desc:"The fallback lane. Netlify’s own address is blocked by EA, so this only imports when a residential proxy is configured — it exists so a dead bot server still pages someone rather than silently losing a night’s scores." },
   /* v4.34: the site's EA club search, self-tested by the bot server every 10 minutes (bot/ea-lookup.mjs) */
-  { key:"ea-lookup", noRun:true, staleAfterMin:30, name:"EA club search (bot server)", every:"A self-test every 10 minutes from the bot server", desc:"Answers the site\u2019s EA club searches and match lists: the Stats Manager\u2019s Add an EA game, the pickup import page and the club game stats desk. EA refuses every other host, so the site asks through the bot server. Every 10 minutes it runs a test search end to end; two failures in a row turn this red and alert the commissioners. A stale stamp means the bot server\u2019s EA process (chel-ea-poll) is down." },
+  { key:"ea-lookup", noRun:true, staleAfterMin:30, name:"EA club search (bot server)", every:"A self-test every 10 minutes from the bot server", desc:"Answers the site\u2019s EA club searches and match lists: the Stats Manager\u2019s Find a game on EA, the pickup import page and the club game stats desk. EA refuses every other host, so the site asks through the bot server. Every 10 minutes it runs a test search end to end; two failures in a row turn this red and alert the commissioners. A stale stamp means the bot server\u2019s EA process (chel-ea-poll) is down." },
   { key:"twitch-live-sync", noRun:true, staleAfterMin:15, name:"Twitch live flags",         every:"Every 2 min",  desc:"Flags streaming players LIVE across the site automatically." },
   { key:"discord-sync", staleAfterMin:15,     name:"Discord roles & names",     every:"Every 2 min + on change",  desc:"Keeps Discord roles and display names matched to the league database. Role changes made on the site push to Discord within seconds." },
   { key:"discord-welcome", noRun:true, staleAfterMin:20,  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },

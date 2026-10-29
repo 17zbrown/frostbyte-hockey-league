@@ -138,5 +138,52 @@ console.log("\n— the handler: merged import persists, and segments can't re-en
   A("a segment of a merged game refuses to import alone", dupRes.statusCode === 409);
 }
 
+/* v4.36: a league sitting is never imported as a pickup game; the guard runs before EA is asked for anything */
+console.log("\n# v4.36: a league sitting is never a pickup game");
+{
+  const rawMatch = (id, ts) => ({ matchId: id, timestamp: ts,
+    clubs: { "111": { details: { name: "Alpha" }, score: "1", result: "1" }, "222": { details: { name: "Bravo" }, score: "0", result: "2" } },
+    players: { "111": { p1: { playername: "P1", position: "center", skgoals: "1", toiseconds: "800" } },
+               "222": { p2: { playername: "P2", position: "goalie", glsaves: "3", glshots: "4", glga: "1", toiseconds: "800" } } } });
+  let FILED = [], LOGROWS = [];
+  const writes = { games: [], stats: [] };
+  let LOOKUPS;
+  globalThis.fetch = async (url, opts = {}) => {
+    const u = String(url), m = opts.method || "GET";
+    const J = (b, c) => new Response(JSON.stringify(b), { status: c || 200, headers: { "content-type": "application/json" } });
+    if (u.includes("/auth/v1/user")) return J({ id: "uid1" });
+    if (u.includes("proclubs.ea.com")) throw new Error("Netlify must never call EA itself (v4.34): " + u);
+    if (u.includes("/rest/v1/ea_lookups")) return LOOKUPS.handle(u, opts);
+    if (u.includes("/rest/v1/games?ea_match_id=in.") && m === "GET") return J(FILED);
+    if (u.includes("/rest/v1/ea_ingest_log") && m === "GET") return J(LOGROWS);
+    if (u.includes("/rest/v1/pickup_games") && m === "POST") { writes.games.push(JSON.parse(opts.body)); return J([{ id: "game9" }]); }
+    if (u.includes("/rest/v1/pickup_stats") && m === "POST") { writes.stats.push(...JSON.parse(opts.body)); return J([]); }
+    return J([]);
+  };
+  const imp = async () => { const r = await handler({ httpMethod: "POST", headers: { authorization: "Bearer tok" },
+    body: JSON.stringify({ action: "import", clubId: "111", matchId: "m1" }) }); return { code: r.statusCode, o: JSON.parse(r.body) }; };
+  const FILED_TXT = "That session is a filed league game. League games are kept by the statistics desk, never as pickup games.";
+  const MAYBE_TXT = "The statistics desk has that session on its list as a possible league game. Ask them before importing it.";
+  for (const [label, filed, log, txt, gid] of [
+    ["the filed sitting of a game", [{ id: "gL" }], [], FILED_TXT, "gL"],
+    ["a merged sitting", [], [{ ea_match_id: "m1", status: "merged", game_id: "gL" }], FILED_TXT, "gL"],
+    ["a struck sitting", [], [{ ea_match_id: "m1", status: "struck", game_id: "gL" }], FILED_TXT, "gL"],
+    ["an incomplete (held) sitting", [], [{ ea_match_id: "m1", status: "incomplete", game_id: "gL" }], FILED_TXT, "gL"],
+    ["an unmatched sitting (a possible league game)", [], [{ ea_match_id: "m1", status: "unmatched", game_id: null }], MAYBE_TXT, null]]) {
+    FILED = filed; LOGROWS = log; writes.games = []; writes.stats = [];
+    LOOKUPS = createLookupsFake();
+    const { code, o } = await imp();
+    A(`${label} is refused (409)`, code === 409 && o.error === txt && o.leagueGameId === gid, JSON.stringify(o));
+    A("...with no pickup write and no EA request", !writes.games.length && !writes.stats.length && LOOKUPS.posts.length === 0 && LOOKUPS.rows.length === 0);
+  }
+  for (const [label, log] of [["an `ignored` sitting", [{ ea_match_id: "m1", status: "ignored", game_id: null }]], ["a sitting the archive never saw", []]]) {
+    FILED = []; LOGROWS = log; writes.games = []; writes.stats = [];
+    LOOKUPS = createLookupsFake(); LOOKUPS.seed("matches", "111", [rawMatch("m1", 1700000000)], 60000);
+    const { o } = await imp();
+    A(`${label} imports`, o.ok === true && writes.games.length === 1, JSON.stringify(o).slice(0, 160));
+    A("...and the reply names both clubs", o.clubA === "Alpha" && o.clubB === "Bravo", JSON.stringify({ a: o.clubA, b: o.clubB }));
+  }
+}
+
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);

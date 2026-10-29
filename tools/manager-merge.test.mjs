@@ -103,7 +103,8 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("/rest/v1/app_config")) return J([{ key: "discord_staff_webhook", value: "https://discord.test/hook" }]);
   if (u.startsWith("https://discord.test/hook")) { writes.webhooks.push(JSON.parse(opts.body)); return J(null); }
   if (u.includes("/rest/v1/ea_ingest_log") && m === "GET") return J(LOG);
-  if (u.includes("/rest/v1/ea_ingest_log") && m === "PATCH") { writes.logPatches.push({ url: u, body: JSON.parse(opts.body) }); return J(null); }
+  /* v4.36: the merge marks an archived sitting conditionally and reads the representation back (an empty one is a race) */
+  if (u.includes("/rest/v1/ea_ingest_log") && m === "PATCH") { writes.logPatches.push({ url: u, body: JSON.parse(opts.body) }); return J([{ ea_match_id: decodeURIComponent((u.match(/ea_match_id=eq\.([^&]+)/)||[])[1]||"") }]); }
   if (u.includes("/rest/v1/game_stats") && m === "DELETE") { writes.statDeletes++; return J(null); }
   if (u.includes("/rest/v1/game_stats") && m === "POST") { writes.statRows.push(...JSON.parse(opts.body)); return J(null); }
   if (u.includes("/rest/v1/games?id=eq.") && m === "PATCH") { writes.gamePatches.push(JSON.parse(opts.body)); return J(null); }
@@ -168,7 +169,8 @@ console.log("\n— a club cannot combine its lag-out (v3.67); statistics staff d
   A("...and nothing is written", writes.statDeletes === 0 && writes.gamePatches.length === 0 && writes.logPatches.length === 0);
   LOG = twoSittings(); reset();
   UID = "statsguy";
-  const res = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
+  /* v4.36: GAME is final and these sittings add up to 12 minutes, so the staff merge confirms the unpublish */
+  const res = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"], unpublish: true } })).body);
   A("statistics staff combine it", res.ok === true && res.sittings === 2, JSON.stringify(res).slice(0, 120));
   A("the score aggregates across sittings", res.score === "3-1");
   A("the old box score is replaced, not appended", writes.statDeletes === 1);
@@ -191,7 +193,7 @@ console.log("\n— a club cannot reach past its own fixture");
   A("a club can't graft another sitting on at all (v3.67)", /Only statistics staff or a commissioner combine/.test(mgmt.error || ""), mgmt.error);
   A("...and the game was left untouched", writes.statDeletes === 0 && writes.gamePatches.length === 0);
   reset(); UID = "statsguy";
-  const staff = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "mLater"] } })).body);
+  const staff = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "mLater"], unpublish: true } })).body);
   A("staff keep the unrestricted reach", staff.ok === true, staff.error);
   A("a staff merge is NOT announced as a club rebuild", writes.webhooks.length === 0);
   A("staff provenance says stats staff", /StatsGuy \(stats staff\)/.test(JSON.stringify(writes.logPatches)));
@@ -211,6 +213,8 @@ console.log("\n— the protections that already existed still hold for managers"
   LOG = [{ ea_match_id: "m2", status: "unmatched", game_id: null, et_day: "2026-10-21", payload: rawSitting("m2", SAME_NIGHT_LATER, 2, 1, false, 420) }];
   const orphan = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m2"] } })).body);
   A("dropping the sitting already on the game is still refused", /Include the sitting/.test(orphan.error || ""));
+  /* v4.36 review: the club desk has no Restarted box, so its managers are told who re-files a restarted game */
+  A("...in the club desk's own words (no Restarted box there)", /statistics staff re-file it\./.test(orphan.error || "") && !/tick "Restarted"/.test(orphan.error || ""), orphan.error);
   A("nothing was written by either refusal", writes.statDeletes === 0 && writes.gamePatches.length === 0);
 }
 
@@ -233,13 +237,13 @@ console.log("\n— a forfeit ruling is a commissioner's to change (v3.52): nobod
   const sr = await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } });
   A("statistics staff are refused too: no staffer changes a ruled game (v3.52)", sr.statusCode === 422 && writes.statDeletes === 0 && writes.gamePatches.length === 0, sr.body);
   reset(); UID = "commish";
-  const staff = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
+  const staff = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"], unpublish: true } })).body);
   A("a commissioner may merge the sittings for the record", staff.ok === true && staff.score === "3-1", staff.error);
   A("...and even a commissioner's merge leaves the ruling exactly as it was (forfeit_team_id is not in the PATCH at all)",
     writes.gamePatches.length === 1 && !("forfeit_team_id" in writes.gamePatches[0]), JSON.stringify(writes.gamePatches[0]));
   FORFEIT = null;
   reset(); UID = "statsguy";
-  const clean = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
+  const clean = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"], unpublish: true } })).body);
   A("without a ruling statistics staff merge as before (a club no longer combines, v3.67)", clean.ok === true, clean.error);
   A("...and its PATCH carries no forfeit_team_id either — the key is absent, not null", !("forfeit_team_id" in writes.gamePatches[0]));
   /* v3.53: re-filing a restarted game strikes sittings and their statistics: statistics staff only */
@@ -261,7 +265,7 @@ console.log("\n— the archive is written before the game is touched, so a merge
     if (u.includes("/rest/v1/games?id=eq.") && m === "PATCH") order.push("game-patch");
     return inner(url, opts);
   };
-  const res = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
+  const res = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"], unpublish: true } })).body);
   globalThis.fetch = inner;
   A("the merge succeeds", res.ok === true);
   A("both provenance rows land BEFORE the box score is deleted and the game is patched",
@@ -281,7 +285,7 @@ console.log("\n— a box score another writer filed at the same moment is not ov
       return new Response(JSON.stringify({ code: "23505", message: "duplicate key value violates unique constraint \"game_stats_one_row_per_player\"" }), { status: 409 });
     return inner(url, opts);
   };
-  const r = await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } });
+  const r = await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"], unpublish: true } });
   globalThis.fetch = inner;
   A("the merge answers 409 and names the reason", r.statusCode === 409 && /same moment/.test(JSON.parse(r.body).error), r.body);
   A("...and the game row was not patched", writes.gamePatches.length === 0);
@@ -338,7 +342,10 @@ console.log("\n— one linked side is enough: the opponent is derived, then prov
   A("scores still read home-first", res.candidates[1].homeScore === 2 && res.candidates[1].awayScore === 1);
 
   reset(); UID = "statsguy";   /* v3.67: combining is statistics staff's */
-  const mg = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
+  /* v4.36 review: the preview says the merge will link the opponent's EA club, so the desk's confirm can say it */
+  const pv = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"], preview: true } })).body);
+  A("the preview names the evidence link it will make", pv.ok === true && pv.links && pv.links.team === "TOR" && pv.links.eaId === "222" && pv.links.name === "Leafs EA" && !writes.teamPatches.length, JSON.stringify(pv.links));
+  const mg = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"], unpublish: true } })).body);
   A("the one-sided merge succeeds", mg.ok === true && mg.score === "3-1", mg.error);
   A("the merge PROVES the opponent's EA club and links it", EA_LINK.T2 === "222" && writes.teamPatches.some((tp) => tp.id === "T2" && tp.body.ea_club_id === "222"));
   A("...and tells staff about the evidence linkage", writes.webhooks.some((w) => /linked by evidence/.test(w.content)));

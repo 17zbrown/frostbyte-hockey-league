@@ -2249,6 +2249,88 @@ details.rb-history[open]>summary::after{content:"–"}
 .ovstat .cell b{display:block;font-family:var(--f-disp);font-weight:900;font-size:20px;letter-spacing:-.01em;line-height:1.15}
 .ovstat .cell b small{font-size:11px;font-weight:700;color:var(--steel)}
 .ovstat .cell span{display:block;margin-top:3px;font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--steel)}
+/* v4.36: the Stats manager desk (#/hub/statsmgr). Layout only: surfaces, chips, buttons and option rows are house classes,
+   scoped under .sm so nothing reaches the survey, the schedule or the generic .gamecard rows. Tokens only (no new hex). */
+.sm .card{margin-bottom:18px}
+.sm .card.sm-sticky{overflow:visible}   /* .card's overflow:hidden made the card the bar's scroll container, so the bar never stuck */
+.sm-one{margin:0 0 14px;max-width:72ch}
+.sm-q{margin:0 0 18px}
+.sm-ql{margin:0 0 8px;font:600 14px/1.3 var(--f-body);color:var(--ink);text-transform:none;outline:none}
+.sm-ql small{display:block;margin-top:2px;font-weight:400;font-size:12.5px;color:var(--steel)}
+.sm-crests{display:grid;grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:8px}
+.sm-crest{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-height:64px;padding:8px 4px;
+  border:1.5px solid var(--line);border-radius:var(--r-s);background:var(--paper);color:var(--ink);font:600 11px/1 var(--f-mono);
+  letter-spacing:.06em;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:border-color .15s,background-color .15s,transform .12s var(--ease-out)}
+.sm-crest .crest{width:32px;height:32px;flex:none}
+.sm-crest:active{transform:scale(.97)}
+@media(hover:hover) and (pointer:fine){.sm-crest:hover{border-color:var(--steel-2)}}
+.sm-crest:focus-visible{outline:2.5px solid var(--ink);outline-offset:2px}
+.sm-crest:disabled{cursor:not-allowed;background:var(--line-soft);color:var(--steel)}
+.sm-crest:disabled .crest{opacity:.4}
+.sm-crest:disabled:active{transform:none}
+.sm-picked{display:flex;align-items:center;gap:10px;padding:8px 8px 8px 12px;margin:0 0 14px;border:1.5px solid var(--ink);border-radius:var(--r-s);background:var(--chrome-tint)}
+.sm-picked .crest{width:28px;height:28px;flex:none}
+.sm-picked .btn{margin-left:auto}
+.btn.sm-ea{display:flex;align-items:center;width:100%;height:auto;min-height:44px;padding-top:8px;padding-bottom:8px;white-space:normal;text-align:left;justify-content:flex-start;gap:10px;margin-bottom:6px}
+.sm-ea b{display:block;overflow-wrap:anywhere}
+.sm-ea small{display:block}
+.sm-ea .crest{width:24px;height:24px;flex:none}
+.sm-line{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-weight:700}
+.sm-line .crest{width:20px;height:20px;flex:none}
+.sm-sc{font:800 15px/1 var(--f-disp);font-variant-numeric:tabular-nums}
+.sm-sc.lose{color:var(--steel);font-weight:600}
+.sm-at{font-size:12px;font-weight:400;color:var(--steel)}
+.sm-line .chip{margin-left:auto}
+.sm-lock{display:inline-flex;color:var(--steel)}
+.sm-grp{border:1.5px solid var(--line);border-radius:var(--r-m);padding:0 12px;margin:0 0 10px;background:var(--paper)}
+.sm-grp.is-focus{border-color:var(--ink)}
+.sm-gh{display:block;padding:12px 0;cursor:pointer;list-style:none}
+.sm-gh::-webkit-details-marker{display:none}
+.sm-gh small{display:block;margin-top:4px;font-size:12.5px;font-weight:400;color:var(--steel)}
+.sm-grp[open]>.sm-gh{border-bottom:1px solid var(--line-soft);margin-bottom:10px}
+.sm-grp>.sv-grid,.sm-grp>.note,.sm-alt{margin-bottom:10px}
+.sm-alt{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12.5px;color:var(--steel)}
+.sv-lbl small.sm-why{color:var(--ink)}
+.sm .sv-opt:has(input:disabled){cursor:not-allowed}
+.sm .sv-opt:has(input:disabled):active{transform:none}
+.sm .sv-opt:has(input:disabled:not(:checked)){background:var(--line-soft)}
+.sm .sv-opt:has(input:disabled:not(:checked)) .sv-box{opacity:.4}
+.sm .sv-opt input:checked+.sv-box{background:var(--chrome);border-color:var(--chrome-deep)}   /* the tick shows even without :has() */
+.sm .sv-opt input:checked+.sv-box svg,.sm .sv-one input:checked+.sv-box::after{opacity:1;transform:none}
+.sm .sv-one.sm-game{padding:8px 12px;align-items:center}
+.sm .sv-one.sm-game .sv-box{margin-top:0}
+.sm-game:not(.is-full) .sv-lbl{display:flex;align-items:center;gap:12px}
+.sm-game:not(.is-full) .sm-line{flex:1;min-width:0}
+.sm-game.is-full .sv-lbl small{margin-top:6px}
+.sm-t{flex:0 0 62px;font:600 11.5px/1 var(--f-mono);color:var(--steel);font-variant-numeric:tabular-nums}
+.sv-one.sm-club .sv-lbl{display:flex;align-items:center;gap:10px}
+.sm-club .crest{width:32px;height:32px;flex:none}
+#smBarSlot{display:contents}   /* the bar sticks within the whole sittings list, not inside its own slot */
+.sm-bar{position:sticky;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;
+  margin-top:12px;padding:12px 14px;background:var(--paper);border:1.5px solid var(--ink);border-radius:var(--r-m);box-shadow:var(--sh-2)}
+.sm-bar-t{flex:1;min-width:0;margin:0;font-size:13px;color:var(--steel)}
+.sm-bar-t b{display:block;font:800 15px/1.2 var(--f-disp);color:var(--ink)}
+.sm-bar-t.err b{color:var(--red-ink)}
+.sm-sc-rows{display:grid;gap:8px;max-width:420px}
+.sm-sc-row{display:grid;grid-template-columns:minmax(0,1fr) 76px;align-items:center;gap:12px;padding:8px 8px 8px 12px;border:1.5px solid var(--line);border-radius:var(--r-s);background:var(--paper)}
+.sm-sc-row label{display:flex;align-items:center;gap:10px;min-width:0;font:700 14.5px/1.2 var(--f-disp);cursor:pointer}
+.sm-sc-row label small{display:block;font:600 10.5px/1.3 var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--steel)}
+.sm-sc-row .crest{width:30px;height:30px;flex:none}
+.sm-sc-row input{height:52px;padding:0 6px;text-align:center;font:900 24px/1 var(--f-disp);font-variant-numeric:tabular-nums;-moz-appearance:textfield;appearance:textfield}
+.sm-sc-row input::-webkit-inner-spin-button,.sm-sc-row input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.sm .check{min-height:44px}
+.sm-msg{margin:8px 0 0}
+.sm-msg.bad{color:var(--red-ink);font-weight:500}
+.sm-go{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:18px}
+.sm-adv{margin-top:6px}
+.sm-adv summary{display:flex;align-items:center;gap:8px;min-height:44px;cursor:pointer;list-style:none;font:700 13px/1.2 var(--f-disp);color:var(--steel)}
+.sm-adv summary::-webkit-details-marker{display:none}
+.sm-adv summary svg{transition:transform .15s var(--ease-out)}
+.sm-adv[open] summary svg{transform:rotate(180deg)}
+.sm-skel{height:58px;margin-bottom:8px;border-radius:var(--r-s)}
+.sm-res{scroll-margin-top:calc(var(--nav-h) + 16px);margin-bottom:12px;outline:none}
+@media(max-width:560px){.sm-bar .btn,.sm-go .btn{flex:1 1 100%;justify-content:center}.titem .sm-go .btn{flex:1 1 auto}}
+@media(prefers-reduced-motion:reduce){.sm-crest,.sm-crest:active{transform:none;transition:none}.sm-adv summary svg{transition:none}.sm .skel::after{animation:none}}
 </style>
 </head>
 <body>

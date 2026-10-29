@@ -38,7 +38,8 @@ A("the battery is recorded", /T5\s+a best-of-seven/.test(sql) && /T7\s+check_pla
 
 console.log("\n— the site");
 A("Stats manager: undo for commissioners, report for staff", /CG\.auth && CG\.auth\.role === "commish"\s*\n\s*\? '<button class="btn btn-ghost" id="smFfUndo">Undo a forfeit<\/button>'\s*\n\s*: '<button class="btn btn-ghost" id="smFfReport"/.test(live));
-A("...and the report button is wired", /var rep = document\.getElementById\("smFfReport"\);[\s\S]{0,200}CG\.reportRulingPrompt\(gSel\.value\)/.test(live));
+/* v4.36: the desk's clicks are delegated; the report button still sends the picked game to the commissioners */
+A("...and the report button is wired", /t\.id === "smFfReport"\) CG\.reportRulingPrompt\(st\.ff\.game\)/.test(live));
 A("the forfeit dialog no longer says the loser burns a game", !/burns the game toward its weekly count/.test(live) && /counts toward no player’s weekly games on either club/.test(live));
 A("no copy promises a later merge replaces a forfeit", !/replaces the forfeit ruling/.test(live) && !/A later lag-out merge of the real game replaces this ruling/.test(live));
 A("Officials' desk lists forfeits (reads the mapped code)", /return g\.status==="final" && \(g\.forfeit \|\| g\.voided\);/.test(desks) && !/g\.forfeit_team_id \|\| g\.voided/.test(desks));

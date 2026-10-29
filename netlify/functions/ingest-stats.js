@@ -1366,15 +1366,11 @@ async function isStatsStaff(jwt) {
   } catch { return false; }
 }
 
-/* Who may work a SPECIFIC game's lag-out merge.
-     - statistics staff (and commissioners) may work any game, with no window limit — that
-       unrestricted reach is the whole point of the staff override.
-     - a club's Owner/GM/AGM may work only games THEIR OWN club played. The seat is checked
-       against the two teams on THAT game, so a manager can never reach another club's fixture
-       by changing the id in the request.
-   Returns the actor so the merge can be stamped with who did it — once non-staff can rebuild a
-   box score, "who did this" has to be recoverable from the archive. */
-async function authForGame(jwt, game) {
+/* v4.36: the staff half of authForGame, shared with leagueSessions (club-wide: no management seat applies). One
+   definition of "statistics staff or a commissioner" for every desk action that names a person. A banned member
+   comes back with no uid, so authForGame denies them before any seat is read; anyone else who is not staff comes
+   back with their uid and gamertag for the seat check. */
+async function staffActor(jwt) {
   const deny = { ok: false };
   if (!jwt) return deny;
   let uid = null;
@@ -1392,6 +1388,23 @@ async function authForGame(jwt, game) {
   const who = prof.gamertag || uid;
   if (prof.role === "commissioner") return { ok: true, uid, who, via: "staff", commish: true };
   if (prof.role === "staff" && (prof.departments || []).indexOf("statistics") >= 0) return { ok: true, uid, who, via: "staff" };
+  return { ok: false, uid, who };
+}
+
+/* Who may work a SPECIFIC game's lag-out merge.
+     - statistics staff (and commissioners) may work any game, with no window limit — that
+       unrestricted reach is the whole point of the staff override.
+     - a club's Owner/GM/AGM may work only games THEIR OWN club played. The seat is checked
+       against the two teams on THAT game, so a manager can never reach another club's fixture
+       by changing the id in the request.
+   Returns the actor so the merge can be stamped with who did it — once non-staff can rebuild a
+   box score, "who did this" has to be recoverable from the archive. */
+async function authForGame(jwt, game) {
+  const deny = { ok: false };
+  const a = await staffActor(jwt);
+  if (a.ok) return a;
+  if (!a.uid) return deny;
+  const { uid, who } = a;
   let seats = [];
   try { seats = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,owner_profile_id,gm_profile_id,agm_profile_id`); }
   catch { return deny; }
@@ -1619,7 +1632,10 @@ export const handler = async (event) => {
         status: row.status,
         oppEaName: pair ? null : oppClub.name || null,
         oppEaId: pair ? null : String(oppClub.ea_club_id),
-        attached: row.game_id === game.id || game.ea_match_id === nrm.ea_match_id,
+        /* v4.36: a struck sitting keeps its game_id, but it is off the game for good (Rules 4.3 and 4.5), so it is
+           never shown as attached; `struck` lets the club desk say why it can't be ticked */
+        attached: (row.game_id === game.id && row.status !== "struck") || game.ea_match_id === nrm.ea_match_id,
+        struck: row.status === "struck",
         usedElsewhere: !!(row.game_id && row.game_id !== game.id)
       });
     }
@@ -1714,14 +1730,180 @@ export const handler = async (event) => {
     return { statusCode: 200, body: JSON.stringify({ ok: true, fetched: rows.length, club: src.code }) };
   }
 
-  if (!authed && body && body.leagueMerge) {
+  /* ---- v4.36: the Stats manager's "Find a game on EA". One EA club's sittings over ten Eastern days: the league
+     archive first, then (only when asked, and only for the newest window) EA itself through the bot's server, each
+     sitting tagged with the league fixture it belongs to, so the desk can show one group per game. Club-wide, so
+     statistics staff or a commissioner only (staffActor): no management seat covers a whole EA club. It reads only;
+     the relay's request row is its one write, and leagueMerge re-checks everything when a staffer merges.
+     The tagging deliberately does NOT reuse ingestOne's team resolution (D8): a sitting under a borrowed EA club
+     (Rule 4.6) is shown as needs-substitution and left to the league office, and the live import stays untouched.
+     Scores are the LEAGUE reading (normalizeMatch: gfraw or the players' goals on a disconnected sitting), never the
+     pickup reading and never EA's 3-0 did-not-finish placeholder (v3.06, v3.88). */
+  if (!authed && body && body.leagueSessions) {
+    const q = body.leagueSessions || {};
+    const clubId = String(q.clubId == null ? "" : q.clubId).trim();
+    if (!/^[0-9]{1,20}$/.test(clubId)) return { statusCode: 400, body: JSON.stringify({ error: "Pick a club." }) };
+    const before = q.before == null || q.before === "" ? null : String(q.before);
+    const dayMs = (d) => Date.parse(`${d}T12:00:00Z`);   // noon UTC, so day arithmetic never lands on a DST edge
+    if (before !== null && !(/^\d{4}-\d{2}-\d{2}$/.test(before) && Number.isFinite(dayMs(before)) && new Date(dayMs(before)).toISOString().slice(0, 10) === before))
+      return { statusCode: 400, body: JSON.stringify({ error: "That date is not readable." }) };
+    const jwt = String(event.headers.authorization || event.headers.Authorization || "").replace(/^Bearer\s+/i, "");
+    const actor = await staffActor(jwt);
+    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: "Statistics staff or a commissioner only." }) };
+    const to = before || etDayUnix(Date.now() / 1000 + 86400);
+    const from = new Date(dayMs(to) - 10 * 86400000).toISOString().slice(0, 10);
+    const GSEL = "id,week,scheduled_at,home_team_id,away_team_id,status,ea_match_id,voided,forfeit_team_id";
+    const SUB = "One EA club here is not linked to a league club. If a club played this game under a borrowed EA club (Rule 4.6), the league office records the substitution and files it.";
+    try {
+      /* EA only for the newest window: an older page is the archive's alone (EA keeps a club's last few games) */
+      let ea = { ok: false, skipped: true }, eaRaw = [];
+      if (q.ea === true && !before) {
+        const got = await eaRelay(DB, "matches", clubId, { answerId: q.eaLookup, requestedBy: actor.uid }).catch((e) => ({ __err: e.message }));
+        if (got.pending) return { statusCode: 200, body: JSON.stringify({ eaPending: got.pending }) };
+        if (got.__err) ea = { ok: false, error: got.__err };
+        else { ea = { ok: true, answeredAt: got.answeredAt }; eaRaw = Array.isArray(got.raw) ? got.raw : []; }
+      }
+      // shortcut: ea_club_ids has no GIN index and the window is capped at 60 rows, a sequential scan; add the index and paging when ea_ingest_log passes ~20k rows
+      const arch = await sbGet(`ea_ingest_log?ea_club_ids=cs.{${clubId}}&et_day=gte.${from}&et_day=lt.${to}&select=ea_match_id,status,game_id,et_day,payload&order=et_day.desc&limit=60`);
+      const tryNorm = (raw) => { try { return normalizeMatch(raw); } catch { return null; } };
+      /* one entry per sitting; the archived payload wins over EA's copy of the same match */
+      const byId = new Map();
+      for (const r of arch || []) byId.set(String(r.ea_match_id), { id: String(r.ea_match_id), n: tryNorm(r.payload), raw: r.payload, row: r, source: "archive" });
+      for (const m of eaRaw) {
+        if (!m || m.matchId == null) continue;
+        const id = String(m.matchId), had = byId.get(id);
+        if (had) had.source = "both";
+        else byId.set(id, { id, n: tryNorm(m), raw: m, row: null, source: "ea" });
+      }
+      const items = [...byId.values()];
+      const norms = items.map((it) => it.n).filter(Boolean);
+      const [ctx, teams] = await Promise.all([batchContext(norms), sbGet("teams?select=id,code,ea_club_id")]);
+      /* an EA sitting the archive holds outside this window (or past the 60-row cap) is still the archive's */
+      for (const it of items) if (!it.row && ctx.log.has(it.id)) {
+        const l = ctx.log.get(it.id);
+        it.row = { ea_match_id: it.id, status: l.status, game_id: l.game_id };
+        it.source = "both";
+      }
+      const teamByClub = new Map((teams || []).filter((t) => t.ea_club_id != null).map((t) => [String(t.ea_club_id), t]));
+      const teamById = new Map((teams || []).map((t) => [t.id, t]));
+      const code = (tid) => (teamById.get(tid) || {}).code || null;
+      /* batched context, never a query per sitting: every league team's games around the sittings, and the pickups */
+      const leagueNs = norms.filter((n) => n.ts && n.clubs.some((c) => teamByClub.has(String(c.ea_club_id))));
+      const teamIds = uniq(leagueNs.flatMap((n) => n.clubs.map((c) => teamByClub.get(String(c.ea_club_id))).filter(Boolean).map((t) => t.id)));
+      const allIds = items.map((it) => it.id).map(encodeURIComponent).join(",");
+      const [games, pus] = await Promise.all([
+        teamIds.length ? (() => {
+          const ends = leagueNs.map((n) => n.ts * 1000);
+          const lo = new Date(Math.min(...ends) - 86400000 - GAME_WINDOW_AFTER_MS).toISOString();
+          const hi = new Date(Math.max(...ends) + 86400000).toISOString();
+          const tl = teamIds.map(encodeURIComponent).join(",");
+          return sbGet(`games?or=(home_team_id.in.(${tl}),away_team_id.in.(${tl}))&scheduled_at=gte.${encodeURIComponent(lo)}&scheduled_at=lte.${encodeURIComponent(hi)}&select=${GSEL}`);
+        })() : Promise.resolve([]),
+        allIds ? sbGet(`pickup_games?or=(ea_match_id.in.(${allIds}),ea_match_ids.ov.{${allIds}})&select=id,ea_match_id,ea_match_ids`) : Promise.resolve([])]);
+      const gameById = new Map((games || []).map((g) => [g.id, g]));
+      /* the games the archive points at that fall outside that span (a sitting merged days later) */
+      const lacking = uniq(items.map((it) => ctx.filed.get(it.id) || (it.row && it.row.game_id)).filter(Boolean)).filter((id) => !gameById.has(id));
+      if (lacking.length) {
+        const more = await sbGet(`games?id=in.(${lacking.map(encodeURIComponent).join(",")})&select=${GSEL}`);
+        for (const g of more || []) gameById.set(g.id, g);
+      }
+      const pickupOf = new Map();
+      for (const p of pus || []) for (const id of [p.ea_match_id, ...(p.ea_match_ids || [])]) if (id != null && !pickupOf.has(String(id))) pickupOf.set(String(id), p.id);
+      const at = (g) => Date.parse(g.scheduled_at);
+      const Fx = (g, endMs) => g ? { gameId: g.id, home: code(g.home_team_id), away: code(g.away_team_id),
+        at: g.scheduled_at ? new Date(at(g)).toISOString() : null, status: g.status,
+        held: g.status === "scheduled" && g.ea_match_id != null, forfeit: g.forfeit_team_id ? code(g.forfeit_team_id) : null,
+        inWindow: !!endMs && matchInWindow(endMs, g.scheduled_at) } : null;
+      const sessions = items.map((it) => {
+        const r = it.row, n = it.n;
+        const struck = !!(r && r.status === "struck");
+        const pickupGameId = pickupOf.get(it.id) || null;
+        const archive = r ? { status: r.status, gameId: r.game_id || null } : null;
+        if (!n) {
+          const ts = it.raw && +it.raw.timestamp;
+          return { matchId: it.id, endedAt: ts ? new Date(ts * 1000).toISOString() : null, minutes: null, length: null, source: it.source,
+            clubs: [], archive, pickupGameId, onGame: false, struck, kind: "not-league", fixture: null, ambiguous: false, alternatives: [],
+            canMerge: false, canPickup: false, why: "EA's record of this sitting can't be read." };
+        }
+        const endMs = (n.ts || 0) * 1000;
+        const st1 = sittingsState([n]);
+        const length = st1.finished ? (st1.wentOt ? "full-ot" : "full") : (st1.level && st1.reachedFull ? "level" : "short");
+        const teamsOf = n.clubs.map((c) => teamByClub.get(String(c.ea_club_id)) || null);
+        const nLeague = teamsOf.filter(Boolean).length;
+        const filedOn = ctx.filed.get(it.id) || (r && r.game_id) || null;
+        let kind = "not-league", fixture = null, ambiguous = false, alternatives = [], why = null, onGame = false, canMerge = null, canPickup = null;
+        if (filedOn) {
+          /* where the archive or the games table says it is filed, it is that game's, whatever its window says */
+          kind = "league";
+          fixture = Fx(gameById.get(filedOn), endMs) || { gameId: filedOn, home: null, away: null, at: null, status: null, held: false, forfeit: null, inWindow: false };
+          onGame = !struck && (ctx.filed.get(it.id) === filedOn || !!(r && /^(ingested|incomplete|merged)$/.test(r.status)));
+          if (nLeague < 2) { canMerge = false; why = SUB; }
+        } else if (nLeague === 2) {
+          const [tA, tB] = teamsOf.map((t) => t.id);
+          const pairAll = [...gameById.values()].filter((g) => !g.voided
+            && ((g.home_team_id === tA && g.away_team_id === tB) || (g.home_team_id === tB && g.away_team_id === tA))
+            && Math.abs(at(g) - endMs) <= 86400000).sort((x, y) => at(x) - at(y));
+          if (pairAll.length) {
+            /* the importer's own choice first (the earliest open fixture whose window holds the end time, siblings from
+               the pair's night), then a held game in window waiting for the rest of its sittings, else the nearest */
+            const open = pairAll.filter((g) => g.status === "scheduled" && g.ea_match_id == null && g.forfeit_team_id == null);
+            const primary = fixtureForMatch(open, tA, tB, endMs, undefined, undefined, pairAll);
+            const held = pairAll.filter((g) => g.status === "scheduled" && g.ea_match_id != null && g.forfeit_team_id == null && matchInWindow(endMs, g.scheduled_at));
+            const tier1 = uniq([primary, ...held].filter(Boolean));
+            const fx = tier1[0] || pairAll.slice().sort((x, y) => Math.abs(at(x) - endMs) - Math.abs(at(y) - endMs))[0];
+            kind = "league";
+            fixture = Fx(fx, endMs);
+            ambiguous = tier1.length > 1;
+            alternatives = pairAll.filter((g) => g.id !== fx.id).map((g) => Fx(g, endMs));
+          }
+        } else if (nLeague === 1) {
+          const known = teamsOf.find(Boolean);
+          const inWin = [...gameById.values()].filter((g) => !g.voided && (g.home_team_id === known.id || g.away_team_id === known.id)
+            && matchInWindow(endMs, g.scheduled_at)).sort((x, y) => at(x) - at(y));
+          const fx = inWin.find((g) => g.status === "scheduled" && g.ea_match_id == null) || inWin[0];
+          /* v4.36: when the fixture's other club has no EA club linked yet, this is most likely its own club playing the
+             game: leagueMerge takes one linked side and links the opponent from the sittings (refusing an EA club another
+             league club owns), so it is a league sitting. Otherwise an outside club played: a Rule 4.6 substitution. */
+          const oppT = fx ? teamById.get(fx.home_team_id === known.id ? fx.away_team_id : fx.home_team_id) : null;
+          /* only when that fixture is the known club's ONE open game in window: windows overlap across a night's slots,
+             and a borrowed club (Rule 4.6) against a later slot must never read as the unlinked club's own (the merge
+             would then link the borrowed club to the wrong team for good) */
+          const openInWin = inWin.filter((g) => g.status === "scheduled" && g.ea_match_id == null);
+          if (fx && oppT && oppT.ea_club_id == null && openInWin.length <= 1) { kind = "league"; fixture = Fx(fx, endMs); }
+          else if (fx) { kind = "needs-substitution"; fixture = Fx(fx, endMs); canMerge = false; canPickup = false; why = SUB; }
+        }
+        if (pickupGameId) { canMerge = false; why = "Imported as a pickup game."; }
+        if (struck) { canMerge = false; why = "Struck when its game restarted from the beginning. A struck sitting stays struck."; }
+        if (canMerge === null) canMerge = kind === "league";
+        /* the pickup import's own league guard (pickup-import.js, v4.36), read the same way */
+        if (canPickup === null) canPickup = kind === "not-league" && it.source !== "archive" && !pickupGameId && (!r || r.status === "ignored");
+        /* v4.36: say why a game outside the league cannot be imported, instead of leaving the desk to guess */
+        if (kind === "not-league" && !canPickup && !why)
+          why = r && r.status !== "ignored" ? "The league archive holds it as a possible league game, so it can't be imported as a pickup game. Ask the statistics desk."
+            : it.source === "archive" ? "Only in the league archive: EA must still list a sitting to import it." : null;
+        return { matchId: it.id, endedAt: endMs ? new Date(endMs).toISOString() : null, minutes: Math.round(segElapsed(n) / 60), length,
+          source: it.source,
+          clubs: n.clubs.map((c, i) => ({ eaId: String(c.ea_club_id), name: c.name || null, team: teamsOf[i] ? teamsOf[i].code : null, score: c.score })),
+          archive, pickupGameId, onGame, struck, kind, fixture, ambiguous, alternatives, canMerge, canPickup, why };
+      });
+      const endOf = (s) => (s.endedAt ? Date.parse(s.endedAt) : 0);
+      sessions.sort((x, y) => endOf(y) - endOf(x));   // newest first
+      const named = norms.flatMap((n) => n.clubs).find((c) => String(c.ea_club_id) === clubId && c.name);
+      const club = { eaId: clubId, name: named ? named.name : `EA club ${clubId}`, team: teamByClub.has(clubId) ? teamByClub.get(clubId).code : null };
+      return { statusCode: 200, body: JSON.stringify({ ok: true, club, archiveFrom: from, archiveTo: to, ea, sessions }) };
+    } catch (e) {
+      return { statusCode: 500, body: JSON.stringify({ error: "Could not read the league archive: " + String((e && e.message) || e) }) };
+    }
+  }
+
+  if (!authed && body && body.leagueMerge) { try {
     const jwt = String(event.headers.authorization || event.headers.Authorization || "").replace(/^Bearer\s+/i, "");
     const gameId = String(body.leagueMerge.gameId || "");
     const matchIds = (Array.isArray(body.leagueMerge.matchIds) ? body.leagueMerge.matchIds : []).map(String).filter(Boolean);
     if (!gameId || !matchIds.length) return { statusCode: 400, body: JSON.stringify({ error: "Missing gameId/matchIds." }) };
     if (matchIds.length > 4) return { statusCode: 400, body: JSON.stringify({ error: "Four sittings is the limit." }) };
     if (new Set(matchIds).size !== matchIds.length) return { statusCode: 400, body: JSON.stringify({ error: "The same sitting is selected twice." }) };
-    const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,season_id,week,scheduled_at,status,home_team_id,away_team_id,ea_match_id,voided,forfeit_team_id`))[0];
+    const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,season_id,week,scheduled_at,status,home_team_id,away_team_id,ea_match_id,voided,forfeit_team_id,home_score,away_score`))[0];
     if (!game) return { statusCode: 404, body: JSON.stringify({ error: "No such game." }) };
     const actor = await authForGame(jwt, game);
     if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
@@ -1750,17 +1932,73 @@ export const handler = async (event) => {
        removed", commissioner 2026-09-28) and Rule 4.3's restart from the beginning. Staff only: it
        deletes statistics a club earned on the ice. */
     const restart = body.leagueMerge.restart === true;
+    /* v4.36: the club desk has no Restarted box; its managers are told who re-files a restarted game */
+    const restartHint = actor.via === "management"
+      ? "If the game was restarted from the beginning, statistics staff re-file it."
+      : "If the game was restarted from the beginning, tick \"Restarted\" to strike the sittings you leave out.";
     if (restart && actor.via !== "staff")
       return { statusCode: 403, body: JSON.stringify({ error: "Only statistics staff can re-file a restarted game." }) };
-    /* the sitting already on the game must be part of the selection — leaving it out would orphan
+    /* v4.36: a sitting the league archive does not hold yet (the poller never saw it: the clubs played outside every
+       polled window, or the night's poll died) can be taken from EA through the bot's server, exactly as the pickup
+       import takes its sessions. Statistics staff or a commissioner only: the club desk works from the archive alone. */
+    const eaClubId = body.leagueMerge.eaClubId != null && body.leagueMerge.eaClubId !== "" ? String(body.leagueMerge.eaClubId).trim() : null;
+    if (eaClubId && actor.via !== "staff")
+      return { statusCode: 403, body: JSON.stringify({ error: "Only statistics staff or a commissioner can merge a sitting the league archive does not hold yet." }) };
+    /* the sitting already on the game must be part of the selection: leaving it out would orphan
        a box score the standings already counted (a restart strikes it instead, on purpose) */
     if (!restart && game.ea_match_id && matchIds.indexOf(String(game.ea_match_id)) < 0)
-      return { statusCode: 422, body: JSON.stringify({ error: `Include the sitting already on this game (${game.ea_match_id}) in the selection — the merge REPLACES the box score. If the game was restarted from the beginning, tick "Restarted" to strike the sittings you leave out.` }) };
-    const logRows = await sbGet(`ea_ingest_log?ea_match_id=in.(${matchIds.map(encodeURIComponent).join(",")})&select=ea_match_id,status,game_id,payload`);
-    if ((logRows || []).length !== matchIds.length)
-      return { statusCode: 404, body: JSON.stringify({ error: "A selected sitting has no archived payload — it was never seen by the poller." }) };
+      return { statusCode: 422, body: JSON.stringify({ error: `Include the sitting already on this game (${game.ea_match_id}) in the selection: the merge REPLACES the box score. ${restartHint}` }) };
+    const idsQ = matchIds.map(encodeURIComponent).join(",");
+    const archivedRows = await sbGet(`ea_ingest_log?ea_match_id=in.(${idsQ})&select=ea_match_id,status,game_id,reason,payload`);
+    const logRows = matchIds.map((id) => (archivedRows || []).find((r) => String(r.ea_match_id) === id)).filter(Boolean);
+    const missing = matchIds.filter((id) => !logRows.some((r) => String(r.ea_match_id) === id));
+    const fromEa = [];
+    if (missing.length) {
+      if (!eaClubId)
+        return { statusCode: 404, body: JSON.stringify({ error: "A selected sitting has no archived payload: the poller never saw it." }) };
+      /* the list the staffer picked from is the bot's stored answer (up to a day old); only a sitting missing from it
+         asks EA again, once (the pickup import's rule). { eaPending } sends the browser to wait and ask again. */
+      const relay = (o) => eaRelay(DB, "matches", eaClubId, { requestedBy: actor.uid, ...o }).catch((e) => ({ __err: e.message }));
+      const pick = (g) => missing.map((id) => (Array.isArray(g.raw) ? g.raw : []).find((m) => m && String(m.matchId) === id));
+      let got = await relay({ maxAgeMs: 86400000, answerId: body.leagueMerge.eaLookup });
+      let picked = got.__err || got.pending ? null : pick(got);
+      if (picked && picked.some((m) => !m) && !got.viaAnswer) { got = await relay({ maxAgeMs: 0 }); picked = got.__err || got.pending ? null : pick(got); }
+      if (got.__err) return { statusCode: 502, body: JSON.stringify({ error: got.__err }) };
+      if (got.pending) return { statusCode: 200, body: JSON.stringify({ eaPending: got.pending }) };
+      if (picked.some((m) => !m))
+        return { statusCode: 404, body: JSON.stringify({ error: "A selected sitting has no archived payload, and EA no longer lists it for that club." }) };
+      /* in memory only: these rows are archived below, with the merge's provenance, before the game is touched */
+      picked.forEach((m, i) => { logRows.push({ ea_match_id: missing[i], status: null, game_id: null, payload: m, fromEa: true }); fromEa.push(missing[i]); });
+    }
+    /* v4.36: A STRUCK SITTING STAYS STRUCK. A restart (Rules 4.3 and 4.5) removed it with its statistics, and before
+       this check any merge that ticked it again wrote it back as ingested or merged, putting back stats the league
+       removed. Every caller, a commissioner and a restart included: there is no door that un-strikes a sitting. */
+    const struckRow = logRows.find((r) => r.status === "struck");
+    if (struckRow)
+      return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${struckRow.ea_match_id} was struck when its game restarted from the beginning (Rules 4.3 and 4.5). A struck sitting stays struck, so it can't be merged.`, code: "struck" }) };
     const stolen = logRows.find((r) => r.game_id && r.game_id !== game.id);
     if (stolen) return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${stolen.ea_match_id} already belongs to another game — it can't be merged here.` }) };
+    /* v4.36: the archive's game_id can lag behind the games table (an interrupted filing), and games.ea_match_id is
+       unique only for a game's FIRST sitting, so the filed sitting of another game is refused from the games table too */
+    const otherFiled = await sbGet(`games?ea_match_id=in.(${idsQ})&id=neq.${encodeURIComponent(game.id)}&select=id,ea_match_id&limit=1`);
+    if (otherFiled && otherFiled[0])
+      return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${otherFiled[0].ea_match_id} is the filed sitting of another game, so it can't be merged here.` }) };
+    /* v4.36: a sitting imported as a pickup game already shows on player profiles; merging it into a league game would
+       count the same play twice. The pickup game is deleted first, from the Stats manager's list. */
+    const pu = await sbGet(`pickup_games?or=(ea_match_id.in.(${idsQ}),ea_match_ids.ov.{${idsQ}})&select=id,ea_match_id,ea_match_ids&limit=1`);
+    if (pu && pu[0]) {
+      const hit = matchIds.find((id) => String(pu[0].ea_match_id) === id || (pu[0].ea_match_ids || []).map(String).indexOf(id) >= 0) || matchIds[0];
+      return { statusCode: 409, body: JSON.stringify({ error: `Sitting ${hit} was imported as a pickup game. Delete that pickup game first (Pickup games on file), then merge.`, pickupGameId: pu[0].id }) };
+    }
+    /* v4.36: EVERY LINE COUNTS (standing rule). The merge REPLACES the game's box score, so a sitting already on the
+       game that is left out of the selection would lose its players' stats with no trace. Only a restart (staff, Rules
+       4.3 and 4.5) may leave one out, and then it is struck below, on purpose. Read once and reused for the strike. */
+    const onGameAll = (await sbGet(`ea_ingest_log?game_id=eq.${encodeURIComponent(game.id)}&select=ea_match_id,status`)) || [];
+    const need = onGameAll.filter((r) => /^(ingested|incomplete|merged)$/.test(r.status)).map((r) => String(r.ea_match_id));
+    if (!restart && need.some((id) => matchIds.indexOf(id) < 0)) {
+      const named = need.length === 1 ? `sitting ${need[0]}` : `sittings ${need.slice(0, -1).join(", ")} and ${need[need.length - 1]}`;
+      return { statusCode: 422, body: JSON.stringify({ error: `This game already has ${named} on it. Include every one of them: the merge REPLACES the box score. ${restartHint}` }) };
+    }
     /* Pair check. Both linked: exact pair. One linked: every selected sitting must contain OUR
        club and agree on a single opposing club — that consistency is what lets the merge then
        LINK the opponent from evidence: the payload of the game being attached to this fixture
@@ -1781,9 +2019,11 @@ export const handler = async (event) => {
                  etDayUnix(Math.floor(Date.parse(game.scheduled_at) / 1000) + 86400)])
       : null;
     const norms = [];
+    const normById = new Map();   // v4.36: the relay rows are archived from their own normalized payload
     let derivedOpp = null;   // {id, name} consistent across every selected sitting
     for (const row of logRows) {
-      const nrm = normalizeMatch(row.payload);
+      let nrm = null;
+      try { nrm = normalizeMatch(row.payload); } catch { nrm = null; }
       if (!nrm) return { statusCode: 422, body: JSON.stringify({ error: `Couldn't read sitting ${row.ea_match_id}.` }) };
       if (pair) {
         if (nrm.clubs.map((c) => c.ea_club_id).sort().join("|") !== pair)
@@ -1800,6 +2040,7 @@ export const handler = async (event) => {
       if (mgmtDays && !mgmtDays.has(nrm.et_day))
         return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${nrm.ea_match_id} wasn't played around this fixture — statistics staff can merge that one for you.` }) };
       norms.push(nrm);
+      normById.set(String(row.ea_match_id), nrm);
     }
     /* Evidence linkage must not silently re-point an EA club that's already backing another
        league club — that would let one wrong selection hijack auto-imports elsewhere. */
@@ -1817,35 +2058,111 @@ export const handler = async (event) => {
     const homeEaId = home.ea_club_id != null ? String(home.ea_club_id) : derivedOpp.id;
     const awayEaId = away.ea_club_id != null ? String(away.ea_club_id) : derivedOpp.id;
     const clubByTeam = { [game.home_team_id]: clubByClubId[homeEaId], [game.away_team_id]: clubByClubId[awayEaId] };
+    const homeClub = clubByTeam[game.home_team_id], awayClub = clubByTeam[game.away_team_id];
+    /* v4.36: everything the desk's confirm states is computed here, before a single write, so the preview below and
+       the merge can never disagree. heldWhy moved up from after the writes; its text is unchanged. */
+    const fshL = st.finished ? null : finalStretchHold(game, st);   // v3.88 (Rule 4.3.6)
+    const heldWhy = st.finished ? null
+      : (st.level && st.reachedFull
+        ? `Level ${homeClub.score}-${awayClub.score} after ${Math.round(st.total / 60)} minutes: held for the overtime reload (Rule 4.3).`
+        : fshL
+          ? `Held: ${fshL.why}.`
+          : `The sittings add up to ${Math.round(st.total / 60)} of ${Math.round(REGULATION_S / 60)} minutes: held until the rest of the game is merged (Rule 4.3).`);
+    const minutes = Math.round(st.total / 60);
+    /* what #game-scores will show (notify_discord_game_final): a final on entering final, a Corrected line on a later
+       score change, nothing for a held game or an unchanged score */
+    const posts = st.finished
+      ? (game.status !== "final" ? "final" : (game.home_score !== homeClub.score || game.away_score !== awayClub.score) ? "corrected" : "none")
+      : "none";
+    const unpublish = game.status === "final" && !st.finished;
+    const strike = restart ? onGameAll.filter((r) => r.status !== "struck" && matchIds.indexOf(String(r.ea_match_id)) < 0).map((r) => String(r.ea_match_id)) : [];
+    const outsideWindow = norms.filter((n) => !matchInWindow((n.ts || 0) * 1000, game.scheduled_at)).map((n) => String(n.ea_match_id));
+    /* v4.36: the desk previews a merge before its confirm. Writes nothing; the relay request above is the only row a
+       preview can file, and only when a sitting has to come from EA. */
+    if (body.leagueMerge.preview === true)
+      return { statusCode: 200, body: JSON.stringify({ ok: true, preview: true,
+        score: `${homeClub.score}-${awayClub.score}`, wentOt: !!st.wentOt, inferredOt: !!st.inferredOt,
+        held: !st.finished, heldWhy, overlong: !!st.overlong, minutes, sittings: norms.length,
+        strike, fromEa, outsideWindow, unpublish, posts,
+        /* v4.36: a merge with one linked side links the opponent's EA club from these sittings; the confirm says so */
+        links: derivedOpp ? { team: (home.ea_club_id == null ? home : away).code, eaId: derivedOpp.id, name: derivedOpp.name } : null,
+        current: { status: game.status, score: game.status === "final" ? `${game.home_score}-${game.away_score}` : null } }) };
+    /* v4.36: a short merge onto a FINAL game takes its published result off the standings and holds the game, and
+       nothing is posted (the old final stays in #game-scores). That used to happen silently on any merge; now it
+       needs the desk's explicit unpublish:true, sent only after its confirm says so. Every caller, the club desk too. */
+    if (unpublish && body.leagueMerge.unpublish !== true)
+      return { statusCode: 409, body: JSON.stringify({ error: `These sittings add up to ${minutes} of 60 minutes, so the game would go back to held and its published result would come off the standings, with nothing posted. Nothing was changed. ${actor.via === "management" ? "Statistics staff can confirm it from the Stats manager." : "Confirm it from the Stats manager to go ahead."}`, wouldHold: true, heldWhy }) };
+    /* v4.36: below the preview, because the profile lookups are reads a preview does not need */
     const rows = await leagueBoxRows(game, clubByTeam);
-    /* WRITE ORDER: the archive first. The payloads are archived by construction (they came from
-       ea_ingest_log), so the archive write here is the provenance — the first sitting owns the
-       game, the rest are merged, stamped with who did it — the SAME marks the automatic path
+    /* WRITE ORDER: the archive first. The archive write here is the provenance (the first sitting
+       owns the game, the rest are merged, stamped with who did it), the SAME marks the automatic path
        leaves, so its dedupe treats this game identically from now on. It goes in BEFORE the game
        is touched: if the writes below die, the archive says who was rebuilding what, and the
-       human who clicked sees the error and clicks again (the retry passes every check above). */
+       human who clicked sees the error and clicks again (the retry passes every check above).
+       v4.36: a sitting taken from EA is archived here too, in ONE insert carrying its final provenance (D9), and an
+       archived sitting is marked only if no restart struck it and no other game claimed it since the checks above;
+       either race answers 409 with the game untouched. */
     const byWhom = actor.via === "management" ? `${actor.who} (${actor.club} management)` : `${actor.who} (stats staff)`;
+    const prov = (id) => {
+      const first = id === String(merged.ea_match_id);
+      return { status: first ? (st.finished ? "ingested" : "incomplete") : "merged", game_id: game.id, reason: first
+        ? `manual lag-out merge (${norms.length} sitting${norms.length === 1 ? "" : "s"}) by ${byWhom}${st.finished ? "" : ", held: not yet a full, decided game"}${restart ? ", restarted from the beginning" : ""}`
+        : `manually merged into ${merged.ea_match_id} by ${byWhom}` };
+    };
+    const archivedNow = [];
+    /* v4.36: a race exit puts back what THIS request already wrote, so no sitting is left claiming a game that never got
+       its stats (every line counts). Each undo is conditional on the row still naming this game, so a newer writer is
+       never undone; an undo that fails is named in the answer, never swallowed. A sitting taken from EA goes back to
+       unmatched: the archive keeps its payload, and the pickup import keeps refusing it as a possible league game. */
+    const prior = new Map((archivedRows || []).map((r) => [String(r.ea_match_id), { status: r.status, game_id: r.game_id || null, reason: r.reason || null }]));
+    const undo = async (patched) => {
+      const failed = [];
+      const back = async (id, body) => {
+        try { await sbSend("PATCH", `ea_ingest_log?ea_match_id=eq.${encodeURIComponent(id)}&game_id=eq.${encodeURIComponent(game.id)}&status=neq.struck`, body, "return=minimal"); }
+        catch (e) { failed.push(id); }
+      };
+      for (const id of patched) if (prior.has(id)) await back(id, prior.get(id));
+      for (const id of archivedNow) await back(id, { status: "unmatched", game_id: null,
+        reason: `taken from EA by the Stats manager search; the merge into this game was abandoned because another writer changed a sitting at the same moment` });
+      return failed.length ? ` Sitting${failed.length === 1 ? "" : "s"} ${failed.join(", ")} could not be put back: tell a commissioner.` : "";
+    };
+    const toInsert = logRows.filter((r) => r.fromEa);
+    if (toInsert.length) {
+      const sent = toInsert.map((r) => {
+        const id = String(r.ea_match_id), nrm = normById.get(id), p = prov(id);
+        return { ea_match_id: id, payload: r.payload, et_day: nrm.et_day, ea_club_ids: nrm.clubs.map((c) => c.ea_club_id),
+          ...p, reason: `${p.reason} (taken from EA by the Stats manager search: the poller never archived it)`,
+          last_attempt_at: new Date().toISOString() };
+      });
+      const back = await sbSend("POST", "ea_ingest_log?on_conflict=ea_match_id", sent, "resolution=ignore-duplicates,return=representation");
+      archivedNow.push(...(Array.isArray(back) ? back : []).map((r) => String(r.ea_match_id)));
+      if (archivedNow.length < sent.length) {
+        const left = await undo([]);
+        return { statusCode: 409, body: JSON.stringify({ error: "The poller saved one of these sittings a moment ago, so the game was not touched. Load the sittings again and merge." + left, archived: archivedNow }) };
+      }
+    }
+    const patched = [];
     for (const row of logRows) {
-      const first = row.ea_match_id === merged.ea_match_id;
-      await sbSend("PATCH", `ea_ingest_log?ea_match_id=eq.${encodeURIComponent(row.ea_match_id)}`,
-        { status: first ? (st.finished ? "ingested" : "incomplete") : "merged", game_id: game.id, reason: first
-          ? `manual lag-out merge (${norms.length} sitting${norms.length === 1 ? "" : "s"}) by ${byWhom}${st.finished ? "" : ", held: not yet a full, decided game"}${restart ? ", restarted from the beginning" : ""}`
-          : `manually merged into ${merged.ea_match_id} by ${byWhom}` });
+      if (row.fromEa) continue;
+      const id = String(row.ea_match_id);
+      const back = await sbSend("PATCH",
+        `ea_ingest_log?ea_match_id=eq.${encodeURIComponent(id)}&status=neq.struck&or=(game_id.is.null,game_id.eq.${encodeURIComponent(game.id)})`,
+        prov(id), "return=representation");
+      if (!Array.isArray(back) || !back.length) {
+        const left = await undo(patched);
+        return { statusCode: 409, body: JSON.stringify({ error: `Sitting ${id} changed while merging, so the game was not touched. Load the sittings again and merge.` + left }) };
+      }
+      patched.push(id);
     }
     let struck = 0;
-    if (restart) {
-      const onGame = await sbGet(`ea_ingest_log?game_id=eq.${game.id}&select=ea_match_id,status`);
-      for (const r0 of onGame || []) {
-        if (matchIds.indexOf(String(r0.ea_match_id)) >= 0 || r0.status === "struck") continue;
-        await sbSend("PATCH", `ea_ingest_log?ea_match_id=eq.${encodeURIComponent(r0.ea_match_id)}`,
-          { status: "struck", reason: `struck by ${byWhom}: the game was restarted from the beginning (Rules 4.3 and 4.5), and its statistics were removed` });
-        struck++;
-      }
+    for (const id of strike) {
+      await sbSend("PATCH", `ea_ingest_log?ea_match_id=eq.${encodeURIComponent(id)}`,
+        { status: "struck", reason: `struck by ${byWhom}: the game was restarted from the beginning (Rules 4.3 and 4.5), and its statistics were removed` });
+      struck++;
     }
     await sbSend("DELETE", `game_stats?game_id=eq.${game.id}`);
     if (rows.length && !(await postBoxScore(rows)))
       return { statusCode: 409, body: JSON.stringify({ error: "Another import wrote this game's box score at the same moment — reload the fixture and try again." }) };
-    const homeClub = clubByTeam[game.home_team_id], awayClub = clubByTeam[game.away_team_id];
     /* forfeit_team_id is deliberately NOT in this PATCH. A merge files what was played; whether
        a ruling stands over it is a commissioner's call, made with undo_forfeit (v3.52). */
     await sbSend("PATCH", `games?id=eq.${game.id}`, st.finished
@@ -1875,18 +2192,16 @@ export const handler = async (event) => {
         `${st.finished ? "final" : "held (not yet a full, decided game)"} ${homeClub.score}-${awayClub.score}${st.wentOt ? " (OT)" : ""}, ${rows.length} player lines. ` +
         `Review it in the Stats Manager if anything looks off.`);
     }
-    const fshL = st.finished ? null : finalStretchHold(game, st);   // v3.88 (Rule 4.3.6)
-    const heldWhy = st.finished ? null
-      : (st.level && st.reachedFull
-        ? `Level ${homeClub.score}-${awayClub.score} after ${Math.round(st.total / 60)} minutes: held for the overtime reload (Rule 4.3).`
-        : fshL
-          ? `Held: ${fshL.why}.`
-          : `The sittings add up to ${Math.round(st.total / 60)} of ${Math.round(REGULATION_S / 60)} minutes: held until the rest of the game is merged (Rule 4.3).`);
     return { statusCode: 200, body: JSON.stringify({ ok: true, gameId: game.id,
       score: `${homeClub.score}-${awayClub.score}`, wentOt: !!st.wentOt, inferredOt: !!st.inferredOt,
       held: !st.finished, heldWhy, struck, overlong: !!st.overlong,
-      sittings: norms.length, players: rows.length, linked, by: byWhom }) };
-  }
+      sittings: norms.length, players: rows.length, linked, by: byWhom,
+      minutes, posts, archived: archivedNow }) };
+  } catch (e) {
+    /* v4.36: a read or write that throws part way answers in words, never Netlify's crash page, which the desk would
+       otherwise take for a reply with no error in it */
+    return { statusCode: 500, body: JSON.stringify({ error: "The merge stopped part way: " + String((e && e.message) || e) + ". Check the game in the Stats manager before trying again." }) };
+  } }
 
   // Commissioner re-ingest: { reingest: "<ea_match_id>" } with the signed-in user's JWT.
   // INGEST_KEY stays server-side only; the archived payload is replayed from ea_ingest_log.

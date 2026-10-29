@@ -19,7 +19,8 @@ A("the staff-desk channel no longer binds the table", /const DESK_TABLES = \["ac
 A("staff alerts no longer route, key or enrich it", !/game_incidents/.test(alerts));
 A("bot comments and description no longer name it", !/incident/.test(handlers) && !/incident/.test(pkg));
 A("the Stats manager card and its wiring are gone", !/incidentCard|log_game_incident|smInGo|Log a game incident/.test(live));
-A("...and the other Stats manager cards remain", /body\.innerHTML = addCard \+ leagueCard \+ fixCard \+ forfeitCard \+ listCard;/.test(live));
+/* v4.36: the desk was rebuilt (forfeit above correction, the merge inside the search); the other cards remain */
+A("...and the other Stats manager cards remain", /'<div class="sm" id="smDesk">'\+CG\._smTodoHtml\(st\)\+CG\._smFindHtml\(st\)\+CG\._smForfeitHtml\(st\)\+CG\._smFixHtml\(st\)\+CG\._smListHtml\(st\)\+'<\/div>'/.test(live));
 
 global.window = {}; global.CG = {}; eval(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook, secs = {};
