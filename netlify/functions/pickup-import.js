@@ -7,10 +7,14 @@
 //   { action: "matches", clubId }              -> [{ matchId, playedAt, a:{name,score}, b:{name,score}, wentOt }]
 //   { action: "import",  clubId, matchId }     -> { ok, pickupGameId, players:[{name,profile_id,goals,...}], unmatched }
 //
-// EA blocks datacenter IPs, so EA calls go through the same residential proxy ea-poll uses (HTTPS_PROXY).
-// Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, HTTPS_PROXY, optional PLATFORM. Node 18+.
+// v4.34: EA (behind Akamai) refuses Netlify, so the three actions ask EA through the bot's server
+// (shared/ea-relay.cjs): an action with no stored answer files a request and replies { eaPending: id };
+// the browser waits on public.ea_lookup_state(id) and posts the same action again with { eaLookup: id }.
+// eaFetch below is kept only for the key-gated GET diagnostics, which show what Netlify itself is served.
+// Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, optional HTTPS_PROXY (diagnostics), optional PLATFORM. Node 18+.
 
 import { noLinkPreviews } from "../../shared/discord-links.cjs";
+import { eaRelay } from "../../shared/ea-relay.cjs";
 
 const SB_URL = process.env.SUPABASE_URL;
 const BOT = process.env.DISCORD_BOT_TOKEN;   // optional: lets an import announce + close its lobby room
@@ -32,6 +36,7 @@ async function sbSend(method, path, body, prefer) {
   const t = await r.text(); return t ? JSON.parse(t) : null;
 }
 const reply = (obj, code) => ({ statusCode: code || 200, headers: { "content-type": "application/json" }, body: JSON.stringify(obj) });
+const DB = { get: sbGet, send: sbSend };   // the relay's service-role pair
 
 /* ---------- close the lobby room a just-imported game came from ----------
    A pickup_games row carries no lobby reference, so the link is inferred from PEOPLE: the lobby
@@ -84,7 +89,7 @@ async function authUser(token) {
   } catch (e) { return null; }
 }
 
-/* ---------- EA Pro Clubs (direct, with the residential proxy as a fallback) ---------- */
+/* ---------- EA Pro Clubs from Netlify: the key-gated diagnostics only (v4.34: the actions use the relay) ---------- */
 // A PROXIED attempt must use undici's OWN fetch: on Node 24 the global fetch silently drops the
 // `dispatcher` option, so the ProxyAgent would be ignored. The direct attempt deliberately uses
 // global fetch instead, which keeps the handler stubbable from tools/*.test.mjs.
@@ -135,10 +140,6 @@ async function eaFetch(url, opts = {}) {
   const all = said.join("; ") || "no route answered";
   throw new Error(`EA unreachable (${all}${all.includes("403") ? " — EA is throttling this host; the VM lane still reaches it" : ""})`);
 }
-const eaSearchClubs = (name) =>
-  eaFetch(`https://proclubs.ea.com/api/nhl/clubs/search?platform=${PLATFORM}&clubName=${encodeURIComponent(name)}`);
-const eaClubMatches = (clubId) =>
-  eaFetch(`https://proclubs.ea.com/api/nhl/clubs/matches?matchType=club_private&platform=${PLATFORM}&clubIds=${encodeURIComponent(clubId)}`);
 
 /* ---------- EA position -> profile position ---------- */
 function mapPos(p) {
@@ -359,7 +360,9 @@ export const handler = async (event) => {
     if (action === "search") {
       const name = String(body.clubName || "").trim();
       if (name.length < 2) return reply({ error: "Enter at least 2 characters." }, 400);
-      const data = await eaSearchClubs(name);
+      const got = await eaRelay(DB, "search", name, { answerId: body.eaLookup, requestedBy: uid });
+      if (got.pending) return reply({ eaPending: got.pending });
+      const data = got.raw;
       // EA returns an object keyed by clubId (or sometimes an array); normalize to a small list.
       const list = Array.isArray(data)
         ? data.map((c) => ({ clubId: String(c.clubId || c.clubInfo?.clubId || ""), name: c.name || c.clubInfo?.name, memberCount: c.memberCount }))
@@ -370,7 +373,9 @@ export const handler = async (event) => {
     if (action === "matches") {
       const clubId = String(body.clubId || "").trim();
       if (!clubId) return reply({ error: "Missing clubId." }, 400);
-      const raw = await eaClubMatches(clubId);
+      const got = await eaRelay(DB, "matches", clubId, { answerId: body.eaLookup, requestedBy: uid });
+      if (got.pending) return reply({ eaPending: got.pending });
+      const raw = got.raw;
       const list = (Array.isArray(raw) ? raw : []).map((m) => {
         const n = normalizeMatch(m); if (!n) return null;
         /* the longest time-on-ice in the match is the best proxy for how much game was played —
@@ -400,8 +405,17 @@ export const handler = async (event) => {
       if (dup[0]) return reply({ error: matchIds.length > 1
         ? "One of those sessions is already part of an imported game." : "That game was already imported.", pickupGameId: dup[0].id }, 409);
 
-      const raw = await eaClubMatches(clubId);
-      const picked = matchIds.map((id) => (Array.isArray(raw) ? raw : []).find((m) => String(m.matchId) === id));
+      /* v4.34: the match list the bot fetched when the staffer listed this club's games (up to a day old) is the
+         one they picked from; only when a picked session is missing from it is EA asked again, once */
+      let got = await eaRelay(DB, "matches", clubId, { maxAgeMs: 24 * 3600 * 1000, answerId: body.eaLookup, requestedBy: uid });
+      if (got.pending) return reply({ eaPending: got.pending });
+      const pick = (raw) => matchIds.map((id) => (Array.isArray(raw) ? raw : []).find((m) => String(m.matchId) === id));
+      let picked = pick(got.raw);
+      if (picked.some((m) => !m) && !got.viaAnswer) {
+        got = await eaRelay(DB, "matches", clubId, { maxAgeMs: 0, requestedBy: uid });
+        if (got.pending) return reply({ eaPending: got.pending });
+        picked = pick(got.raw);
+      }
       if (picked.some((m) => !m)) return reply({ error: "A selected match is no longer in the club's recent history (EA only keeps the last few). Use the screenshot importer instead." }, 404);
       const norms = picked.map(normalizeMatch);
       if (norms.some((nrm) => !nrm)) return reply({ error: "Couldn't read one of those matches (need exactly 2 clubs)." }, 422);

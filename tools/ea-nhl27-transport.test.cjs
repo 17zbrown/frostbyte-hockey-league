@@ -18,6 +18,8 @@ const ingest = R("netlify/functions/ingest-stats.js");
 const poll   = R("netlify/functions/ea-poll.js");
 const live   = R("src/live/part_live.js");
 const fetcher = R("tools/ea-fetcher/fetch-and-post.mjs");
+const vm     = R("bot/ea-poll.mjs");
+const relay  = R("shared/ea-relay.cjs");
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
 
@@ -25,16 +27,18 @@ console.log("— the EA transport tries DIRECT before the paid proxy");
 /* v3.06: the route list gained a one-try mode for interactive callers, so pin the PROPERTY (the
    direct attempt is first, and a missing proxy never arms one) rather than the literal line. */
 A("pickup-import puts the direct route first", /const routes = PROXY\s*\n?\s*\? \(opts\.tries === 1 \? \[null, PROXY\] : \[null, PROXY, PROXY\]\)/.test(pickup));
-A("ingest-stats puts the direct route first", /const routes = EA_PROXY\s*\n?\s*\? \(opts\.tries === 1 \? \[null, EA_PROXY\] : \[null, EA_PROXY, EA_PROXY\]\)/.test(ingest));
-A("...and with no proxy configured every route is direct",
-  /: \(opts\.tries === 1 \? \[null\] : \[null, null, null\]\)/.test(pickup) && /: \(opts\.tries === 1 \? \[null\] : \[null, null, null\]\)/.test(ingest));
+/* v4.34: the fixture desk's live EA transport is gone. Akamai refuses Netlify whichever route it takes, so
+   ingest-stats now asks through the bot's server (shared/ea-relay.cjs), the only host EA serves. */
+A("ingest-stats no longer calls EA itself: the desk's lookups go through the bot's server",
+  !/proclubs\.ea\.com/.test(ingest) && /eaRelay\(DB, "search"/.test(ingest) && /eaRelay\(DB, "matches"/.test(ingest));
+A("...and with no proxy configured every route is direct (pickup-import's diagnostics)",
+  /: \(opts\.tries === 1 \? \[null\] : \[null, null, null\]\)/.test(pickup));
 A("ea-poll puts the direct route first", /const routes = PROXY \? \[null, PROXY\] : \[null\];/.test(poll));
 A("...and none of them arms a dispatcher before the first attempt",
   !/if \(PROXY\) opts\.dispatcher = new ProxyAgent\(PROXY\);\s*\n\s*const r = await \(PROXY \? uFetch : fetch\)/.test(pickup) &&
   !/let dispatcher;\s*\n\s*if \(PROXY\) \{ dispatcher = new ProxyAgent\(PROXY\); \}/.test(poll));
 A("a proxied attempt still uses undici's fetch (global fetch drops `dispatcher`)",
-  /await \(proxy \? uFetch\(url, o\) : fetch\(url, o\)\)/.test(pickup) &&
-  /await \(proxy \? uFetch\(url, o\) : fetch\(url, o\)\)/.test(ingest));
+  /await \(proxy \? uFetch\(url, o\) : fetch\(url, o\)\)/.test(pickup));
 /* clubErrors is a STRING channel: its first entry becomes lastError and is rendered straight into
    the Automations chip tooltip, so an object there reads "[object Object]" and the operator learns
    nothing. The first cut of this change pushed an object — caught in adversarial review. */
@@ -55,9 +59,12 @@ A("...nor in player-facing copy", !/NHL ?26/i.test(live));
 A("the standalone fetcher sends a generic ea.com referer", /Referer: "https:\/\/www\.ea\.com\/"/.test(fetcher));
 
 console.log("\n— the platform token stays overridable without a deploy");
-for (const [n, s] of [["pickup-import", pickup], ["ingest-stats", ingest], ["ea-poll", poll]])
+for (const [n, s] of [["pickup-import", pickup], ["ea-poll", poll]])
   A(`${n} reads PLATFORM from the environment`, /process\.env\.PLATFORM \|\| "common-gen5"/.test(s));
-A("club_private is still the match type queried", /matchType=club_private/.test(pickup) && /matchType=club_private/.test(poll));
+A("the bot's one EA URL builder takes the platform too (the poller and the site lookups)",
+  /export function eaUrl\(kind, arg, platform = "common-gen5"\)/.test(vm) && /const platform = opts\.platform \|\| "common-gen5";/.test(vm));
+A("club_private is still the match type queried", /matchType=club_private/.test(pickup) && /matchType=club_private/.test(poll) && /matchType=club_private/.test(vm));
+A("the relay never builds an EA URL (the bot is the only EA client)", !/proclubs\.ea\.com\/api/.test(relay));
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);
 process.exit(ok ? 0 : 1);

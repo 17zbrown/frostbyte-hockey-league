@@ -2813,6 +2813,7 @@ CG.ROUTES["pickup-import"] = function(){
       '<label class="fld" style="margin:0"><span>EASHL club name</span>'+
         '<div style="display:flex;gap:8px;flex-wrap:wrap"><input id="puClub" placeholder="e.g. Chel Gaming Blades" autocomplete="off" style="flex:1;min-width:200px">'+
         '<button class="btn btn-chrome" id="puSearch">Search EA</button></div></label>'+
+      CG.eaStatusLine()+
       '<div id="puResults" style="margin-top:18px"></div>'+
     '</div></div>'+
     '<p class="caption" style="margin-top:14px">EA only keeps each club’s last few private matches, so import soon after playing. If a game has aged out or EA’s feed is down, a box-score screenshot import is the backup.</p>'+
@@ -2820,14 +2821,8 @@ CG.ROUTES["pickup-import"] = function(){
 };
 CG.AFTER["pickup-import"] = function(){
   var res = document.getElementById("puResults"); if (!res) return;
-  function api(payload){
-    return CG.sb.auth.getSession().then(function(s){
-      var tok = s && s.data && s.data.session && s.data.session.access_token;
-      if (!tok) throw new Error("Sign in again — no session token");
-      return fetch("/api/pickup-import", { method:"POST", headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+tok },
-        body: JSON.stringify(payload) }).then(function(r){ return r.json(); });
-    });
-  }
+  var api = CG._smApi;   /* v4.34: through the bot's server (CG.eaPost) */
+  CG.paintEaStatus(res.parentNode);
   var errBox = function(m){ return '<div class="note red">'+esc(m)+'</div>'; };
   function doSearch(){
     var name = (document.getElementById("puClub").value||"").trim();
@@ -2959,24 +2954,76 @@ CG.AFTER._statsMgr = function(qs){
     else CG._smRenderList(body);
   });
 };
+/* v4.34 (2026-10-29): the site's EA lookups go through the bot's server, the only host EA serves (Akamai refuses
+   Netlify and Supabase; CORS refuses a browser). Commissioner: "Also this box in the staff desk never works. Can you
+   make sure you check regularly that it works and functions so I can use it so I dont need to ask you each time?"
+   An action with no stored answer files a request and replies { eaPending: id }; this waits on ea_lookup_state(id)
+   about once a second (25 s at most), then posts the same action again with eaLookup: id, which reads the bot's
+   answer. Every site action that can reach EA (the pickup actions, the fixture desk's league actions) comes through
+   here, so no box can forget the wait; the Control Center's Re-ingest replays the stored archive and never asks EA. eaLookup rides on the action's own object: the payload for pickup-import ({ action }), its one sub-object for
+   ingest-stats ({ leagueEaSearch: {...} }). */
+CG.EA_WAIT_MS = 25000;
+CG.eaPost = function(url, payload){
+  function post(p){
+    return CG.sb.auth.getSession().then(function(s){
+      var tok = s && s.data && s.data.session && s.data.session.access_token;
+      if (!tok) throw new Error("Sign in again: no session token");
+      return fetch(url, { method:"POST", headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+tok },
+        body: JSON.stringify(p) }).then(function(r){ return r.json(); });
+    });
+  }
+  function withLookup(id){
+    var p = JSON.parse(JSON.stringify(payload)), k = p.action ? null : Object.keys(p)[0];
+    if (k && p[k] && typeof p[k] === "object") p[k].eaLookup = id; else p.eaLookup = id;
+    return p;
+  }
+  function wait(id, t0){
+    return CG.sb.rpc("ea_lookup_state", { p_id: id }).then(function(r){
+      if (r.error) throw new Error("Could not check on the EA lookup: "+r.error.message);
+      if (!r.data) throw new Error("That EA lookup is gone. Search again.");
+      if (r.data.pending === false) return id;
+      if (Date.now() - t0 > CG.EA_WAIT_MS) throw new Error("The bot server did not answer within 25 seconds. Try again in a minute; the EA status line on this box says whether it is up.");
+      return new Promise(function(res){ setTimeout(res, 1000); }).then(function(){ return wait(id, t0); });
+    });
+  }
+  var waited = false;
+  function round(p, n){
+    return post(p).then(function(o){
+      if (!o || !o.eaPending) return o;
+      if (n >= 2) throw new Error("The EA lookup did not settle. Try again in a minute.");
+      waited = true;
+      return wait(o.eaPending, Date.now()).then(function(id){ return round(withLookup(id), n+1); });
+    });
+  }
+  /* a lookup that went to the bot also refreshes the status lines, so a failure shows where it happened */
+  return round(payload, 0).then(function(o){ if (waited) CG.paintEaStatus(); return o; },
+    function(e){ if (waited) CG.paintEaStatus(); throw e; });
+};
+/* v4.34: the status line under each EA box, from the bot's own self-test every 10 minutes. ea_lookup_health reads the
+   same ledgers the Automations panel and the watchdog read, so the box, the panel and the alert cannot disagree.
+   Painted in place (never a re-render). */
+CG.eaStatusLine = function(){
+  return '<p class="caption" data-ea-status style="margin:10px 0 0;display:flex;align-items:baseline;gap:8px">'+
+    '<span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--chrome-deep)"></span>'+
+    '<span>Checking EA search\u2026</span></p>';
+};
+CG.paintEaStatus = function(root){
+  if (!CG.sb) return;
+  var els = (root || document).querySelectorAll("[data-ea-status]");
+  if (!els.length) return;
+  CG.sb.rpc("ea_lookup_health").then(function(r){
+    var h = r && !r.error && r.data, color, text;
+    if (!h){ color = "var(--chrome-deep)"; text = "EA search status is unavailable"+(r && r.error ? " ("+r.error.message+")" : "")+"."; }
+    else if (h.state === "working"){ color = "var(--green)"; text = "EA search is working. The bot server tested it "+CG.fmtAgo(Date.parse(h.at))+(h.latencyMs != null ? " (answered in "+(Math.round(h.latencyMs/100)/10)+" s)" : "")+"."; }
+    else if (h.state === "failing"){ color = "var(--red)"; text = "EA search is not working right now: "+(h.error || "the bot server's last two tests failed.")+" The commissioners are alerted automatically."; }
+    else { color = "var(--amber-ink)"; text = "EA search has not been tested in over 30 minutes, so the bot server may be down. The commissioners are alerted automatically."; }
+    Array.prototype.forEach.call(els, function(el){ el.firstChild.style.background = color; el.lastChild.textContent = text; });
+  });
+};
 /* -- league lag-out merge API (the ingest function, staff JWT) -- */
-CG._smLeagueApi = function(payload){
-  return CG.sb.auth.getSession().then(function(sess){
-    var tok = sess && sess.data && sess.data.session && sess.data.session.access_token;
-    if (!tok) throw new Error("Sign in again — no session token");
-    return fetch("/api/ingest-stats", { method:"POST", headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+tok },
-      body: JSON.stringify(payload) }).then(function(r){ return r.json(); });
-  });
-};
+CG._smLeagueApi = function(payload){ return CG.eaPost("/api/ingest-stats", payload); };
 /* -- EA import API (same backend the pickup importer uses) -- */
-CG._smApi = function(payload){
-  return CG.sb.auth.getSession().then(function(s){
-    var tok = s && s.data && s.data.session && s.data.session.access_token;
-    if (!tok) throw new Error("Sign in again — no session token");
-    return fetch("/api/pickup-import", { method:"POST", headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+tok },
-      body: JSON.stringify(payload) }).then(function(r){ return r.json(); });
-  });
-};
+CG._smApi = function(payload){ return CG.eaPost("/api/pickup-import", payload); };
 /* -- LIST: add-by-club-search + the manage list -- */
 CG._smRenderList = function(body){
   CG.sb.from("pickup_games").select("id,played_at,club_a,club_b,score_a,score_b,source,went_ot,pickup_stats(count)")
@@ -2986,6 +3033,7 @@ CG._smRenderList = function(body){
       '<div class="card-b"><label class="fld" style="margin:0"><span>EASHL club name</span>'+
         '<div style="display:flex;gap:8px;flex-wrap:wrap"><input id="smClub" placeholder="e.g. Chel Gaming Blades" autocomplete="off" style="flex:1;min-width:200px">'+
         '<button class="btn btn-chrome" id="smSearch">Search EA</button></div></label>'+
+        CG.eaStatusLine()+
         '<div id="smSearchOut" style="margin-top:14px"></div>'+
         '<p class="caption" style="margin-top:12px">EA keeps only each club’s last few private matches, so import soon after the game. The box score attaches to matched profiles by their EA ID. If a game lagged out, tick every session it was played across and use <b>Import as one game</b>.</p>'+
       '</div></div>';
@@ -3301,6 +3349,7 @@ CG._smRenderList = function(body){
       }).catch(function(e){ btn.disabled = false; btn.textContent = was; CG.toast("Import failed: "+e.message,"err"); });
     }
     var sbtn = document.getElementById("smSearch"); if (sbtn) sbtn.addEventListener("click", doSearch);
+    CG.paintEaStatus(body);
     var sinp = document.getElementById("smClub"); if (sinp) sinp.addEventListener("keydown", function(e){ if (e.key==="Enter"){ e.preventDefault(); doSearch(); } });
     body.querySelectorAll("[data-smdel]").forEach(function(b){ b.addEventListener("click", function(){
       var id=this.getAttribute("data-smdel"), lbl=this.getAttribute("data-lbl");
@@ -11838,6 +11887,8 @@ CG.AUTOMATIONS = [
      poller means no scores all night; a day outside it, where not running is correct */
   { key:"ea-poll-vm", staleAfterMin:10, name:"EA score poller (bot server)", every:"Every minute from the bot server; asks EA only while a fixture’s game window is open", desc:"The primary lane. Runs on the always-on bot server, whose address EA serves. It asks EA only while a fixture’s game window is open (10 minutes before puck drop to 3 hours after, plus a short grace so a game that ends at the buzzer is still collected), only for the clubs in those fixtures, and hands everything it finds to the importer — which files only a match between the two scheduled clubs that ended inside that window, merges a lag-out replay into the game it continues (Rule 4.3), and archives the rest. A stale stamp here means the bot server is down; the Netlify lane below takes over automatically.", noRun:true },
   { key:"ea-poll", noRun:true, staleAfterMin:function(){ return CG.inGameWindowET && CG.inGameWindowET() ? 20 : 1440; }, name:"EA stats poller (Netlify fallback)", every:"Every 5 min; same fixture-window rule; stands down while the bot server lane is fresh", desc:"The fallback lane. Netlify’s own address is blocked by EA, so this only imports when a residential proxy is configured — it exists so a dead bot server still pages someone rather than silently losing a night’s scores." },
+  /* v4.34: the site's EA club search, self-tested by the bot server every 10 minutes (bot/ea-lookup.mjs) */
+  { key:"ea-lookup", noRun:true, staleAfterMin:30, name:"EA club search (bot server)", every:"A self-test every 10 minutes from the bot server", desc:"Answers the site\u2019s EA club searches and match lists: the Stats Manager\u2019s Add an EA game, the pickup import page and the club game stats desk. EA refuses every other host, so the site asks through the bot server. Every 10 minutes it runs a test search end to end; two failures in a row turn this red and alert the commissioners. A stale stamp means the bot server\u2019s EA process (chel-ea-poll) is down." },
   { key:"twitch-live-sync", noRun:true, staleAfterMin:15, name:"Twitch live flags",         every:"Every 2 min",  desc:"Flags streaming players LIVE across the site automatically." },
   { key:"discord-sync", staleAfterMin:15,     name:"Discord roles & names",     every:"Every 2 min + on change",  desc:"Keeps Discord roles and display names matched to the league database. Role changes made on the site push to Discord within seconds." },
   { key:"discord-welcome", noRun:true, staleAfterMin:20,  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
@@ -14059,6 +14110,7 @@ CG._gsOne = function(el){
               }); });
             }).catch(function(e){ sOut.innerHTML = eb(e.message); });
           }
+          CG.paintEaStatus(out);
           if (sBtn){ sBtn.addEventListener("click", doClubSearch);
             var qEl = document.getElementById("gsClubQ");
             if (qEl) qEl.addEventListener("keydown", function(ev){ if (ev.key==="Enter") doClubSearch(); }); }
@@ -14083,10 +14135,11 @@ CG._gsOne = function(el){
             '<label class="fld" style="margin:0"><span>EASHL club name</span><div style="display:flex;gap:8px;flex-wrap:wrap">'+
             '<input id="gsClubQ" placeholder="e.g. Chel Gaming Blades" autocomplete="off" style="flex:1;min-width:200px">'+
             '<button class="btn btn-chrome" id="gsClubSearch">Search EA</button></div></label>'+
+            CG.eaStatusLine()+
             '<div id="gsClubOut" style="margin-top:12px"></div></div></div>'
           : '';
         var fetchBtn = myLinked
-          ? '<div style="margin-top:10px"><button class="btn '+(cs.length?'btn-ghost btn-sm':'btn-chrome')+'" id="gsFetch">'+(cs.length?'Check EA again for newer sessions':'Check EA for this game’s sessions')+'</button></div>'
+          ? '<div style="margin-top:10px"><button class="btn '+(cs.length?'btn-ghost btn-sm':'btn-chrome')+'" id="gsFetch">'+(cs.length?'Check EA again for newer sessions':'Check EA for this game’s sessions')+'</button>'+CG.eaStatusLine()+'</div>'
           : '';
         if (!cs.length){
           out.innerHTML = searchCard +

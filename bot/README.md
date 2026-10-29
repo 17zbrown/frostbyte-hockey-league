@@ -16,6 +16,17 @@ Netlify sweep.
 as its own process. It shares the env file and nothing else: the gateway bot exits on purpose
 when Discord closes the connection unrecoverably, and the box-score import must not die with it.
 
+**The same unit answers the site's EA lookups (v4.34, `ea-lookup.mjs`).** EA refuses Netlify and
+Supabase, so the Stats Manager's "Add an EA game", the pickup import page and the club game stats
+desk file a request row in `public.ea_lookups`; this lane hears it through Supabase Realtime, asks
+EA once (one call at a time, 1.5 s apart, sharing the poller's 403 backoff), and writes EA's answer
+onto the row. A catch-up every minute answers anything Realtime missed. Every 10 minutes it runs a
+self-test search end to end and stamps `rl_ea-lookup` / `rl_ea-lookup_result`: the Automations
+panel shows it as "EA club search (bot server)", each EA box on the site shows its status line, and
+the watchdog alerts the commissioners after two failed tests in a row or 30 silent minutes. The
+commissioner chose this route on 2026-10-29; it is the one exception to "nothing new on the VM".
+Check it with `journalctl -u chel-ea-poll | grep ea-lookup` (look for "self-test ok").
+
 **What it deliberately does NOT do:** replace the Netlify sweeps. They keep running at their
 current (free-tier) cadences as the reconciliation backstop. Both lanes write the same
 ledgers (`welcomed_members`, `guild_members.present`), so whichever lane acts first, the

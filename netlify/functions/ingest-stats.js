@@ -22,6 +22,7 @@ export { normalizeMatch, mergeSegments, segElapsed, ingestOne };
 import { timingSafeEqual } from "node:crypto";
 import { matchInWindow, fixtureForMatch, describeWindow, FULL_GAME_CLOCK_S, GAME_WINDOW_BEFORE_MS, GAME_WINDOW_AFTER_MS } from "../../shared/game-window.cjs";
 import { noLinkPreviews } from "../../shared/discord-links.cjs";
+import { eaRelay } from "../../shared/ea-relay.cjs";
 
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -176,68 +177,11 @@ function normalizeMatch(raw) {
 // scored on in the first sitting has no shutout); the per-game ratings are time-on-ice-weighted
 // rather than summed. The game-winning goal cannot be attributed without goal timings, so it is
 // zeroed rather than guessed.
-/* ---- live EA transport for the fixture desk's on-demand fetch ----
-   KEEP IN SYNC with eaFetch in pickup-import.js and eaGet in ea-poll.js — same route order, same
-   reasons: DIRECT first (EA blocks by client fingerprint, not by datacenter IP), then the
-   residential proxy only if EA answers 403. A proxied attempt needs undici's own fetch because
-   Node's global fetch silently drops `dispatcher`; the direct attempt uses global fetch so tests
-   can stub it. */
-const PLATFORM = process.env.PLATFORM || "common-gen5";
-const EA_PROXY = process.env.HTTPS_PROXY;
-const EA_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
-async function eaFetch(url, opts = {}) {
-  const { ProxyAgent, fetch: uFetch } = await import("undici");
-  const headers = {
-    "User-Agent": EA_UA, "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.ea.com/", "Origin": "https://www.ea.com",
-    "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-    "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"Windows"',
-    "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-site",
-  };
-  /* EA blocks by CLIENT FINGERPRINT, not by datacenter IP — verified 2026-09-07: curl is refused
-     (403) from a residential address while undici/global fetch is served (200) from BOTH a
-     residential and a datacenter address. So try DIRECT first: it needs no paid proxy and is a hop
-     faster. The residential proxy stays only as a fallback for the day EA starts refusing this
-     range again — a lapsed proxy can no longer take the whole EA pipeline down with it, which is
-     exactly what happened when IPRoyal expired and every import went dark.
-
-     v3.06: report what EVERY route said, not just the last. This loop used to keep only the final
-     error, so a lapsed proxy's "fetch failed" masked whatever the direct attempt had actually
-     answered, and the staff desk showed "EA unreachable (fetch failed)" whichever leg was really
-     broken. `timeoutMs` and `tries` let an interactive caller (the club search on the stats desk)
-     wait longer and only once, inside Netlify's own 10-second budget, instead of spending it on
-     three identical attempts. */
-  const perTry = opts.timeoutMs || 2800;
-  const routes = EA_PROXY
-    ? (opts.tries === 1 ? [null, EA_PROXY] : [null, EA_PROXY, EA_PROXY])
-    : (opts.tries === 1 ? [null] : [null, null, null]);
-  const said = [];
-  for (const proxy of routes) {
-    const label = proxy ? "proxy" : "direct";
-    try {
-      const o = { headers, signal: AbortSignal.timeout(perTry) };
-      if (proxy) o.dispatcher = new ProxyAgent(proxy);
-      /* the direct attempt uses global fetch so tests can stub it; only a PROXIED attempt needs
-         undici's own fetch, because Node's global fetch silently drops `dispatcher` */
-      const r = await (proxy ? uFetch(url, o) : fetch(url, o));
-      if (r.ok) return r.json();
-      said.push(`${label}: EA ${r.status}`);
-      if (r.status !== 403) break;   // only a 403 is worth trying another route
-    } catch (e) {
-      const cause = e && e.cause ? ` (${e.cause.code || e.cause.message || e.cause})` : "";
-      said.push(`${label}: ${String((e && e.message) || e)}${cause}`);
-    }
-  }
-  const all = said.join("; ") || "no route answered";
-  throw new Error(`EA unreachable (${all}${all.includes("403") ? " — EA is throttling this host; the VM lane still reaches it" : ""})`);
-}
-/* the club search is INTERACTIVE: somebody is watching a spinner, so give EA one generous try
-   rather than three impatient ones, and stay inside Netlify's 10-second budget either way */
-const eaSearchClubs = (name) =>
-  eaFetch(`https://proclubs.ea.com/api/nhl/clubs/search?platform=${PLATFORM}&clubName=${encodeURIComponent(name)}`,
-          { timeoutMs: 7000, tries: 1 });
-const eaClubMatches = (clubId) =>
-  eaFetch(`https://proclubs.ea.com/api/nhl/clubs/matches?matchType=club_private&platform=${PLATFORM}&clubIds=${encodeURIComponent(clubId)}`);
+/* ---- the fixture desk's on-demand EA lookups ----
+   v4.34: through the bot's server (shared/ea-relay.cjs). The live transport that used to sit here (direct first,
+   then a residential proxy) has been refused by Akamai since the proxy lapsed on 2026-09-05; only the Oracle VM
+   reaches EA, so the desk files a request there and the browser waits for the answer (public.ea_lookup_state). */
+const DB = { get: sbGet, send: sbSend };   // the relay's service-role pair
 
 /* EA's toiseconds runs on the DISPLAYED 20-minute clock: 3600 for a full regulation game, more in
    overtime, less when the game ended early (a disconnection or a quit). See shared/game-window.cjs;
@@ -1696,8 +1640,11 @@ export const handler = async (event) => {
     const actor = await authForGame(jwt, game);
     if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
     if (name.length < 2) return { statusCode: 400, body: JSON.stringify({ error: "Enter at least 2 characters." }) };
-    const data = await eaSearchClubs(name).catch((e) => ({ __err: e.message }));
-    if (data && data.__err) return { statusCode: 502, body: JSON.stringify({ error: data.__err }) };
+    /* v4.34: through the bot's server; { eaPending } sends the browser to wait and ask again with eaLookup */
+    const got = await eaRelay(DB, "search", name, { answerId: body.leagueEaSearch.eaLookup, requestedBy: actor.uid }).catch((e) => ({ __err: e.message }));
+    if (got.__err) return { statusCode: 502, body: JSON.stringify({ error: got.__err }) };
+    if (got.pending) return { statusCode: 200, body: JSON.stringify({ eaPending: got.pending }) };
+    const data = got.raw;
     const list = Array.isArray(data)
       ? data.map((c) => ({ clubId: String(c.clubId || c.clubInfo?.clubId || ""), name: c.name || c.clubInfo?.name, memberCount: c.memberCount }))
       : Object.entries(data || {}).map(([clubId, c]) => ({ clubId: String((c && c.clubId) || clubId), name: (c && (c.name || (c.clubInfo && c.clubInfo.name))) || null, memberCount: c && c.memberCount }));
@@ -1749,8 +1696,10 @@ export const handler = async (event) => {
       : (named ? teams.find((t) => t.id === named) : null) || null;
     const src = (mine && mine.ea_club_id != null) ? mine : teams.find((t) => t.ea_club_id != null);
     if (!src) return { statusCode: 422, body: JSON.stringify({ error: "Link your club's EA club first (search above)." }) };
-    const raw = await eaClubMatches(String(src.ea_club_id)).catch((e) => ({ __err: e.message }));
-    if (raw && raw.__err) return { statusCode: 502, body: JSON.stringify({ error: raw.__err }) };
+    const got = await eaRelay(DB, "matches", String(src.ea_club_id), { answerId: body.leagueEaFetch.eaLookup, requestedBy: actor.uid }).catch((e) => ({ __err: e.message }));
+    if (got.__err) return { statusCode: 502, body: JSON.stringify({ error: got.__err }) };
+    if (got.pending) return { statusCode: 200, body: JSON.stringify({ eaPending: got.pending }) };
+    const raw = got.raw;
     /* Archive everything EA returned, exactly as the poller would — but NEVER clobber a row the
        pipeline already owns: ignore-duplicates leaves existing status/game_id untouched. */
     const rows = [];

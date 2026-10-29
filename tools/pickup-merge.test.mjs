@@ -8,6 +8,7 @@ process.env.SUPABASE_SERVICE_ROLE_KEY ||= "k";
 delete process.env.HTTPS_PROXY;   // force the global-fetch path so the stub intercepts EA calls
 
 const { _internals: P, handler } = await import(new URL("../netlify/functions/pickup-import.js", import.meta.url).pathname);
+const { createLookupsFake } = await import(new URL("./ea-lookups-fake.mjs", import.meta.url).pathname);
 
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
@@ -87,11 +88,15 @@ console.log("\n— the handler: merged import persists, and segments can't re-en
              "222": { details: { name: "Bravo" }, score: "0", result: "2" } },
     players: { "111": { p1: { playername: "P1", position: "center", skgoals: "1", toiseconds: "800" } },
                "222": { p2: { playername: "P2", position: "goalie", glsaves: "3", glshots: "4", glga: "1", toiseconds: "800" } } } });
+  /* v4.34: the list the staffer picked from is the one the bot stored when they listed the club's games */
+  const LOOKUPS = createLookupsFake();
+  LOOKUPS.seed("matches", "111", [rawMatch("m1", 1700000000), rawMatch("m2", 1700002000)], 5 * 60 * 1000);
   globalThis.fetch = async (url, opts = {}) => {
     const u = String(url), m = opts.method || "GET";
     const J = (b, c) => new Response(JSON.stringify(b), { status: c || 200, headers: { "content-type": "application/json" } });
     if (u.includes("/auth/v1/user")) return J({ id: "uid1" });
-    if (u.includes("proclubs.ea.com")) return J([rawMatch("m1", 1700000000), rawMatch("m2", 1700002000)]);
+    if (u.includes("proclubs.ea.com")) throw new Error("Netlify must never call EA itself (v4.34): " + u);
+    if (u.includes("/rest/v1/ea_lookups")) return LOOKUPS.handle(u, opts);
     if (u.includes("/rest/v1/pickup_games") && m === "GET") { dupHit = u.includes("ea_match_ids.ov"); return J([]); }
     if (u.includes("/rest/v1/pickup_games") && m === "POST") { writes.games.push(JSON.parse(opts.body)); return J([{ id: "game1" }]); }
     if (u.includes("/rest/v1/pickup_stats") && m === "POST") { writes.stats.push(...JSON.parse(opts.body)); return J([]); }
@@ -105,6 +110,19 @@ console.log("\n— the handler: merged import persists, and segments can't re-en
   A("stats are the SUM of both sessions", writes.stats.find((r) => r.skater_name === "P1").goals === 2);
   A("goalie totals sum too", writes.stats.find((r) => r.skater_name === "P2").saves === 6);
   A("the duplicate check consults the session-id array", dupHit);
+  A("the import read the stored match list (five minutes old) without asking EA again", LOOKUPS.posts.length === 0);
+
+  /* a picked session missing from the stored list: ask EA once more, then read exactly that answer */
+  writes.games = []; writes.stats = [];
+  const call = (extra) => handler({ httpMethod: "POST", headers: { authorization: "Bearer tok" },
+    body: JSON.stringify({ action: "import", clubId: "111", matchIds: ["m1", "m3"], ...extra }) });
+  const w = JSON.parse((await call()).body);
+  A("a session missing from the stored list files one fresh request for the bot", typeof w.eaPending === "number" && LOOKUPS.posts.length === 1 && LOOKUPS.posts[0].requested_by === "uid1");
+  LOOKUPS.answerAll(() => [rawMatch("m1", 1700000000), rawMatch("m3", 1700004000)]);
+  const done = JSON.parse((await call({ eaLookup: w.eaPending })).body);
+  A("...and the import completes from the bot's answer", done.ok === true && writes.games.length === 1 && (writes.games[0].ea_match_ids || []).join(",") === "m1,m3", JSON.stringify(done).slice(0, 160));
+  const still = JSON.parse((await call({ matchIds: ["m1", "m9"], eaLookup: w.eaPending })).body);
+  A("a session EA no longer lists after that fresh answer is a plain refusal, not another request", /no longer in the club's recent history/.test(still.error || "") && LOOKUPS.posts.length === 1, JSON.stringify(still).slice(0, 160));
 
   const dupRes = await (async () => {
     globalThis.fetch = async (url, opts = {}) => {

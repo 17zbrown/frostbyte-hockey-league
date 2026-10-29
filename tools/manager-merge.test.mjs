@@ -7,6 +7,9 @@ process.env.SUPABASE_SERVICE_ROLE_KEY ||= "k";
 process.env.INGEST_KEY ||= "machine-key";
 
 const { handler } = await import(new URL("../netlify/functions/ingest-stats.js", import.meta.url).pathname);
+const { createLookupsFake } = await import(new URL("./ea-lookups-fake.mjs", import.meta.url).pathname);
+/* v4.34: the desk asks EA through the bot's server; LOOKUPS is public.ea_lookups and, via answerAll, the bot */
+const LOOKUPS = createLookupsFake();
 
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
@@ -47,8 +50,8 @@ const SEATS = [
 ];
 let EA_LINK = { T1: "111", T2: "222" };          // mutable: tests unlink sides
 const eaTeams = () => [{ id: "T1", code: "BOS", ea_club_id: EA_LINK.T1 ?? null }, { id: "T2", code: "TOR", ea_club_id: EA_LINK.T2 ?? null }];
-let EA_SEARCH = [];                                // what proclubs search returns
-let EA_MATCHES = [];                               // what proclubs matches returns
+let EA_SEARCH = [];                                // what EA's club search returns (the bot stores it)
+let EA_MATCHES = [];                               // what EA's club matches returns (the bot stores it)
 
 const PROFILES = {
   "bos-gm":     { role: "member", departments: [], gamertag: "BosGM", banned: false },
@@ -74,8 +77,8 @@ globalThis.fetch = async (url, opts = {}) => {
     const id = decodeURIComponent(u.match(/id=eq\.([^&]+)/)[1]);
     return J(PROFILES[id] ? [PROFILES[id]] : []);
   }
-  if (u.includes("proclubs.ea.com") && u.includes("clubs/search")) return J(EA_SEARCH);
-  if (u.includes("proclubs.ea.com") && u.includes("clubs/matches")) return J(EA_MATCHES);
+  if (u.includes("proclubs.ea.com")) throw new Error("Netlify must never call EA itself (v4.34): " + u);
+  if (u.includes("/rest/v1/ea_lookups")) return LOOKUPS.handle(u, opts);
   if (u.includes("/rest/v1/games?id=eq.g1") && m === "GET") return J([{ ...GAME, forfeit_team_id: FORFEIT }]);
   if (u.includes("/rest/v1/teams?id=in.")) return J(u.includes("owner_profile_id") ? SEATS : eaTeams());
   if (u.includes("/rest/v1/teams?id=eq.") && m === "GET") {
@@ -107,6 +110,15 @@ globalThis.fetch = async (url, opts = {}) => {
   return J([]);
 };
 const call = (body) => handler({ httpMethod: "POST", headers: { authorization: "Bearer jwt" }, body: JSON.stringify(body) });
+/* the browser's side of v4.34: post, and on { eaPending } let the bot answer, then post again with eaLookup */
+const viaBot = async (key, inner, ea) => {
+  const r1 = await call({ [key]: inner });
+  const first = JSON.parse(r1.body);
+  if (!first.eaPending) return { first, res: r1, out: first };
+  LOOKUPS.answerAll(ea || ((row) => (row.kind === "search" ? EA_SEARCH : EA_MATCHES)));
+  const res = await call({ [key]: { ...inner, eaLookup: first.eaPending } });
+  return { first, res, out: JSON.parse(res.body) };
+};
 const twoSittings = () => [
   { ea_match_id: "m1", status: "ingested", game_id: "g1", et_day: "2026-10-21", payload: rawSitting("m1", SAME_NIGHT, 1, 0, false, 300) },
   { ea_match_id: "m2", status: "unmatched", game_id: null, et_day: "2026-10-21", payload: rawSitting("m2", SAME_NIGHT_LATER, 2, 1, true, 420) },
@@ -281,8 +293,16 @@ console.log("\n— the live-EA fallback: search, link, fetch");
   UID = "rando";
   A("search is gated like everything else", (await call({ leagueEaSearch: { gameId: "g1", clubName: "Chel" } })).statusCode === 401);
   UID = "bos-gm";
-  const sr = JSON.parse((await call({ leagueEaSearch: { gameId: "g1", clubName: "Chel Bruins" } })).body);
-  A("the manager can search EA by club name", sr.clubs && sr.clubs.length === 2 && sr.clubs[0].name === "Chel Bruins");
+  const posted = LOOKUPS.posts.length;
+  const { first: sp, out: sr } = await viaBot("leagueEaSearch", { gameId: "g1", clubName: "Chel Bruins" });
+  A("the search files ONE request for the bot's server and says to wait", typeof sp.eaPending === "number" && LOOKUPS.posts.length === posted + 1);
+  A("...as the signed-in manager, from the site", LOOKUPS.posts[posted].requested_by === "bos-gm" && LOOKUPS.posts[posted].source === "site" && LOOKUPS.posts[posted].kind === "search" && LOOKUPS.posts[posted].arg === "Chel Bruins");
+  A("the manager can search EA by club name (the bot's answer, read back)", sr.clubs && sr.clubs.length === 2 && sr.clubs[0].name === "Chel Bruins");
+  const again = JSON.parse((await call({ leagueEaSearch: { gameId: "g1", clubName: "Chel Bruins" } })).body);
+  A("a repeat search within a minute reuses the stored answer (no second request)", again.clubs && again.clubs.length === 2 && LOOKUPS.posts.length === posted + 1);
+  const { res: failRes, out: failOut } = await viaBot("leagueEaSearch", { gameId: "g1", clubName: "Nobody Club" },
+    () => ({ error: "EA refused the bot server (Akamai 403). EA lookups and box-score imports pause until 9:05 PM ET." }));
+  A("a lookup the bot could not answer is a 502 carrying its sentence", failRes.statusCode === 502 && /Akamai 403/.test(failOut.error || ""), failRes.body);
 
   reset(); EA_LINK = { T1: null, T2: null };
   const lk = JSON.parse((await call({ leagueEaLink: { gameId: "g1", clubId: "900111", clubName: "Chel Bruins" } })).body);
@@ -297,7 +317,8 @@ console.log("\n— the live-EA fallback: search, link, fetch");
 
   reset(); UID = "bos-gm";
   EA_MATCHES = [rawSitting("mNew1", SAME_NIGHT, 1, 0, false, 300), rawSitting("mNew2", SAME_NIGHT_LATER, 2, 1, true, 420)];
-  const fr = JSON.parse((await call({ leagueEaFetch: { gameId: "g1" } })).body);
+  const { first: fp, out: fr } = await viaBot("leagueEaFetch", { gameId: "g1" });
+  A("the fetch asks the bot for the linked club's matches", typeof fp.eaPending === "number" && LOOKUPS.posts[LOOKUPS.posts.length - 1].kind === "matches" && LOOKUPS.posts[LOOKUPS.posts.length - 1].arg === "900111");
   A("the fetch archives what EA returned", fr.ok === true && fr.fetched === 2 && writes.logInserts.length === 1);
   A("...WITHOUT clobbering rows the pipeline owns", /ignore-duplicates/.test(writes.logInserts[0].prefer));
   A("...stamped with who pulled them", writes.logInserts[0].rows.every((r2) => /BosGM/.test(r2.reason)));

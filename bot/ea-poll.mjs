@@ -46,6 +46,23 @@ export const EA_HEADERS = Object.freeze({
   "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-site",
 });
 
+/* v4.34: the one place an EA Pro Clubs URL is built on this server: the score poller's club matches and the site
+   lookup lane (ea-lookup.mjs) both use it. Refuses anything that is not a club name or an EA club id, so a request
+   row can never steer the server to another EA path. */
+export function eaUrl(kind, arg, platform = "common-gen5") {
+  const a = String(arg == null ? "" : arg).trim();
+  const plat = String(platform).replace(/[^a-z0-9-]/gi, "") || "common-gen5";
+  if (kind === "search") {
+    if (a.length < 2 || a.length > 40) throw new Error("a club name of 2 to 40 characters");
+    return `https://proclubs.ea.com/api/nhl/clubs/search?platform=${plat}&clubName=${encodeURIComponent(a)}`;
+  }
+  if (kind === "matches") {
+    if (!/^[0-9]{1,20}$/.test(a)) throw new Error("an EA club id (digits only)");
+    return `https://proclubs.ea.com/api/nhl/clubs/matches?matchType=club_private&platform=${plat}&clubIds=${a}`;
+  }
+  throw new Error("a lookup kind of search or matches");
+}
+
 export function createEaPoller(env, opts = {}) {
   const { SB_URL, SB_KEY } = env || {};
   /* The ingest hand-off's secret: the dedicated INGEST_KEY when the VM has one, else the service
@@ -109,7 +126,7 @@ export function createEaPoller(env, opts = {}) {
       const c = clubs[i];
       if (i) await sleep(CLUB_GAP_MS);
       try {
-        const url = `https://proclubs.ea.com/api/nhl/clubs/matches?matchType=club_private&platform=${platform}&clubIds=${c}`;
+        const url = eaUrl("matches", c, platform);
         const r = await F(url, { headers: EA_HEADERS, signal: AbortSignal.timeout(EA_TIMEOUT_MS) });
         if (!r.ok) {
           /* three distinct failure classes, so the Automations chip says what actually broke:
@@ -159,7 +176,7 @@ export function createEaPoller(env, opts = {}) {
           const t = Date.parse(r && r.value);
           if (!Number.isFinite(t)) continue;
           if (r.key === "rl_ea-poll") lastPollAt = t;
-          if (r.key === "rl_ea-poll_backoff" && t > t0) backoffUntil = t;
+          if (r.key === "rl_ea-poll_backoff" && t > t0) backoffUntil = Math.max(backoffUntil, t);
         }
       } catch (e) { log("ea-poll: could not read the ledgers, starting unseeded — " + String((e && e.message) || e)); }
       if (lastPollAt === -Infinity) lastPollAt = 0;
@@ -333,7 +350,15 @@ export function createEaPoller(env, opts = {}) {
     sum.live = false;
   }
 
-  return { start, stop, runOnce, tick, sum };
+  /* v4.34: the 403 backoff is shared with the site lookup lane in the same process (ea-lookup.mjs): one address
+     leaves for EA, so a block either one draws pauses both, and a lookup can never be what stops box scores. */
+  function holdOff(untilMs) {
+    if (Number.isFinite(untilMs) && untilMs > backoffUntil) backoffUntil = untilMs;
+    sum.backoffUntil = backoffUntil > now() ? iso(backoffUntil) : null;
+  }
+  const blockedUntil = () => (backoffUntil > now() ? backoffUntil : 0);
+
+  return { start, stop, runOnce, tick, sum, holdOff, blockedUntil };
 }
 
 /* ---- one-shot CLI, for the VM: prints the cycle's result as JSON on stdout, logs on stderr.
