@@ -100,6 +100,11 @@ globalThis.fetch = async (url, opts = {}) => {
     const ids = decodeURIComponent(u.match(/in\.\(([^)]+)\)/)[1]).split(",");
     return J((world.subs || []).filter((x) => ids.includes(String(x.ea_club_id))));
   }
+  /* v4.37: the resume, the restart and the abandoned-game sweep read a game's substitutions by side */
+  if (u.includes("/rest/v1/game_club_substitutions?game_id=eq.")) {
+    const g = decodeURIComponent(u.match(/game_id=eq\.([^&]+)/)[1]);
+    return J((world.subs || []).filter((x) => x.game_id === g));
+  }
   if (u.includes("/rest/v1/games?id=in.")) {
     const ids = decodeURIComponent(u.match(/in\.\(([^)]+)\)/)[1]).split(",");
     return J(world.open.concat(world.finals, world.held || []).filter((g) => ids.includes(g.id))
@@ -468,6 +473,18 @@ console.log("\n— Rule 4.6: a borrowed club files on the ONE fixture its substi
   reset(); world.open = [G900]; world.clubOnly = { tA: [G900] };
   const s5 = await run(ea("s5", at(30), 111, 999));
   A("with no substitution on record the match is still refused", s5.ingested.length === 0, JSON.stringify(s5));
+
+  /* v4.37: two outside clubs, each recorded on a DIFFERENT fixture of the pair whose windows both hold the match. Each
+     substitution speaks for its own fixture only, so the match is nobody's; before, either pin let it file on the
+     earliest of the two, counting the other club's borrowed club for a game it was never recorded on. */
+  reset(); world.open = [G900, G935];
+  world.subs = [{ game_id: "g900", ea_club_id: "998", team_id: "tA" }, { game_id: "g935", ea_club_id: "999", team_id: "tB" }];
+  const s6 = await run(ea("s6", at(30), 998, 999));
+  A("two outside clubs pinned to two different fixtures file on neither", s6.ingested.length === 0 && writes.gamePatches.length === 0, JSON.stringify(s6));
+  reset(); world.open = [G900, G935];
+  world.subs = [{ game_id: "g900", ea_club_id: "998", team_id: "tA" }, { game_id: "g900", ea_club_id: "999", team_id: "tB" }];
+  const s7 = await run(ea("s7", at(30), 998, 999));
+  A("...both recorded on one fixture: filed there", s7.ingested.length === 1 && s7.ingested[0].game_id === "g900", JSON.stringify(s7));
 }
 
 console.log("— v3.53 (Q18, Q19, Q20): a combined game is a result only at a full, decided game");

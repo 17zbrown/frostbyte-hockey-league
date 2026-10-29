@@ -32,6 +32,7 @@ const world = {
   statPostStatus: 204,
   cfg: [],           // app_config rows (the staff webhook, when a test wants one)
   forfeits: [],      // what the abandoned-game sweep ruled
+  subs: [],          // v4.37: game_club_substitutions rows (Rule 4.6), empty unless a case records one
   toStaff: [],       // what tellStaff posted
 };
 const calls = [];                 // every fetch, in order: {m, u, body}
@@ -83,9 +84,14 @@ globalThis.fetch = async (url, opts = {}) => {
     return J({ ok: true, winner: "w", kept_result: true, score: "2-1" });
   }
   if (u.includes("/rest/v1/teams?ea_club_id=not.is.null")) return J(TEAMS.map((t) => ({ ...t, code: t.id })));
-  /* v3.20 Rule 4.6 — no club in this file borrowed another, so the substitution table is empty and
-     the batch behaves exactly as before. */
-  if (u.includes("/rest/v1/game_club_substitutions?")) return J([]);
+  /* v3.20 Rule 4.6: the substitution table is empty unless a case records one (v4.37), so every other case behaves
+     exactly as before. Read by club (the importer's pin) and by game (the resume, the restart and the sweep, by side). */
+  if (u.includes("/rest/v1/game_club_substitutions?")) {
+    const d = decodeURIComponent(u), g = (d.match(/game_id=eq\.([^&]+)/) || [])[1], ein = (d.match(/ea_club_id=in\.\(([^)]*)\)/) || [])[1];
+    return J((world.subs || []).filter((x) => (!g || x.game_id === g) && (!ein || ein.split(",").includes(String(x.ea_club_id)))));
+  }
+  /* the pin's window check reads the recorded games by id */
+  if (u.includes("/rest/v1/games?id=in.")) { const ids = inList(u); return J(world.open.concat(world.finals, world.held || []).filter((g) => ids.includes(g.id))); }
   if (u.includes("/rest/v1/teams?ea_club_id=in.")) { const ids = inList(u); return J(TEAMS.filter((t) => ids.includes(String(t.ea_club_id)))); }
   if (u.includes("/rest/v1/teams?id=in.")) { const ids = inList(u); return J(TEAMS.filter((t) => ids.includes(t.id)).map((t) => ({ ...t, name: t.id, code: t.id }))); }
   if (u.includes("/rest/v1/ea_ingest_log?or=")) return J(world.logs);
@@ -119,7 +125,7 @@ globalThis.fetch = async (url, opts = {}) => {
 };
 const reset = () => {
   calls.length = 0;
-  world.open = []; world.finals = []; world.held = []; world.filed = {}; world.archived = {}; world.logs = []; world.prior = {}; world.profiles = []; world.statPostStatus = 204; world.cfg = []; world.toStaff = []; world.forfeits = []; world.bells = [];
+  world.open = []; world.finals = []; world.held = []; world.filed = {}; world.archived = {}; world.logs = []; world.prior = {}; world.profiles = []; world.statPostStatus = 204; world.cfg = []; world.toStaff = []; world.forfeits = []; world.bells = []; world.subs = [];
 };
 /* an EA match between two clubs that ENDED at `end` and ran `toi` seconds of game clock, with the
    given rosters ({eaPlayerId: name}) on each side */
@@ -388,6 +394,101 @@ console.log("\n— a lone ingestOne (the commissioner re-ingest, the tests) buil
   A("filed", summary.ingested.length === 1);
   A("with the same two prefetches, for just that match", of((c) => c.m === "GET" && c.u.includes("games?ea_match_id=in.(solo)")).length === 1
     && of((c) => c.m === "GET" && c.u.includes("ea_ingest_log?ea_match_id=in.(solo)")).length === 1);
+}
+
+/* v4.37: a lag-out finished under a BORROWED club recorded for the game (Rule 4.6). The game is read by side
+   (fixtureSides): the borrowed club is that side's club, so the resume merges, the restart files, and the sweep never
+   reads the resumed game as a club moving on to another opponent. */
+console.log("\n— v4.37: a lag-out resumed or restarted under a borrowed club recorded for the game (Rule 4.6)");
+{
+  const gamePatch = (id) => of((c) => c.m === "PATCH" && c.u.includes(`/rest/v1/games?id=eq.${id}`)).map((c) => c.body);
+  /* a. tB lags out under its own club at 30 minutes, 1-0 down, and finishes under borrowed club 999 */
+  reset();
+  world.cfg = [{ key: "discord_staff_webhook", value: "https://discord.com/api/webhooks/1/x" }];
+  world.held = [{ ...G900, ea_match_id: "own1" }];
+  world.filed = { own1: "g900" }; world.archived = { own1: { status: "incomplete", game_id: "g900" } };
+  world.logs = [{ ea_match_id: "own1", payload: ea("own1", at(35), 111, 222, 1800, [1, 0]) }];
+  world.subs = [{ game_id: "g900", ea_club_id: "999", team_id: "tB" }];
+  let s = await post([ea("bor1", at(75), 111, 999, 1800, [0, 2])]);
+  A("own club then a recorded borrowed club: the resume merges them into one final game", (s.ingested || []).some((x) => x.ea_match_id === "bor1" && x.game_id === "g900" && x.resumed) && (s.errors || []).length === 0, JSON.stringify(s));
+  A("...on the sittings' combined score, 1-2, with the borrowed club's goals for tB", gamePatch("g900").some((b) => b.status === "final" && b.home_score === 1 && b.away_score === 2), JSON.stringify(gamePatch("g900")));
+  A("...and the sweep never rules it abandoned", world.forfeits.length === 0, JSON.stringify(world.forfeits));
+
+  /* b. both sittings under the borrowed club: the resume maps it by side instead of failing on every poll */
+  reset();
+  world.held = [{ ...G900, ea_match_id: "bb1" }];
+  world.filed = { bb1: "g900" }; world.archived = { bb1: { status: "incomplete", game_id: "g900" } };
+  world.logs = [{ ea_match_id: "bb1", payload: ea("bb1", at(35), 111, 999, 1800, [2, 0]) }];
+  world.subs = [{ game_id: "g900", ea_club_id: "999", team_id: "tB" }];
+  s = await post([ea("bb2", at(75), 111, 999, 1800, [1, 0])]);
+  A("both sittings under the borrowed club: merged and filed final 3-0, no 'could not map clubs' error", (s.errors || []).length === 0 && gamePatch("g900").some((b) => b.status === "final" && b.home_score === 3 && b.away_score === 0), JSON.stringify({ errors: s.errors, patches: gamePatch("g900") }));
+  A("...nothing ruled abandoned", world.forfeits.length === 0);
+
+  /* c. stopped after five minutes under its own club, restarted in full under the borrowed club: the restart files */
+  reset();
+  world.held = [{ ...G900, ea_match_id: "st1" }];
+  world.filed = { st1: "g900" }; world.archived = { st1: { status: "incomplete", game_id: "g900" } };
+  world.logs = [{ ea_match_id: "st1", payload: ea("st1", at(12), 111, 222, 300, [0, 0]) }];
+  world.subs = [{ game_id: "g900", ea_club_id: "999", team_id: "tB" }];
+  s = await post([ea("st2", at(80), 111, 999, 3600, [3, 2])]);
+  A("a restart under the borrowed club files 3-2 on its own (Rule 4.3), no mapping error", (s.errors || []).length === 0 && (s.ingested || []).some((x) => x.ea_match_id === "st2" && x.restarted) && gamePatch("g900").some((b) => b.status === "final" && b.home_score === 3 && b.away_score === 2), JSON.stringify({ s, patches: gamePatch("g900") }));
+
+  /* d. the sweep itself, read by side: the continuation under the recorded borrowed club ends past the window, so it
+     is not merged; it is still these two sides playing, never "a club moved on to another opponent" */
+  reset();
+  world.cfg = [{ key: "discord_staff_webhook", value: "https://discord.com/api/webhooks/1/x" }];
+  world.held = [{ ...G900, ea_match_id: "sw1" }];
+  world.filed = { sw1: "g900" }; world.archived = { sw1: { status: "incomplete", game_id: "g900" } };
+  world.logs = [{ ea_match_id: "sw1", payload: ea("sw1", at(35), 111, 222, 1800, [1, 0]) }];
+  world.subs = [{ game_id: "g900", ea_club_id: "999", team_id: "tB" }];
+  await post([ea("sw2", at(190), 111, 999, 1800, [0, 1])]);
+  A("the sweep reads a recorded borrowed club as its side: never ruled abandoned", world.forfeits.length === 0, JSON.stringify(world.forfeits));
+  world.subs = []; world.forfeits = [];
+  await post([ea("sw3", at(190), 111, 999, 1800, [0, 1])]);
+  A("...while a club outside the league with no substitution on record is still read as another opponent (Rule 4.3, unchanged)", world.forfeits.length === 1 && world.forfeits[0].p_game === "g900", JSON.stringify(world.forfeits));
+}
+
+/* v4.37 review: a game whose sittings already MIX a club's own EA club and a borrowed one still takes its next sitting,
+   and the sweep still rules it under Rule 4.3 when a club really does move on */
+console.log("\n— v4.37: a game mixing own and borrowed clubs takes its third sitting; the sweep reads it by side");
+{
+  const gp = () => of((c) => c.m === "PATCH" && c.u.includes("/rest/v1/games?id=eq.g900")).map((c) => c.body);
+  const mixed = () => {
+    reset();
+    world.cfg = [{ key: "discord_staff_webhook", value: "https://discord.com/api/webhooks/1/x" }];
+    world.held = [{ ...G900, ea_match_id: "mx1" }];
+    world.filed = { mx1: "g900" }; world.archived = { mx1: { status: "incomplete", game_id: "g900" }, mx2: { status: "merged", game_id: "g900" } };
+    world.logs = [{ ea_match_id: "mx1", payload: ea("mx1", at(35), 111, 222, 1800, [1, 0]) },
+                  { ea_match_id: "mx2", payload: ea("mx2", at(75), 111, 999, 1800, [0, 1]) }];   // level 1-1 after sixty: held for overtime
+    world.subs = [{ game_id: "g900", ea_club_id: "999", team_id: "tB" }];
+  };
+  mixed();
+  let s = await post([ea("mx3", at(85), 111, 999, 240, [0, 1])]);
+  A("own club, then the borrowed club (held level at sixty), then the overtime reload under the borrowed club: final 1-2 in overtime", (s.errors || []).length === 0 && gp().some((b) => b.status === "final" && b.home_score === 1 && b.away_score === 2 && b.went_ot === true), JSON.stringify({ s, p: gp() }));
+  mixed();
+  s = await post([ea("mx4", at(85), 111, 222, 240, [1, 0])]);
+  A("...and the overtime reload back under the club's own EA club: final 2-1 in overtime", (s.errors || []).length === 0 && gp().some((b) => b.status === "final" && b.home_score === 2 && b.away_score === 1 && b.went_ot === true), JSON.stringify({ s, p: gp() }));
+  /* the sweep: the mixed held game is 2-0 after forty minutes, and BOS (111) then plays club 333: ruled under Rule 4.3 */
+  reset();
+  world.cfg = [{ key: "discord_staff_webhook", value: "https://discord.com/api/webhooks/1/x" }];
+  world.held = [{ ...G900, ea_match_id: "mv1" }];
+  world.filed = { mv1: "g900" }; world.archived = { mv1: { status: "incomplete", game_id: "g900" }, mv2: { status: "merged", game_id: "g900" } };
+  world.logs = [{ ea_match_id: "mv1", payload: ea("mv1", at(35), 111, 222, 1800, [2, 0]) },
+                { ea_match_id: "mv2", payload: ea("mv2", at(55), 111, 999, 600, [0, 0]) }];
+  world.subs = [{ game_id: "g900", ea_club_id: "999", team_id: "tB" }];
+  await post([ea("mv3", at(150), 111, 333, 3600, [3, 2])]);
+  /* game-night load: the sweep reads substitutions only for an unfinished or mixed game, never for every filed game */
+  {
+    const keepF = world.forfeits.slice();
+    reset();
+    world.finals = [{ ...G900, ea_match_id: "fn1", home_score: 4, away_score: 1 }];
+    world.filed = { fn1: "g900" }; world.archived = { fn1: { status: "ingested", game_id: "g900" } };
+    world.logs = [{ ea_match_id: "fn1", payload: ea("fn1", at(18), 111, 222, 3600, [4, 1]) }];
+    await post([ea("fn2", at(90), 111, 333, 3600, [3, 2])]);
+    A("the sweep reads no substitutions for a game that is plainly finished (one read per unfinished game, not per filed game)", of((c) => c.u.includes("game_club_substitutions?game_id=eq.")).length === 0 && world.forfeits.length === 0, String(of((c) => c.u.includes("game_club_substitutions?game_id=eq.")).length));
+    world.forfeits = keepF;
+  }
+  A("a mixed held game whose club then plays another opponent is ruled under Rule 4.3, on the sides' score", world.forfeits.length === 1 && world.forfeits[0].p_forfeiting_team === "tB" && world.forfeits[0].p_home_score === 2 && world.forfeits[0].p_away_score === 0, JSON.stringify(world.forfeits));
 }
 
 console.log(ok ? "\nPASS" : "\nFAIL");

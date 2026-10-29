@@ -33,8 +33,10 @@ A("finished = full clock and a decided score", /finished: reachedFull && margin 
 A("overtime read from the clock at one goal past sixty", /const inferredOt = !eaOt && total > REGULATION_S \+ slack && margin === 1;/.test(ing) && /const slack = lateReload \? CLOCK_SLACK_S : 0;/.test(ing));
 A("overlong = past sixty by more than a goal", /overlong: total > REGULATION_S \+ slack && margin > 1/.test(ing));
 A("ten minutes is the early-restart line", /const EARLY_RESTART_S = 600;/.test(ing));
+/* v4.37: the manual merge, the continuation and the sweep test their sittings read as the fixture's two sides
+   (fixtureSides and bySide: a Rule 4.6 club recorded for one of them is that side's club) */
 A("used by the fresh filing, the continuation, the manual merge and the sweep",
-  /const st1 = sittingsState\(\[norm\]\);/.test(ing) && /const stp = sittingsState\(ps\);/.test(ing) && /const st = sittingsState\(norms\);/.test(ing) && /const stA = sittingsState\(ps\);/.test(ing));
+  /const st1 = sittingsState\(\[norm\]\);/.test(ing) && /const stp = sittingsState\(bySide\(ps, sidesG\)\);/.test(ing) && /const st = sittingsState\(sideNorms\);/.test(ing) && /const stA = sittingsState\(bySide\(ps, sidesG\)\);/.test(ing));
 A("the sweep reads held games", /status=in\.\(final,scheduled\)&ea_match_id=not\.is\.null&voided=not\.is\.true&forfeit_team_id=is\.null&select=id,status,home_team_id/.test(ing));
 A("a struck sitting stays struck", /if \(row && row\.status === "struck"\)/.test(ing));
 A("the level-merge double loss is gone", !/Resumed game ended level/.test(ing));

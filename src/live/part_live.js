@@ -3235,7 +3235,10 @@ CG._smGroups = function(sessions, st){
 CG._smSelection = function(st, groups){
   var f = st.find, byId = {}, ticked = [], grs = [];
   groups.forEach(function(gr){ gr.sessions.forEach(function(s){ byId[s.matchId] = { s:s, gr:gr }; }); });
-  Object.keys(f.picked).forEach(function(id){ if (f.picked[id] && byId[id]){ ticked.push(id); if (grs.indexOf(byId[id].gr) < 0) grs.push(byId[id].gr); } });
+  /* v4.37: a tick counts only while its row can still be ticked (the row's own rule): a reload can turn a ticked sitting
+     unmergeable (its substitution removed, its game filed by the importer), and the row then shows it unticked */
+  var tickable = function(x){ return !x.s.struck && !x.gr.locked && (x.s.onGame || (x.gr.kind === "league" ? x.s.canMerge : x.s.canPickup)); };
+  Object.keys(f.picked).forEach(function(id){ if (f.picked[id] && byId[id] && tickable(byId[id])){ ticked.push(id); if (grs.indexOf(byId[id].gr) < 0) grs.push(byId[id].gr); } });
   var one = grs.length === 1 ? grs[0] : null, reFile = false;
   /* a game opened from Needs attention whose every sitting is already on it but no result is published (held, or put back
      to scheduled by a forfeit undo): it can be filed again from those sittings with nothing ticked */
@@ -3248,6 +3251,35 @@ CG._smSelection = function(st, groups){
   var sel = locked.concat(ticked.filter(function(id){ return locked.indexOf(id) < 0; }));
   return { ticked:ticked, groups:grs, one:one, locked:locked, sel:sel, byId:byId, reFile:reFile,
     restartable: !!(one && one.kind === "league" && one.sessions.some(function(s){ return s.onGame && !s.struck; })) };
+};
+/* v4.37 (commissioner, 2026-10-29: "add the ability to seach a non-league club and match it to a team so we can file the
+   league games by searching the club they used and entering their league game"): the games a group's outside club could
+   have been (the server's subCandidates, one list per group) and the outside clubs still to name (Rule 4.6) */
+CG._smMatchInfo = function(gr){
+  var seen = {}, cands = [], unres = {}, order = [];
+  gr.sessions.forEach(function(s){
+    (s.subCandidates || []).forEach(function(c){ if (!seen[c.gameId]){ seen[c.gameId] = 1; cands.push(c); } });
+    (s.clubs || []).forEach(function(c){ if (!c.team && !unres[c.eaId]){ unres[c.eaId] = c.name || "EA club "+c.eaId; order.push(c.eaId); } });
+  });
+  var end = gr.latest || 0;
+  cands.sort(function(a, b){ return ((b.inWindow ? 1 : 0) - (a.inWindow ? 1 : 0)) || (Math.abs((Date.parse(a.at) || 0) - end) - Math.abs((Date.parse(b.at) || 0) - end)); });
+  return { cands:cands, unresolved:order.map(function(id){ return { eaId:id, name:unres[id] }; }) };
+};
+/* which league club each outside club played as, for the picked game. With one league club in the sittings the answer is
+   the game's other club; with none, the desk asks which club the first outside club was, and the second is the other.
+   null while it still has to ask; { err } when the game cannot take it (one club, one substitution per game). */
+CG._smMatchMap = function(info, m){
+  var c = info.cands.filter(function(x){ return x.gameId === m.gameId; })[0], u = info.unresolved, map = {};
+  if (!c || !u.length) return null;
+  if (c.borrower){
+    if (u.length > 1) return { err:"Two different outside clubs can’t both stand in for "+c.borrower+" in one game." };
+    map[u[0].eaId] = c.borrower; return { map:map, fx:c };
+  }
+  if (u.length > 2) return { err:"These sittings hold more than two outside clubs, so they are not one game." };
+  if (!m.side || (m.side !== c.home && m.side !== c.away)) return null;
+  map[u[0].eaId] = m.side;
+  if (u[1]) map[u[1].eaId] = m.side === c.home ? c.away : c.home;
+  return { map:map, fx:c };
 };
 CG._smLengthText = function(s){
   return s.length === "full" ? "Full game" : s.length === "full-ot" ? "Full game, overtime" : s.length === "level" ? "60 min, tied"
@@ -3367,6 +3399,7 @@ CG._smFindResHtml = function(st){
         (r.overlong ? ' The sittings run past sixty minutes by more than a goal, so statistics staff were flagged (Rule 4.3).' : '')+
         '<div class="sm-go" style="margin-top:8px"><a class="btn btn-ghost btn-sm" href="#/matchup/'+esc(res.gid)+'">Open the game</a></div></div>';
   }
+  if (res.kind === "sub") return '<div class="note grn sm-res" id="smFindRes" role="status" tabindex="-1">'+(res.b ? '<b style="font-family:var(--f-disp)">'+esc(res.b)+'</b> ' : '')+esc(res.text)+'</div>';
   if (res.kind === "pickup") return '<div class="sm-res" id="smFindRes" role="status" tabindex="-1">'+CG._puResultHtml(res.o)+
     '<div class="sm-go" style="margin-top:8px"><a class="btn btn-ghost btn-sm" href="#/hub/statsmgr?game='+esc(res.o.pickupGameId)+'">Edit this game</a></div></div>';
   return '<div class="note red sm-res" id="smFindRes" role="status" tabindex="-1">'+esc(res.error)+
@@ -3402,18 +3435,21 @@ CG._smGroupHtml = function(gr, st, sel){
   if (gr.kind === "league" && g){
     var onFile = gr.complete ? " · "+gr.sessions.length+" sitting"+(gr.sessions.length === 1 ? "" : "s")+" on file" : "";
     head = CG._smBoard(g)+'<small>'+esc(CG.fmtFull(g.at)+(g.week ? " · "+CG._smStage(g) : "")+onFile)+'</small>';
-    if (g.forfeit) notes = gr.locked
+    notes = CG._smSubNotes(gr);
+    if (g.forfeit) notes += gr.locked
       ? '<div class="note" style="margin-bottom:10px">Forfeit on record against '+esc(g.forfeit)+'. Only a commissioner can change this game. <button type="button" class="btn btn-ghost btn-sm" data-sm-act="report" data-game="'+esc(g.id)+'">Report a mistake</button></div>'
       : '<div class="note" style="margin-bottom:10px">The forfeit against '+esc(g.forfeit)+' stays on record. Undo it in Forfeit a game if it should not stand.</div>';
   } else if (gr.kind === "needs-substitution" && g){
     var s0 = gr.sessions[0], other = (s0.clubs || []).filter(function(c){ return !c.team; })[0], ours = (s0.clubs || []).filter(function(c){ return c.team; })[0];
     head = '<span class="sm-line">'+(ours ? CG.crest(ours.team, 10, { decorative:true })+'<b>'+esc(ours.team)+'</b>' : '')+'<span class="sm-at">vs</span><b>'+esc(other ? (other.name || "EA club "+other.eaId) : "an outside club")+'</b></span>'+
       '<small>'+esc("Near "+CG._smFx(g)+" · "+CG.fmtFull(g.at))+'</small>';
-    notes = '<div class="note" style="margin-bottom:10px">One EA club in these sittings is not linked to a league club. If '+esc(ours ? ours.team : "the club")+' played this game under a borrowed EA club, the league office records the substitution and files it (Rule 4.6); this desk can’t.</div>';
+    /* the match panel explains itself; the note stands only when there is no open game to match it to */
+    notes = CG._smSubNotes(gr) + (CG._smMatchHtml(gr, st) || '<div class="note" style="margin-bottom:10px">'+esc((other ? (other.name || "EA club "+other.eaId) : "One club")+" is not a league club, and no open game is near it to match it to. If a club played under it (Rule 4.6), the league office records the substitution and files it.")+'</div>');
   } else {
     var cl = gr.sessions[0].clubs || [];
     head = '<span class="sm-line"><b>'+esc((cl[0] && (cl[0].name || cl[0].team)) || "?")+'</b><span class="sm-at">vs</span><b>'+esc((cl[1] && (cl[1].name || cl[1].team)) || "?")+'</b></span>'+
       '<small>'+esc(CG.fmtDay(gr.latest || CG.now())+" · Not a league game")+'</small>';
+    notes = CG._smSubNotes(gr) + CG._smMatchHtml(gr, st);
   }
   var alts = "";
   if (gr.kind === "league") gr.sessions.forEach(function(s){
@@ -3426,6 +3462,59 @@ CG._smGroupHtml = function(gr, st, sel){
   return '<details class="sm-grp'+(gr.focus ? ' is-focus' : '')+'" data-key="'+esc(gr.key)+'" data-open="'+(open ? 1 : 0)+'"'+(open ? ' open' : '')+'>'+
     '<summary class="sm-gh">'+head+'</summary>'+notes+
     '<div class="sv-grid c1">'+gr.sessions.map(function(s){ return CG._smSitRowHtml(s, gr, st, sel); }).join("")+'</div>'+alts+'</details>';
+};
+/* v4.37: match an outside club's sittings to the league game a CGHL club played under it (Rule 4.6) */
+CG._smMatchHtml = function(gr, st){
+  var f = st.find, m = f.match, info = CG._smMatchInfo(gr);
+  if (!info.cands.length || !info.unresolved.length) return "";
+  var names = info.unresolved.map(function(u){ return u.name; }).join(" and "), many = info.unresolved.length > 1;
+  /* said once, above the button; the open panel only asks */
+  if (!m || m.key !== gr.key)
+    return '<p class="caption" style="margin:0 0 8px">'+esc(names+" "+(many ? "are not league clubs" : "is not a league club")+". If a CGHL club played its league game under "+(many ? "them" : "it")+" (Rule 4.6), match "+(many ? "them" : "it")+" to that game.")+'</p>'+
+      '<div class="sm-go" style="margin:0 0 10px"><button type="button" class="btn btn-ghost btn-sm" data-sm-act="match" data-key="'+esc(gr.key)+'">Match to a league game</button></div>';
+  var h = '<div class="sm-match" id="smMatch"><p class="sm-ql" id="smMatchQ" tabindex="-1">Which league game was it?</p><div class="sv-grid c1">';
+  info.cands.forEach(function(c){
+    var g = CG._smFxGame(c);
+    h += '<label class="sv-opt sv-one sm-game"><input type="radio" name="smMatchGame" value="'+esc(c.gameId)+'"'+(m.gameId === c.gameId ? ' checked' : '')+'><span class="sv-box"></span>'+
+      '<span class="sv-lbl"><span class="sm-t">'+esc(CG.fmtTime(g.at).replace(/ ET$/, ""))+'</span>'+CG._smBoard(g)+'</span></label>';
+  });
+  h += '</div>';
+  var mm = m.gameId ? CG._smMatchMap(info, m) : null, c = info.cands.filter(function(x){ return x.gameId === m.gameId; })[0];
+  if (c && mm && mm.err) h += '<div class="note red" style="margin-top:10px">'+esc(mm.err)+'</div>';
+  else if (c && c.borrower) h += '<p class="caption" style="margin-top:10px">'+esc(CG._smName(c.borrower)+" played as "+info.unresolved[0].name+".")+'</p>';
+  else if (c){
+    h += '<p class="sm-ql" style="margin-top:14px">Which club played as '+esc(info.unresolved[0].name)+'?'+
+      (info.unresolved[1] ? '<small>'+esc(info.unresolved[1].name+" was the other club.")+'</small>' : '')+'</p><div class="sv-grid">'+
+      [c.away, c.home].map(function(code){
+        return '<label class="sv-opt sv-one sm-club"><input type="radio" name="smMatchSide" value="'+esc(code)+'"'+(m.side === code ? ' checked' : '')+'><span class="sv-box"></span>'+
+          '<span class="sv-lbl">'+CG.crest(code, 16, { decorative:true })+'<span><b>'+esc(code+" · "+CG._smName(code))+'</b><small>'+(code === c.away ? 'Away' : 'Home')+'</small></span></span></label>';
+      }).join("")+'</div>';
+  }
+  var ready = !!(mm && mm.map) && String(m.why || "").trim().length >= 3 && !m.busy;
+  h += '<label class="fld" style="margin-top:14px"><span>Why couldn’t they use their own club?</span><input id="smMatchWhy" maxlength="200" placeholder="e.g. Their club would not load" value="'+esc(m.why || "")+'">'+
+    '<span class="hint">Kept with the substitution in the league’s audit log.</span></label>'+
+    '<div class="sm-go"><button type="button" class="btn btn-ink" id="smMatchGo"'+(ready ? '' : ' disabled')+'>'+(m.busy ? 'Recording…' : 'Record it')+'</button>'+
+    '<button type="button" class="btn btn-ghost" data-sm-act="matchcancel">Cancel</button></div>';
+  if (m.err) h += '<div class="note red" style="margin-top:10px">'+esc(m.err)+'</div>';
+  return h + '</div>';
+};
+/* v4.37: a substitution on record shows on its game, in any group (one outside club recorded, the other not yet, is
+   still a needs-substitution group). Remove names the game the substitution is recorded on (subGame), not the group's,
+   and stands only while that game is open: not filed, not held, no sitting on it. The database refuses the rest for
+   everyone but a commissioner (sql/2026-10-29-substitution-clear-guard-v437.sql). */
+CG._smSubNotes = function(gr){
+  var subs = [];
+  gr.sessions.forEach(function(s){ (s.clubs || []).forEach(function(c){ if (c.via === "substitution" && c.team && c.subGame && !subs.some(function(x){ return x.eaId === c.eaId && x.subGame === c.subGame; })) subs.push(c); }); });
+  return subs.map(function(c){
+    var g = CG._smGame(c.subGame) || (gr.game && gr.game.id === c.subGame ? gr.game : null);
+    var open = !!g && g.status === "scheduled" && !g.eaMatchId && !gr.sessions.some(function(s){ return s.onGame; });
+    /* v4.37 review: on a filed or held game the desk offers no Remove to anyone. Removing it there would leave a filed box
+       score under a club that stands for no one, and nothing on this desk can record it again; a commissioner rules on
+       a wrong one (Rule 4.6), from the report */
+    return '<div class="note" style="margin-bottom:10px">'+esc((c.name || "EA club "+c.eaId)+" counts as "+CG._smName(c.team)+" in "+(g && g !== gr.game ? CG._smFx(g)+", "+CG.fmtFull(g.at) : "this game")+" only (Rule 4.6).")+
+      (open ? ' <button type="button" class="btn btn-ghost btn-sm" data-sm-act="unsub" data-game="'+esc(c.subGame)+'" data-ea="'+esc(c.eaId)+'" data-name="'+esc(c.name || "")+'">Remove</button>'
+        : g ? ' <button type="button" class="btn btn-ghost btn-sm" data-sm-act="report" data-game="'+esc(c.subGame)+'">Report a mistake</button>' : '')+'</div>';
+  }).join("");
 };
 /* the restart fold and the action bar share one slot: both change with every tick */
 CG._smBarSlotHtml = function(st, groups, sel){
@@ -3717,6 +3806,7 @@ CG._smLoad = function(opts){
   opts = opts || {};
   var st = CG._smS(), f = st.find; if (!f.club) return;
   var req = opts.before ? st.seq : ++st.seq, club = f.club.eaId, first = !f.sess;
+  f.match = null;   /* every load is the staffer's: it closes the match panel, as Record does (v4.37 review) */
   if (opts.keep && !opts.before && f.ea && f.ea.state === "wait") opts.ea = true;   /* the old EA reply is dropped with the old sequence */
   f.loadErr = null;
   if (opts.before){ f.loading = "older"; f.paged = true; }
@@ -3726,37 +3816,91 @@ CG._smLoad = function(opts){
   CG._smLeagueApi({ leagueSessions:p1 }).then(function(o){
     if (req !== st.seq || !f.club || f.club.eaId !== club) return;
     f.loading = null;
-    if (!o || o.error){ f.loadErr = (o && o.error) || "The server did not answer."; CG._smPaint("smSess", CG._smSessHtml(st)); return; }
+    /* a failed load drops the pending ticks, as a failed EA phase does: a later load must not tick them unasked */
+    if (!o || o.error){ CG._smDropTicks(opts.tick); f.loadErr = (o && o.error) || "The server did not answer."; CG._smPaint("smSess", CG._smSessHtml(st)); return; }
     f.sess = CG._smUnion(f.sess, o.sessions || []);
+    CG._smApplyTicks(!opts.ea, opts.tick);
     if (o.archiveFrom && (!f.from || o.archiveFrom < f.from)) f.from = o.archiveFrom;
-    if (opts.before) CG._smPaintSess();
-    else { var el = CG._smPaint("smSess", CG._smSessHtml(st)); if (first && el) CG._smEnter(el.querySelector(".sm-grps")); }
-    if (opts.ea) CG._smLoadEa(req);
+    if (opts.before) CG._smPaintSessIdle(CG._smPaintSess);
+    else CG._smPaintSessIdle(function(){ var el = CG._smPaint("smSess", CG._smSessHtml(st)); if (first && el) CG._smEnter(el.querySelector(".sm-grps")); });
+    if (opts.ea) CG._smLoadEa(req, opts.tick);
   }).catch(function(e){
     if (req !== st.seq) return;
+    CG._smDropTicks(opts.tick);
     f.loading = null; f.loadErr = e.message; CG._smPaint("smSess", CG._smSessHtml(st));
   });
 };
-CG._smLoadEa = function(req){
+/* v4.37 review: after a substitution is recorded or removed, reload the page its game's sittings are on: an older game's
+   sit on an archive page (the same rule as _smFocusGame), a recent one's on the newest page and EA */
+CG._smReloadFor = function(g){
+  /* the pending ticks ride THIS load (its phases carry the object): no other load, an older page's sharing the sequence
+     number included, ever replays them (v4.37 review) */
+  var f = CG._smS().find, tick = f.tickAfter || null;
+  /* an older game's sittings sit on an archive page; any EA only lists (the poller never archived them) need EA too */
+  var eaOnly = (f.sess || []).some(function(s){ return s.source === "ea" && ((tick && tick.ids.indexOf(s.matchId) >= 0) || (g && s.fixture && s.fixture.gameId === g.id)); });
+  CG._smLoad(g && CG.now() - g.at >= 9 * 86400000 ? { before:CG._smEtDay(g.at + 2 * 86400000), ea:eaOnly, tick:tick } : { ea:true, keep:true, tick:tick });
+};
+/* v4.37: after a substitution is recorded, the sittings it matched are ticked once they read as that game's */
+CG._smApplyTicks = function(done, tick){
+  var f = CG._smS().find, t = f.tickAfter; if (!t || t !== tick) return;
+  var ok = (f.sess || []).filter(function(s){ return t.ids.indexOf(s.matchId) >= 0 && s.kind === "league" && s.fixture && s.fixture.gameId === t.gameId && s.canMerge && !s.onGame && !s.struck; });
+  /* v4.37 review: ticked only when the game's sittings, those already on it included, can be one plain game. A
+     full-length sitting beside another is a second game (a rematch, a full replay) or a restart; a first sitting of ten
+     (10) minutes or less with more after it is a restart (Rule 4.3: its stub is struck, never added). Those the staffer
+     picks by hand, with the Restarted fold. */
+  var all = (f.sess || []).filter(function(s){ return !s.struck && ((s.kind === "league" && s.fixture && s.fixture.gameId === t.gameId) || t.ids.indexOf(s.matchId) >= 0); })
+    .sort(function(a, b){ return (Date.parse(a.endedAt) || 0) - (Date.parse(b.endedAt) || 0); });
+  var full = all.filter(function(s){ return s.length === "full" || s.length === "full-ot"; }).length;
+  /* the stub is the earliest of the game's OWN sittings (on it, or matched now and not moved away), with anything after
+     it: an unrelated earlier sitting tagged to the fixture never hides it */
+  var own = all.filter(function(s){ return (s.onGame || ok.indexOf(s) >= 0) && !(f.moved[s.matchId] && f.moved[s.matchId] !== t.gameId); }), first = own[0];
+  var stub = !!first && first.minutes != null && first.minutes <= 10 && all.some(function(s){ return (Date.parse(s.endedAt) || 0) > (Date.parse(first.endedAt) || 0); });
+  /* a later phase sees more (EA adds the restart the archive had not yet): it takes back only its OWN earlier ticks; a
+     tick the staffer made ended the automatic ones already */
+  (t.auto || []).forEach(function(id){ delete f.picked[id]; });
+  t.auto = [];
+  if (ok.length && !stub && (!full || all.length === 1)) ok.forEach(function(s){ f.picked[s.matchId] = true; t.auto.push(s.matchId); });
+  if (done) f.tickAfter = null;
+};
+/* v4.37 review: a phase that failed takes back the ticks it set and spends the rest (a phase that never completed leaves
+   nothing ticked), and says whether the list must be repainted */
+CG._smDropTicks = function(tick){
+  var f = CG._smS().find; if (!tick || f.tickAfter !== tick) return false;
+  var had = (tick.auto || []).length > 0;
+  (tick.auto || []).forEach(function(id){ delete f.picked[id]; });
+  f.tickAfter = null;
+  return had;
+};
+/* v4.37 review: a reply that lands while the match panel is open leaves the list as it is (the staffer may be typing the
+   reason, and a field is never rebuilt mid-typing): the state holds the reply, the EA line says what came in, and closing
+   the panel (Record, Cancel) repaints the list */
+CG._smPaintSessIdle = function(paint){
+  var st = CG._smS();
+  if (st.find.match && document.getElementById("smMatch")){ CG._smPaint("smEaLine", CG._smEaLineHtml(st)); return null; }
+  return paint();
+};
+CG._smLoadEa = function(req, tick){
   var st = CG._smS(), f = st.find; if (!f.club) return;
   var club = f.club.eaId;
   f.ea = { state:"wait", t0:Date.now() }; CG._smPaint("smEaLine", CG._smEaLineHtml(st)); CG._smTick();
   CG._smLeagueApi({ leagueSessions:{ clubId:club, ea:true } }).then(function(o){
     if (req !== st.seq || !f.club || f.club.eaId !== club) return;
-    if (!o || o.error){ f.ea = { state:"fail", error:(o && o.error) || "The server did not answer." }; CG._smPaint("smEaLine", CG._smEaLineHtml(st)); return; }
+    if (!o || o.error){ var dropped = CG._smDropTicks(tick); f.ea = { state:"fail", error:(o && o.error) || "The server did not answer." }; if (dropped) CG._smPaintSessIdle(CG._smPaintSess); else CG._smPaint("smEaLine", CG._smEaLineHtml(st)); return; }
     var seen = {}; (f.sess || []).forEach(function(s){ seen[s.matchId] = 1; });
     var added = (o.sessions || []).filter(function(s){ return !seen[s.matchId]; }).length;
     f.sess = CG._smUnion(f.sess, o.sessions || []);
+    CG._smApplyTicks(true, tick);
     f.ea = o.ea && o.ea.ok === false && !o.ea.skipped ? { state:"fail", error:o.ea.error || "" } : { state:"ok", added:added };
-    CG._smPaintSess();
+    CG._smPaintSessIdle(CG._smPaintSess);
   }).catch(function(e){
     if (req !== st.seq) return;
-    f.ea = { state:"fail", error:e.message }; CG._smPaint("smEaLine", CG._smEaLineHtml(st));
+    var dropped2 = CG._smDropTicks(tick);
+    f.ea = { state:"fail", error:e.message }; if (dropped2) CG._smPaintSessIdle(CG._smPaintSess); else CG._smPaint("smEaLine", CG._smEaLineHtml(st));
   });
 };
 CG._smPickClub = function(club){
   var st = CG._smS(), f = st.find;
-  f.club = club; f.focus = null; f.focusBefore = null; f.picked = {}; f.moved = {}; f.restart = false; f.adv = false; f.res = null; f.err = null; f.open = {}; f.clubs = null; f.clubsErr = null;
+  f.club = club; f.focus = null; f.focusBefore = null; f.match = null; f.tickAfter = null; f.picked = {}; f.moved = {}; f.restart = false; f.adv = false; f.res = null; f.err = null; f.open = {}; f.clubs = null; f.clubsErr = null;
   st.focusNext = "smQ2";
   CG._smPaint("smFind", CG._smFindHtml(st));
   CG._smLoad({ ea:true });
@@ -3768,7 +3912,7 @@ CG._smFocusGame = function(id){
   if (!t){ f.err = "Neither "+g.away+" nor "+g.home+" has an EA club on file, so this game’s sittings can’t be listed."; CG._smPaint("smFind", CG._smFindHtml(st)); var e0 = document.getElementById("smFindErr"); if (e0) e0.scrollIntoView({ block:"center" }); return; }
   var older = CG.now() - g.at >= 9 * 86400000;
   f.club = { eaId:t.eaClubId, name:t.name, team:t.code }; f.focus = id; f.focusBefore = older ? CG._smEtDay(g.at + 2 * 86400000) : null;
-  f.picked = {}; f.moved = {}; f.restart = false; f.adv = false; f.res = null; f.err = null; f.open = {};
+  f.picked = {}; f.moved = {}; f.restart = false; f.adv = false; f.res = null; f.err = null; f.open = {}; f.match = null; f.tickAfter = null;
   st.focusNext = "smQ2";
   CG._smPaint("smFind", CG._smFindHtml(st));
   var el = document.getElementById("smFind"); if (el) el.scrollIntoView({ block:"start" });
@@ -3809,7 +3953,7 @@ CG._smGo = function(){
       f.busy = null;
       /* an error belongs beside the button that was pressed (the bar is sticky, the result note is at the top) */
       if (!o || o.error){ f.err = (o && o.error) || "The import did not answer."; paintBar(); return; }
-      f.res = { kind:"pickup", o:o }; f.picked = {};
+      f.res = { kind:"pickup", o:o }; f.picked = {}; f.tickAfter = null;
       (f.sess || []).forEach(function(s){ if (sel.sel.indexOf(s.matchId) >= 0){ s.pickupGameId = o.pickupGameId; s.canPickup = false; } });
       st.list.at = 0; CG._smLoadList();
       st.focusNext = "smFindRes"; CG._smPaintSess();
@@ -3848,7 +3992,7 @@ CG._smGo = function(){
       CG._smLeagueApi(r.unpublish ? CG._smWith(req, { unpublish:true }) : req).then(function(r2){
         f.busy = null;
         if (!r2 || r2.error || !r2.ok){ f.err = (r2 && r2.error) || "The server did not confirm the merge. Check the game before trying again."; paintBar(); return; }
-        f.res = { kind:"merge", gid:gid, r:r2 }; f.picked = {}; f.restart = false; f.adv = false; st.focusNext = "smFindRes"; st.refocus = "smFindRes";
+        f.res = { kind:"merge", gid:gid, r:r2 }; f.picked = {}; f.tickAfter = null; f.restart = false; f.adv = false; st.focusNext = "smFindRes"; st.refocus = "smFindRes";
         /* the merged rows read right at once, whichever archive page they came from; then that page is reloaded */
         (f.sess || []).forEach(function(s){
           if (ids.indexOf(s.matchId) >= 0){ s.onGame = true; s.struck = false; s.archive = { status:"merged", gameId:gid }; }
@@ -3859,6 +4003,54 @@ CG._smGo = function(){
       }).catch(function(e2){ f.busy = null; f.err = e2.message; paintBar(); });
     });
   }).catch(function(e){ f.busy = null; f.err = e.message; paintBar(); });
+};
+/* v4.37: record the Rule 4.6 substitution (set_game_club_substitution: statistics staff or a commissioner; its trigger
+   refuses a club another league club owns, a club outside the fixture and a game already filed), then reload so the
+   sittings read as that game's and come back ticked. This step files nothing itself; while the game window is open the
+   importer may file the game on its own (it reads substitutions), which the confirm says. */
+CG._smMatchPaint = function(){
+  var st = CG._smS(), f = st.find, m = f.match; if (!m) return;
+  var gr = CG._smGroups(f.sess, st).filter(function(x){ return x.key === m.key; })[0];
+  if (gr) CG._smPaint("smMatch", CG._smMatchHtml(gr, st));
+};
+CG._smMatchGo = function(){
+  var st = CG._smS(), f = st.find, m = f.match; if (!m || m.busy) return;
+  var gr = CG._smGroups(f.sess, st).filter(function(x){ return x.key === m.key; })[0];
+  /* the list changed under the open panel (a reply moved these sittings): say so, never a silent no-op */
+  if (!gr){ f.match = null; f.err = "The list changed while the panel was open. Open Match to a league game again."; CG._smPaintSess(); return; }
+  var info = CG._smMatchInfo(gr), mm = CG._smMatchMap(info, m), why = String(m.why || "").trim();
+  if (!mm || !mm.map || why.length < 3) return;
+  var g = CG._smFxGame(mm.fx), G = CG._smFx(g);
+  var pairs = Object.keys(mm.map).map(function(id){ return { eaId:id, code:mm.map[id], name:(info.unresolved.filter(function(u){ return u.eaId === id; })[0] || {}).name || "EA club "+id }; });
+  var said = pairs.map(function(p){ return CG._smName(p.code)+" played "+G+" ("+CG.fmtFull(g.at)+") as "+p.name+"."; });
+  CG.confirm("Record the substitution for "+G+"?", said.concat(["That EA club counts as that club in this one game and in no other (Rule 4.6).", "Nothing is filed by this step. While the game window is open, the league’s importer may file the game by itself within a few minutes; otherwise its sittings come back ticked here, ready to merge into the game."]),
+    "Record it", function(){
+      m.busy = true; m.err = null; CG._smMatchPaint();
+      var done = [];
+      pairs.reduce(function(p, x){
+        return p.then(function(){
+          var tm = CG.TEAM[x.code];
+          if (!tm || !tm.id) throw new Error("No league club "+x.code+".");
+          return Promise.resolve(CG.sb.rpc("set_game_club_substitution", { p_game:g.id, p_ea_club_id:x.eaId, p_team:tm.id, p_reason:why })).then(function(r){
+            if (r.error) throw new Error(r.error.message || "The substitution was not recorded.");
+            if (!r.data) throw new Error("The server did not confirm the substitution.");
+            done.push(x);
+          });
+        });
+      }, Promise.resolve()).then(function(){
+        f.match = null; f.tickAfter = { gameId:g.id, ids:gr.sessions.map(function(s){ return s.matchId; }) };
+        f.res = { kind:"sub", b:"Recorded.", text:said.join(" ")+" Its sittings now read as that game’s below. Tick the ones that were this game (a restart or a second game is left for you to pick), then use the button to file it." };
+        st.focusNext = "smFindRes";
+        CG._smReloadFor(g);
+      }, function(e){
+        /* a second substitution that fails leaves the first on record: reload so the desk shows exactly that */
+        m.busy = false; m.err = e.message+(done.length ? " ("+done.map(function(x){ return x.name+" as "+x.code; }).join(", ")+" was recorded.)" : "");
+        /* never silent: when a load closed this panel while the call was out, the error goes to the list's note */
+        if (done.length){ f.err = m.err; if (f.match === m) f.match = null; f.tickAfter = null; CG._smReloadFor(g); }
+        else if (f.match === m) CG._smMatchPaint();
+        else { f.err = m.err; var gs = CG._smGroups(f.sess, st); CG._smPaint("smBarSlot", CG._smBarSlotHtml(st, gs, CG._smSelection(st, gs))); }
+      });
+    });
 };
 CG._smFfGo = function(){
   var st = CG._smS(), f = st.ff, g = CG._smGame(f.game); if (!g || f.busy) return;
@@ -3958,27 +4150,54 @@ CG._smPickGame = function(kind, id){
   if (changed){ var form = document.getElementById(kind === "ff" ? "smFfForm" : "smFixForm"); if (form) CG._smEnter(form); }
 };
 CG._smOnClick = function(e){
-  var st = CG._smS(), t = e.target.closest("[data-sm-act], #smFfGo, #smFfUndo, #smFfReport, #smFixGo, #smFixReport");
+  var st = CG._smS(), t = e.target.closest("[data-sm-act], #smFfGo, #smFfUndo, #smFfReport, #smFixGo, #smFixReport, #smMatchGo");
   if (!t || t.disabled) return;
   if (t.id === "smFfGo") return CG._smFfGo();
   if (t.id === "smFfUndo") return CG._smFfUndo();
   if (t.id === "smFfReport") CG.reportRulingPrompt(st.ff.game);
   if (t.id === "smFixGo") return CG._smFixGo();
   if (t.id === "smFixReport") return CG.reportRulingPrompt(st.fix.game);
+  if (t.id === "smMatchGo") return CG._smMatchGo();
   var act = t.getAttribute("data-sm-act"), f = st.find;
   if (act === "club"){ var tm = CG.TEAM[t.getAttribute("data-code")]; if (tm && tm.eaClubId) CG._smPickClub({ eaId:tm.eaClubId, name:tm.name, team:tm.code }); }
   else if (act === "eaclub"){
     var eid = t.getAttribute("data-id"), lt = (CG.TEAMS || []).filter(function(x){ return x.eaClubId === eid; })[0];
     CG._smPickClub({ eaId:eid, name:t.getAttribute("data-name") || ("EA club "+eid), team:lt ? lt.code : null });
   }
-  else if (act === "club-change"){ ++st.seq; f.club = null; f.sess = null; f.ea = null; f.focus = null; f.focusBefore = null; f.picked = {}; f.res = null; f.err = null; CG._smPaint("smFind", CG._smFindHtml(st)); var c0 = document.querySelector("#smFind .sm-crest:not(:disabled)"); if (c0) c0.focus(); }
+  else if (act === "club-change"){ ++st.seq; f.match = null; f.tickAfter = null; f.club = null; f.sess = null; f.ea = null; f.focus = null; f.focusBefore = null; f.picked = {}; f.res = null; f.err = null; CG._smPaint("smFind", CG._smFindHtml(st)); var c0 = document.querySelector("#smFind .sm-crest:not(:disabled)"); if (c0) c0.focus(); }
   else if (act === "search") CG._smSearch();
   else if (act === "retry") CG._smLoad(f.focusBefore ? { before:f.focusBefore } : { ea:true });
-  else if (act === "eaagain") CG._smLoadEa(st.seq);
+  else if (act === "eaagain"){ if (f.match){ f.match = null; CG._smPaintSess(); } CG._smLoadEa(st.seq); }
   else if (act === "older"){ if (f.from) CG._smLoad({ before:f.from }); }
-  else if (act === "move"){ f.moved[t.getAttribute("data-match")] = t.getAttribute("data-to"); delete f.picked[t.getAttribute("data-match")]; CG._smPaintSess(); }
-  else if (act === "clear"){ f.picked = {}; f.restart = false; f.adv = false; f.err = null; CG._smPaint("smSess", CG._smSessHtml(st)); }
+  else if (act === "move"){ f.moved[t.getAttribute("data-match")] = t.getAttribute("data-to"); delete f.picked[t.getAttribute("data-match")]; f.tickAfter = null; CG._smPaintSess(); }
+  else if (act === "clear"){ f.picked = {}; f.tickAfter = null; f.restart = false; f.adv = false; f.err = null; CG._smPaint("smSess", CG._smSessHtml(st)); }
   else if (act === "go") CG._smGo();
+  else if (act === "match"){
+    if (f.busy) return;   /* not while a merge or import is in flight: its reload would close the panel under the typing */
+    var mk = t.getAttribute("data-key"), mg = CG._smGroups(f.sess, st).filter(function(x){ return x.key === mk; })[0];
+    var only = mg ? CG._smMatchInfo(mg).cands.filter(function(c){ return c.inWindow; }) : [];
+    f.match = { key:mk, gameId:only.length === 1 ? only[0].gameId : null, side:null, why:"", busy:false, err:null };
+    /* the group is found afresh each time: the button that was clicked is gone after the repaint (v4.37 review) */
+    CG._smAnchor(function(){ return [].filter.call(document.querySelectorAll("#smSess .sm-grp"), function(el){ return el.getAttribute("data-key") === mk; })[0]; },
+      function(){ CG._smPaint("smSess", CG._smSessHtml(st)); });
+    var mq = document.getElementById("smMatchQ"); if (mq) mq.focus({ preventScroll:true });
+  }
+  else if (act === "matchcancel"){
+    var ck = f.match && f.match.key; f.match = null; CG._smPaintSess();
+    /* Cancel removes the panel and the button it was on: focus goes back to the group's Match button */
+    var mb = [].filter.call(document.querySelectorAll('#smSess [data-sm-act="match"]'), function(el){ return el.getAttribute("data-key") === ck; })[0];
+    if (mb) try { mb.focus({ preventScroll:true }); } catch(e){}
+  }
+  else if (act === "unsub"){
+    var ug = t.getAttribute("data-game"), ue = t.getAttribute("data-ea"), un = t.getAttribute("data-name") || ("EA club "+ue), ugm = CG._smGame(ug);
+    CG.confirm("Remove the substitution?", [un+" stops counting as a league club for "+(ugm ? CG._smFx(ugm) : "this game")+". Its sittings go back to unmatched here."], "Remove it", function(){
+      Promise.resolve(CG.sb.rpc("clear_game_club_substitution", { p_game:ug, p_ea_club_id:ue })).then(function(r){
+        if (r.error){ f.err = r.error.message; CG._smPaint("smSess", CG._smSessHtml(st)); return; }
+        f.res = { kind:"sub", b:"Removed.", text:un+" no longer counts for "+(ugm ? CG._smFx(ugm) : "that game")+"." }; f.picked = {}; f.tickAfter = null; st.focusNext = "smFindRes";
+        CG._smReloadFor(ugm);
+      }, function(e){ f.err = e.message; CG._smPaint("smSess", CG._smSessHtml(st)); });
+    });
+  }
   else if (act === "report") CG.reportRulingPrompt(t.getAttribute("data-game"));
   else if (act === "change"){
     var kk = t.getAttribute("data-k"), card = kk === "ff" ? "smForfeit" : "smFix";
@@ -4011,7 +4230,8 @@ CG._smOnClick = function(e){
 CG._smOnChange = function(e){
   var st = CG._smS(), t = e.target, f = st.find;
   if (t.name === "smSess"){
-    f.picked[t.value] = t.checked; t.defaultChecked = t.checked; f.err = null;
+    /* the staffer's own tick or untick ends the automatic ticks: a later reply never re-ticks what they cleared */
+    f.picked[t.value] = t.checked; t.defaultChecked = t.checked; f.err = null; f.tickAfter = null;
     var groups = CG._smGroups(f.sess, st), sel = CG._smSelection(st, groups);
     if (!sel.restartable) f.restart = false;
     if (!sel.ticked.length) f.restart = false;
@@ -4020,7 +4240,7 @@ CG._smOnChange = function(e){
     var bar = document.getElementById("smBar"); if (bar && sel.ticked.length === 1 && t.checked) CG._smEnter(bar);
   }
   else if (t.id === "smLgRestart"){
-    f.restart = t.checked; f.adv = true; t.defaultChecked = t.checked;
+    f.restart = t.checked; f.adv = true; t.defaultChecked = t.checked; f.tickAfter = null;
     if (f.restart){ var g2 = CG._smGroups(f.sess, st), s2 = CG._smSelection(st, g2); if (s2.one) s2.one.sessions.forEach(function(s){ if (s.onGame) delete f.picked[s.matchId]; }); }
     CG._smAnchor(function(){ return document.getElementById("smLgRestart"); }, function(){ CG._smPaint("smSess", CG._smSessHtml(st)); });
   }
@@ -4039,6 +4259,11 @@ CG._smOnChange = function(e){
     var g3 = CG._smGame(st.ff.game); if (g3) CG._smPaint("smFfState", CG._smFfStateHtml(g3, st));
   }
   else if (t.id === "smFixOt"){ st.fix.ot = t.checked; t.defaultChecked = t.checked; CG._smFixPatch(); }
+  else if ((t.name === "smMatchGame" || t.name === "smMatchSide") && f.match){
+    document.querySelectorAll('input[name="'+t.name+'"]').forEach(function(r){ r.defaultChecked = r.checked; });
+    if (t.name === "smMatchGame"){ f.match.gameId = t.value; f.match.side = null; } else f.match.side = t.value;
+    f.match.err = null; CG._smMatchPaint();
+  }
 };
 CG._smFixPatch = function(){
   var st = CG._smS(), g = CG._smGame(st.fix.game); if (!g) return;
@@ -4051,6 +4276,12 @@ CG._smOnInput = function(e){
   if (t.id === "smClub") st.find.q = t.value;
   else if (t.id === "smFfFind" || t.id === "smFixFind"){ var k = t.id === "smFfFind" ? "ff" : "fix"; st[k].q = t.value; CG._smPaint(k === "ff" ? "smFfPick" : "smFixPick", CG._smPickListHtml(k, st)); }
   else if (t.id === "smFfWhy") st.ff.why = t.value;
+  else if (t.id === "smMatchWhy" && st.find.match){
+    st.find.match.why = t.value;
+    var mgo = document.getElementById("smMatchGo"), mgr = CG._smGroups(st.find.sess, st).filter(function(x){ return x.key === st.find.match.key; })[0];
+    var mmm = mgr ? CG._smMatchMap(CG._smMatchInfo(mgr), st.find.match) : null;
+    if (mgo) mgo.disabled = !(mmm && mmm.map) || t.value.trim().length < 3 || st.find.match.busy;
+  }
   else if (t.id === "smFixA" || t.id === "smFixH"){ st.fix[t.id === "smFixA" ? "a" : "h"] = t.value; CG._smFixPatch(); }
   else return;
   t.defaultValue = t.value;

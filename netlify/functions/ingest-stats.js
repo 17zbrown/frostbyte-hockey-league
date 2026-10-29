@@ -387,6 +387,22 @@ async function noteUnattributed(game, homeClub, awayClub, summary) {
   } catch (e) { console.warn("unattributed-goal note failed:", String((e && e.message) || e)); }
 }
 
+/* v4.37: Rule 4.6 reads a fixture by SIDE: each club's own EA club plus every club recorded for it in THAT game
+   (game_club_substitutions), so a game lagged out under a club's own EA club and resumed under a borrowed one, or played
+   under borrowed clubs throughout, is one game between the same two sides. One definition for the desk's merge
+   (leagueMerge), the importer's resume and restart (ingestContinuation) and the abandoned-game sweep (closeOutAbandoned). */
+function fixtureSides(home, away, subs) {
+  const ids = (t) => new Set(t ? [t.ea_club_id].concat((subs || []).filter((x) => x.team_id === t.id).map((x) => x.ea_club_id))
+    .filter((x) => x != null).map(String) : []);
+  return { home: ids(home), away: ids(away) };
+}
+/* the sittings with every club relabeled "H" or "A" by side, for mergeSegments and sittingsState (which pair clubs by
+   id); the archive keeps the real ids. A club on neither side keeps its id, or what `other` names it. */
+function bySide(norms, sides, other) {
+  const lab = (id) => (sides.home.has(String(id)) ? "H" : sides.away.has(String(id)) ? "A" : other ? other(String(id)) : String(id));
+  return norms.map((n) => Object.assign({}, n, { clubs: n.clubs.map((c) => Object.assign({}, c, { ea_club_id: lab(c.ea_club_id) })) }));
+}
+
 function mergeSegments(segments) {
   const segs = segments.slice().sort((a, b) => a.ts - b.ts);
   const last = segs[segs.length - 1];
@@ -812,6 +828,7 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
   let pinnedGames = null;
   const unresolved = ids.filter((c) => !teamByClub[c]);
   if (unresolved.length && matchEndMs) {
+    // shortcut: a Remove or re-point landing between this read and the games PATCH below (a second or two, once per game) is not re-checked; revisit if a filed game is ever found with its substitution gone or pointing at the other club
     const subs = await sbGet(`game_club_substitutions?ea_club_id=in.(${unresolved.map(encodeURIComponent).join(",")})&select=game_id,ea_club_id,team_id`) || [];
     const fx = subs.length
       ? await sbGet(`games?id=in.(${subs.map((s) => s.game_id).join(",")})&select=id,scheduled_at`) || []
@@ -822,7 +839,9 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
       const mine = live.filter((s) => String(s.ea_club_id) === String(cid));
       if (mine.length !== 1) continue;   // two fixtures in one window is nobody, same rule as everywhere else
       teamByClub[cid] = mine[0].team_id;
-      pinnedGames = (pinnedGames || []).concat(mine[0].game_id);
+      /* v4.37: two outside clubs must both name the SAME fixture. Pinned to two different games is nobody's game (each
+         substitution speaks for its own fixture only); before, either pin let the match file on the other's fixture */
+      pinnedGames = pinnedGames === null ? [mine[0].game_id] : pinnedGames.filter((id) => id === mine[0].game_id);
     }
   }
   if (Object.keys(teamByClub).length < 2) {
@@ -1101,7 +1120,10 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
      to overtime, AND (v3.53) its score is decided: a game level after sixty minutes is an overtime
      disconnection, and the overtime reload belongs to it (Q20). A complete game is never resumed:
      on a playoff night it is the previous game, not this one's first half. */
-  let cand = null, priors = [], missingArchive = false;
+  /* v4.37: every candidate is read by side (fixtureSides): a club recorded for it under Rule 4.6 is that side's club, so
+     a game whose sittings mix a club's own EA club and a borrowed one is judged, resumed and restarted like any other */
+  const teamRowsC = await sbGet(`teams?id=in.(${tA},${tB})&select=id,ea_club_id`);
+  let cand = null, priors = [], missingArchive = false, sidesC = null;
   for (const g of inWindow) {
     const logRows = await sbGet(`ea_ingest_log?or=(ea_match_id.eq.${encodeURIComponent(g.ea_match_id)},and(game_id.eq.${g.id},status.eq.merged))&select=ea_match_id,status,payload`);
     const ps = [];
@@ -1111,9 +1133,15 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
       if (n2 && !ps.some((x) => x.ea_match_id === n2.ea_match_id)) ps.push(n2);
     }
     if (!ps.length) { missingArchive = true; continue; }   // cannot be judged; see below
-    const stp = sittingsState(ps);
+    /* a game the raw reading already finds complete is complete by side too (one pair of clubs relabels one to one):
+       no substitution read for it. Mixed own and borrowed sittings read as an error raw, and go on to the side read. */
+    const raw0 = sittingsState(ps);
+    if (!raw0.error && raw0.finished) continue;
+    const subsG = (await sbGet(`game_club_substitutions?game_id=eq.${g.id}&select=ea_club_id,team_id`)) || [];
+    const sidesG = fixtureSides(teamRowsC.find((t) => t.id === g.home_team_id), teamRowsC.find((t) => t.id === g.away_team_id), subsG);
+    const stp = sittingsState(bySide(ps, sidesG));
     if (stp.error || stp.finished) continue;   // finished (or unreadable): never resumed
-    cand = g; priors = ps; break;
+    cand = g; priors = ps; sidesC = sidesG; break;
   }
   if (!cand) {
     /* a same-pair final with no archive cannot be judged — exactly the case a commissioner
@@ -1169,11 +1197,10 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
      record with its statistics. This sitting then becomes the game's first, filed or held exactly
      as a fresh one is. */
   const priorTotal = priors.reduce((a, p2) => a + segElapsed(p2), 0);
+  /* v4.37: the restart and the resume map clubs by the candidate's sides (sidesC, read in the candidate loop above) */
   if (priorTotal <= EARLY_RESTART_S) {
-    const clubByTeamR = {};
-    const teamRowsR = await sbGet(`teams?id=in.(${tA},${tB})&select=id,ea_club_id`);
-    for (const tr of teamRowsR) clubByTeamR[tr.id] = norm.clubs.find((c) => c.ea_club_id === String(tr.ea_club_id));
-    const hC = clubByTeamR[cand.home_team_id], aC = clubByTeamR[cand.away_team_id];
+    const hC = norm.clubs.find((c) => sidesC.home.has(String(c.ea_club_id))), aC = norm.clubs.find((c) => sidesC.away.has(String(c.ea_club_id)));
+    const clubByTeamR = { [cand.home_team_id]: hC, [cand.away_team_id]: aC };
     if (!hC || !aC) {
       summary.errors.push({ ea_match_id: norm.ea_match_id, error: "restart could not map clubs to teams" });
       await archive(ctx, norm, raw, "error", "restart could not map clubs to teams");
@@ -1226,7 +1253,8 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
     return R(true);
   }
 
-  const merged = mergeSegments(priors.concat([norm]));
+  const sideAll = bySide(priors.concat([norm]), sidesC);
+  const merged = mergeSegments(sideAll);
   if (merged.error) {
     return refuse(merged.error);
   }
@@ -1236,11 +1264,11 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
      written and no result, until the next sitting arrives. A level total after sixty minutes is an
      overtime disconnection waiting for its overtime reload (Q20). This replaces the v3.18 rule that
      filed a level merge as a double loss and asked the officials to rule on it. */
-  const st = sittingsState(priors.concat([norm]));
+  const st = sittingsState(sideAll);
   /* v3.88 (Rule 4.3.6): the earlier sittings stopped inside the final five minutes. After a game-ending drop the
      reload of the time left is the rule and the merge files it as usual; after a stop the office has to rule on (a
      club left, or nothing explains it), the reload is combined as played but held, never published. */
-  const priorSorted = priors.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  const priorSorted = bySide(priors, sidesC).sort((a, b) => (a.ts || 0) - (b.ts || 0));
   /* the hold sticks: ANY earlier point at which the game stopped for the office keeps it held, so a later sitting
      (an overtime, a further drop) can never publish a game the office has not ruled on */
   let priorHold = null;
@@ -1251,10 +1279,8 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
   const officeHold = !!priorHold;
 
   // write exactly as a normal ingest writes, from the merged line
-  const clubByTeam = {};
-  const teamRows = await sbGet(`teams?id=in.(${tA},${tB})&select=id,ea_club_id`);
-  for (const tr of teamRows) clubByTeam[tr.id] = merged.clubs.find((c) => c.ea_club_id === String(tr.ea_club_id));
-  const homeClub = clubByTeam[cand.home_team_id], awayClub = clubByTeam[cand.away_team_id];
+  const homeClub = merged.clubs.find((c) => c.ea_club_id === "H"), awayClub = merged.clubs.find((c) => c.ea_club_id === "A");
+  const clubByTeam = { [cand.home_team_id]: homeClub, [cand.away_team_id]: awayClub };
   if (!homeClub || !awayClub) {
     summary.errors.push({ ea_match_id: norm.ea_match_id, error: "resume merge could not map clubs to teams" });
     await archive(ctx, norm, raw, "error", "resume merge could not map clubs to teams");
@@ -1786,6 +1812,15 @@ export const handler = async (event) => {
       }
       const teamByClub = new Map((teams || []).filter((t) => t.ea_club_id != null).map((t) => [String(t.ea_club_id), t]));
       const teamById = new Map((teams || []).map((t) => [t.id, t]));
+      /* v4.37 (commissioner, 2026-10-29: "add the ability to seach a non-league club and match it to a team so we can
+         file the league games by searching the club they used and entering their league game"): a club outside the
+         league that a CGHL club played under is read through the Rule 4.6 substitutions on record, exactly as the
+         importer reads them (one fixture each, scoped by that fixture's window), and a sitting still unresolved is
+         offered the open games it could have been */
+      const unresolvedIds = uniq(norms.flatMap((n) => n.clubs.map((c) => String(c.ea_club_id))).filter((id) => !teamByClub.has(id)));
+      const subRows = unresolvedIds.length
+        ? (await sbGet(`game_club_substitutions?ea_club_id=in.(${unresolvedIds.map(encodeURIComponent).join(",")})&select=game_id,ea_club_id,team_id`)) || []
+        : [];
       const code = (tid) => (teamById.get(tid) || {}).code || null;
       /* batched context, never a query per sitting: every league team's games around the sittings, and the pickups */
       const leagueNs = norms.filter((n) => n.ts && n.clubs.some((c) => teamByClub.has(String(c.ea_club_id))));
@@ -1802,10 +1837,17 @@ export const handler = async (event) => {
         allIds ? sbGet(`pickup_games?or=(ea_match_id.in.(${allIds}),ea_match_ids.ov.{${allIds}})&select=id,ea_match_id,ea_match_ids`) : Promise.resolve([])]);
       const gameById = new Map((games || []).map((g) => [g.id, g]));
       /* the games the archive points at that fall outside that span (a sitting merged days later) */
-      const lacking = uniq(items.map((it) => ctx.filed.get(it.id) || (it.row && it.row.game_id)).filter(Boolean)).filter((id) => !gameById.has(id));
+      const lacking = uniq(items.map((it) => ctx.filed.get(it.id) || (it.row && it.row.game_id)).concat(subRows.map((x) => x.game_id)).filter(Boolean)).filter((id) => !gameById.has(id));
       if (lacking.length) {
         const more = await sbGet(`games?id=in.(${lacking.map(encodeURIComponent).join(",")})&select=${GSEL}`);
         for (const g of more || []) gameById.set(g.id, g);
+      }
+      /* the open games a sitting with an unresolved club could have been: one read over the span of those sittings */
+      const needEnds = norms.filter((n) => n.ts && n.clubs.some((c) => !teamByClub.has(String(c.ea_club_id)))).map((n) => n.ts * 1000);
+      if (needEnds.length) {
+        const lo = new Date(Math.min(...needEnds) - 6 * 3600000).toISOString(), hi = new Date(Math.max(...needEnds) + 600000).toISOString();
+        const openG = await sbGet(`games?status=eq.scheduled&voided=not.is.true&forfeit_team_id=is.null&scheduled_at=gte.${encodeURIComponent(lo)}&scheduled_at=lte.${encodeURIComponent(hi)}&select=${GSEL}`);
+        for (const g of openG || []) if (!gameById.has(g.id)) gameById.set(g.id, g);
       }
       const pickupOf = new Map();
       for (const p of pus || []) for (const id of [p.ea_match_id, ...(p.ea_match_ids || [])]) if (id != null && !pickupOf.has(String(id))) pickupOf.set(String(id), p.id);
@@ -1814,7 +1856,7 @@ export const handler = async (event) => {
         at: g.scheduled_at ? new Date(at(g)).toISOString() : null, status: g.status,
         held: g.status === "scheduled" && g.ea_match_id != null, forfeit: g.forfeit_team_id ? code(g.forfeit_team_id) : null,
         inWindow: !!endMs && matchInWindow(endMs, g.scheduled_at) } : null;
-      const sessions = items.map((it) => {
+      const mapIt = (it) => {
         const r = it.row, n = it.n;
         const struck = !!(r && r.status === "struck");
         const pickupGameId = pickupOf.get(it.id) || null;
@@ -1828,9 +1870,61 @@ export const handler = async (event) => {
         const endMs = (n.ts || 0) * 1000;
         const st1 = sittingsState([n]);
         const length = st1.finished ? (st1.wentOt ? "full-ot" : "full") : (st1.level && st1.reachedFull ? "level" : "short");
-        const teamsOf = n.clubs.map((c) => teamByClub.get(String(c.ea_club_id)) || null);
-        const nLeague = teamsOf.filter(Boolean).length;
         const filedOn = ctx.filed.get(it.id) || (r && r.game_id) || null;
+        /* v4.37: a club outside the league resolves through the Rule 4.6 substitutions on record, read the way the importer
+           reads them: the game must include the sitting's league club, EVERY outside club in the sitting must be recorded
+           on that same game, and together they must be its two clubs. In window first (the importer's rule); else, for a
+           game played late, the same six-hour span the desk's candidate list offers. A club borrowed all night is recorded
+           on every fixture of the night and their windows overlap: the earliest still open (a held game counts, so a
+           continuation goes to the game it continues) is the slot, and the others are offered as alternatives. */
+        const linkedOf = n.clubs.map((c) => teamByClub.get(String(c.ea_club_id)) || null);
+        const knownT = linkedOf.find(Boolean) || null;
+        const outIdx = linkedOf.map((t, i) => (t ? -1 : i)).filter((i) => i >= 0);
+        const inSpan = (g, strict) => strict ? matchInWindow(endMs, g.scheduled_at) : (at(g) <= endMs + 600000 && at(g) >= endMs - 6 * 3600000);
+        const rowsAt = (i, strict) => subRows.filter((x) => {
+          const g = gameById.get(x.game_id);
+          if (!g || String(x.ea_club_id) !== String(n.clubs[i].ea_club_id)) return false;
+          if (filedOn) return x.game_id === filedOn;
+          if (!endMs || !inSpan(g, strict)) return false;
+          return !knownT || g.home_team_id === knownT.id || g.away_team_id === knownT.id;
+        });
+        const isOpenG = (g) => g.status === "scheduled" && !g.voided && g.forfeit_team_id == null;
+        /* an open game near the sitting that the substitution is NOT recorded on (the known club's, when one is known) */
+        const openElse = (strict, recorded) => [...gameById.values()].some((g) => isOpenG(g) && !recorded.includes(g.id) && endMs && inSpan(g, strict)
+          && (!knownT || g.home_team_id === knownT.id || g.away_team_id === knownT.id));
+        const fits = (gid, idxs, rows) => {
+          const g = gameById.get(gid);
+          const ts = idxs.map((i, k) => (rows[k].find((x) => x.game_id === gid) || {}).team_id).concat(knownT ? [knownT.id] : []);
+          return ts.every((t) => t && (t === g.home_team_id || t === g.away_team_id)) && new Set(ts).size === ts.length;
+        };
+        const choose = (idxs) => {
+          for (const strict of [true, false]) {
+            const rows = idxs.map((i) => rowsAt(i, strict));
+            if (rows.some((rs) => !rs.length)) continue;
+            const games = uniq(rows[0].map((x) => x.game_id)).filter((gid) => rows.every((rs) => rs.some((x) => x.game_id === gid)) && fits(gid, idxs, rows));
+            if (!games.length) continue;
+            const open = games.filter((gid) => isOpenG(gameById.get(gid))).sort((x, y) => at(gameById.get(x)) - at(gameById.get(y)));
+            /* v4.37 review: a substitution on a game already final (or forfeited) does not pin a NEW sitting there while
+               another open game is near: a final game is complete, so the sitting is most likely that next game's, and
+               it stays unresolved so the desk offers it to be matched. A sitting already filed keeps its game. */
+            const gid = open[0] || (games.length === 1 && (filedOn || !openElse(strict, games)) ? games[0] : null);
+            if (!gid) continue;
+            return { gid, idxs, rows, others: games.filter((x) => x !== gid) };
+          }
+          return null;
+        };
+        /* every outside club on one game; failing that (two outside clubs, one recorded so far), each one alone */
+        let hit = outIdx.length ? choose(outIdx) : null;
+        if (!hit && outIdx.length > 1) for (const i of outIdx) { hit = choose([i]); if (hit) break; }
+        const pin = hit ? hit.gid : null;
+        const via = linkedOf.map((t) => (t ? "linked" : null)), subGame = linkedOf.map(() => null);
+        const teamsOf = linkedOf.slice();
+        if (hit) hit.idxs.forEach((i, k) => {
+          const row = hit.rows[k].find((x) => x.game_id === pin);
+          teamsOf[i] = teamById.get(row.team_id) || null;
+          if (teamsOf[i]) { via[i] = "substitution"; subGame[i] = pin; }
+        });
+        const nLeague = teamsOf.filter(Boolean).length;
         let kind = "not-league", fixture = null, ambiguous = false, alternatives = [], why = null, onGame = false, canMerge = null, canPickup = null;
         if (filedOn) {
           /* where the archive or the games table says it is filed, it is that game's, whatever its window says */
@@ -1838,6 +1932,12 @@ export const handler = async (event) => {
           fixture = Fx(gameById.get(filedOn), endMs) || { gameId: filedOn, home: null, away: null, at: null, status: null, held: false, forfeit: null, inWindow: false };
           onGame = !struck && (ctx.filed.get(it.id) === filedOn || !!(r && /^(ingested|incomplete|merged)$/.test(r.status)));
           if (nLeague < 2) { canMerge = false; why = SUB; }
+        } else if (nLeague === 2 && pin) {
+          /* a recorded substitution pins its sitting to that one fixture (Rule 4.6); other open games the same club was
+             recorded on for that night are offered as alternatives (the desk's "Move it there") */
+          kind = "league"; fixture = Fx(gameById.get(pin), endMs);
+          alternatives = hit.others.map((gid) => Fx(gameById.get(gid), endMs));
+          ambiguous = alternatives.some((x) => x.status === "scheduled" && !x.forfeit);
         } else if (nLeague === 2) {
           const [tA, tB] = teamsOf.map((t) => t.id);
           const pairAll = [...gameById.values()].filter((g) => !g.voided
@@ -1860,7 +1960,9 @@ export const handler = async (event) => {
           const known = teamsOf.find(Boolean);
           const inWin = [...gameById.values()].filter((g) => !g.voided && (g.home_team_id === known.id || g.away_team_id === known.id)
             && matchInWindow(endMs, g.scheduled_at)).sort((x, y) => at(x) - at(y));
-          const fx = inWin.find((g) => g.status === "scheduled" && g.ea_match_id == null) || inWin[0];
+          /* one club resolved through a substitution: its game is the fixture (v4.37 review); else the known club's
+             earliest open game in window */
+          const fx = pin ? gameById.get(pin) : (inWin.find((g) => g.status === "scheduled" && g.ea_match_id == null) || inWin[0]);
           /* v4.36: when the fixture's other club has no EA club linked yet, this is most likely its own club playing the
              game: leagueMerge takes one linked side and links the opponent from the sittings (refusing an EA club another
              league club owns), so it is a league sitting. Otherwise an outside club played: a Rule 4.6 substitution. */
@@ -1869,8 +1971,35 @@ export const handler = async (event) => {
              and a borrowed club (Rule 4.6) against a later slot must never read as the unlinked club's own (the merge
              would then link the borrowed club to the wrong team for good) */
           const openInWin = inWin.filter((g) => g.status === "scheduled" && g.ea_match_id == null);
-          if (fx && oppT && oppT.ea_club_id == null && openInWin.length <= 1) { kind = "league"; fixture = Fx(fx, endMs); }
+          /* nor when the unresolved club has been recorded as BORROWED before: then it is a stand-in, not a new club's own
+             (the merge would refuse to link it, and the desk offers the substitution instead) */
+          const outId = String(n.clubs[teamsOf[0] ? 1 : 0].ea_club_id);
+          const borrowedBefore = subRows.some((x) => String(x.ea_club_id) === outId);
+          /* v4.37 review: a pin is certain only when no other OPEN game shares the record (a club borrowed all night) */
+          const pinSure = pin && !hit.others.some((gid) => isOpenG(gameById.get(gid)));
+          if (fx && oppT && oppT.ea_club_id == null && (pin ? pinSure : openInWin.length <= 1) && !borrowedBefore) { kind = "league"; fixture = Fx(fx, endMs); }
           else if (fx) { kind = "needs-substitution"; fixture = Fx(fx, endMs); canMerge = false; canPickup = false; why = SUB; }
+        }
+        /* the games a sitting with a club outside the league could have been, for the desk's "Match to a league game":
+           an open (or held) fixture that started up to six hours before it ended; with one league club known, only that
+           club's games, and the club that played under the outside club is the fixture's other one */
+        let subCandidates = [];
+        if (nLeague < 2 && !filedOn && !struck && !pickupGameId && endMs) {
+          const known = teamsOf.find(Boolean) || null;
+          /* v4.37 review: one outside club already resolved through a substitution: the other outside club must be recorded
+             on a game the first one is recorded on (the importer reads both on one fixture), so only those games are offered,
+             never a game where a second record would stand alone. A club borrowed all night is recorded on several, and
+             every open one is offered, each with the club the first outside club stands for THERE. */
+          const pinGames = pin ? [pin, ...hit.others] : null;
+          const knownAt = (g) => (pinGames ? teamById.get((hit.rows[0].find((x) => x.game_id === g.id) || {}).team_id) || null : known);
+          const pool = (pinGames ? pinGames.map((id) => gameById.get(id)) : [...gameById.values()]).filter((g) => g && isOpenG(g)
+              && (pinGames || !known || g.home_team_id === known.id || g.away_team_id === known.id));
+          /* the same two steps the resolution above reads: in window first (never cut: one night's slate), else the
+             six-hour span for a game played late; a substitution recorded on any game offered here is read back */
+          const inWinC = pool.filter((g) => matchInWindow(endMs, g.scheduled_at)).sort((x, y) => at(x) - at(y));
+          subCandidates = (inWinC.length ? inWinC : pool.filter((g) => inSpan(g, false)).sort((x, y) => Math.abs(at(x) - endMs) - Math.abs(at(y) - endMs)).slice(0, 8))
+            .map((g) => { const k = knownAt(g); return Object.assign(Fx(g, endMs), { known: k ? k.code : null,
+              borrower: k ? code(g.home_team_id === k.id ? g.away_team_id : g.home_team_id) : null }); });
         }
         if (pickupGameId) { canMerge = false; why = "Imported as a pickup game."; }
         if (struck) { canMerge = false; why = "Struck when its game restarted from the beginning. A struck sitting stays struck."; }
@@ -1883,9 +2012,22 @@ export const handler = async (event) => {
             : it.source === "archive" ? "Only in the league archive: EA must still list a sitting to import it." : null;
         return { matchId: it.id, endedAt: endMs ? new Date(endMs).toISOString() : null, minutes: Math.round(segElapsed(n) / 60), length,
           source: it.source,
-          clubs: n.clubs.map((c, i) => ({ eaId: String(c.ea_club_id), name: c.name || null, team: teamsOf[i] ? teamsOf[i].code : null, score: c.score })),
-          archive, pickupGameId, onGame, struck, kind, fixture, ambiguous, alternatives, canMerge, canPickup, why };
-      });
+          clubs: n.clubs.map((c, i) => ({ eaId: String(c.ea_club_id), name: c.name || null, team: teamsOf[i] ? teamsOf[i].code : null, via: via[i] || null, subGame: subGame[i], score: c.score })),
+          archive, pickupGameId, onGame, struck, kind, fixture, ambiguous, alternatives, canMerge, canPickup, why, subCandidates };
+      };
+      const sessions = items.map(mapIt);
+      /* v4.37 review: a game's sittings already on file under ANOTHER EA club belong in its group. A club that lagged out
+         under its own club and resumed under a borrowed one (Rule 4.6) has its first sitting held on the game, and that
+         sitting is not in the borrowed club's list; the merge must include it (every line counts), so the desk shows it
+         locked in and the bar files both. Read for every game a mergeable sitting here points at. */
+      const gidsOpenMerge = uniq(sessions.filter((x) => x.kind === "league" && x.fixture && x.canMerge && !x.onGame && !x.struck).map((x) => x.fixture.gameId));
+      if (gidsOpenMerge.length) {
+        const onFile = (await sbGet(`ea_ingest_log?game_id=in.(${gidsOpenMerge.map(encodeURIComponent).join(",")})&select=ea_match_id,status,game_id,et_day,payload`)) || [];
+        const extra = onFile.filter((r) => !byId.has(String(r.ea_match_id))).map((r) => ({ id: String(r.ea_match_id), n: tryNorm(r.payload), raw: r.payload, row: r, source: "archive" }));
+        const moreIds = uniq(extra.flatMap((it) => (it.n ? it.n.clubs : []).map((c) => String(c.ea_club_id))).filter((id) => !teamByClub.has(id) && !unresolvedIds.includes(id)));
+        if (moreIds.length) subRows.push(...((await sbGet(`game_club_substitutions?ea_club_id=in.(${moreIds.map(encodeURIComponent).join(",")})&select=game_id,ea_club_id,team_id`)) || []));
+        for (const it of extra) { byId.set(it.id, it); sessions.push(mapIt(it)); }
+      }
       const endOf = (s) => (s.endedAt ? Date.parse(s.endedAt) : 0);
       sessions.sort((x, y) => endOf(y) - endOf(x));   // newest first
       const named = norms.flatMap((n) => n.clubs).find((c) => String(c.ea_club_id) === clubId && c.name);
@@ -1925,7 +2067,11 @@ export const handler = async (event) => {
       return { statusCode: 403, body: JSON.stringify({ error: "Only statistics staff or a commissioner combine a game played in more than one sitting (Rule 4.3). Attach the single sitting that is this game, or leave it to them: a game short of sixty minutes is held and flagged to them automatically." }) };
     const teams = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,ea_club_id`);
     const home = teams.find((t) => t.id === game.home_team_id), away = teams.find((t) => t.id === game.away_team_id);
-    if (!home || !away || (home.ea_club_id == null && away.ea_club_id == null))
+    /* v4.37: each side is its own EA club plus any club recorded as playing for it in THIS fixture (Rule 4.6) */
+    const subsHere = home && away ? ((await sbGet(`game_club_substitutions?game_id=eq.${encodeURIComponent(game.id)}&select=ea_club_id,team_id`)) || []) : [];
+    const sides = fixtureSides(home, away, subsHere);
+    const homeSet = sides.home, awaySet = sides.away;
+    if (!home || !away || (!homeSet.size && !awaySet.size))
       return { statusCode: 422, body: JSON.stringify({ error: "Link a club's EA club first — search EA from the fixture page." }) };
     /* v3.53: a RESTART re-files the game from the sittings selected and strikes every other sitting
        on it, with its statistics. Rule 4.5 ("the game will be fully restarted and any stats will be
@@ -2004,9 +2150,8 @@ export const handler = async (event) => {
        LINK the opponent from evidence: the payload of the game being attached to this fixture
        IS the proof of which EA club the opponent is. A manager never asserts the opponent's
        identity directly. */
-    const bothLinked = home.ea_club_id != null && away.ea_club_id != null;
-    const pair = bothLinked ? [String(home.ea_club_id), String(away.ea_club_id)].sort().join("|") : null;
-    const ourLinked = home.ea_club_id != null ? { team: home, side: "home" } : { team: away, side: "away" };
+    const bothLinked = homeSet.size > 0 && awaySet.size > 0;
+    const ourLinked = homeSet.size ? { team: home, side: "home", ids: homeSet } : { team: away, side: "away", ids: awaySet };
     /* A club may only merge sittings from its fixture's own night (±1 ET day) — exactly the set
        the desk offered it. Two clubs meet several times a season, so without this a manager
        could graft a different meeting's sitting onto this game. Staff keep the unrestricted
@@ -2025,12 +2170,14 @@ export const handler = async (event) => {
       let nrm = null;
       try { nrm = normalizeMatch(row.payload); } catch { nrm = null; }
       if (!nrm) return { statusCode: 422, body: JSON.stringify({ error: `Couldn't read sitting ${row.ea_match_id}.` }) };
-      if (pair) {
-        if (nrm.clubs.map((c) => c.ea_club_id).sort().join("|") !== pair)
-          return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${nrm.ea_match_id} is not between ${home.code} and ${away.code}.` }) };
+      if (bothLinked) {
+        /* one club on each side: its own EA club, or one recorded for it in this fixture */
+        const [c0, c1] = nrm.clubs.map((c) => String(c.ea_club_id));
+        if (!((homeSet.has(c0) && awaySet.has(c1)) || (homeSet.has(c1) && awaySet.has(c0))))
+          return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${nrm.ea_match_id} is not between ${home.code} and ${away.code} (or a club recorded for one of them in this game under Rule 4.6).` }) };
       } else {
-        const ourClub = nrm.clubs.find((c) => c.ea_club_id === String(ourLinked.team.ea_club_id));
-        const oppClub = nrm.clubs.find((c) => c.ea_club_id !== String(ourLinked.team.ea_club_id));
+        const ourClub = nrm.clubs.find((c) => ourLinked.ids.has(String(c.ea_club_id)));
+        const oppClub = nrm.clubs.find((c) => !ourLinked.ids.has(String(c.ea_club_id)));
         if (!ourClub || !oppClub)
           return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${nrm.ea_match_id} doesn't involve ${ourLinked.team.code}.` }) };
         if (derivedOpp && derivedOpp.id !== String(oppClub.ea_club_id))
@@ -2047,17 +2194,23 @@ export const handler = async (event) => {
     if (derivedOpp) {
       const clash = await sbGet(`teams?ea_club_id=eq.${encodeURIComponent(derivedOpp.id)}&select=code&limit=1`);
       if (clash[0]) return { statusCode: 422, body: JSON.stringify({ error: `These sittings are against ${clash[0].code}'s EA club — not this fixture's opponent.` }) };
+      /* v4.37: nor a club the league office has recorded as BORROWED (Rule 4.6): linking it would make a one-night
+         stand-in a club's permanent identity. Record a substitution for this game instead. */
+      const borrowed = await sbGet(`game_club_substitutions?ea_club_id=eq.${encodeURIComponent(derivedOpp.id)}&select=game_id&limit=1`);
+      if (borrowed && borrowed[0]) return { statusCode: 422, body: JSON.stringify({ error: `EA club ${derivedOpp.name || derivedOpp.id} has been played under as a borrowed club (Rule 4.6), so a merge does not link it as a club's own. Match it to this game as a substitution in the Stats manager; if it really is the club's own EA club, link it in the Control Center.` }) };
     }
     norms.sort((x, y) => (x.ts || 0) - (y.ts || 0));
-    const merged = norms.length > 1 ? mergeSegments(norms) : norms[0];
+    /* v4.37: the merge keys clubs by EA club, so each sitting's clubs are read as the fixture's two SIDES first: a game
+       played partly under a club's own EA club and partly under a borrowed one (Rule 4.6) is still one game. The
+       original norms keep the real EA ids for the archive rows written below. */
+    const sideNorms = bySide(norms, sides, (id) => (derivedOpp && id === derivedOpp.id ? (homeSet.size ? "A" : "H") : id));
+    const merged = sideNorms.length > 1 ? mergeSegments(sideNorms) : sideNorms[0];
     if (merged.error) return { statusCode: 422, body: JSON.stringify({ error: merged.error }) };
     /* v3.53: the same finished test as the automatic import (sittingsState). A manual merge short of a
        full, decided game is written and HELD, never published. */
-    const st = sittingsState(norms);
+    const st = sittingsState(sideNorms);
     const clubByClubId = Object.fromEntries(merged.clubs.map((c) => [String(c.ea_club_id), c]));
-    const homeEaId = home.ea_club_id != null ? String(home.ea_club_id) : derivedOpp.id;
-    const awayEaId = away.ea_club_id != null ? String(away.ea_club_id) : derivedOpp.id;
-    const clubByTeam = { [game.home_team_id]: clubByClubId[homeEaId], [game.away_team_id]: clubByClubId[awayEaId] };
+    const clubByTeam = { [game.home_team_id]: clubByClubId.H, [game.away_team_id]: clubByClubId.A };
     const homeClub = clubByTeam[game.home_team_id], awayClub = clubByTeam[game.away_team_id];
     /* v4.36: everything the desk's confirm states is computed here, before a single write, so the preview below and
        the merge can never disagree. heldWhy moved up from after the writes; its text is unchanged. */
@@ -2085,7 +2238,7 @@ export const handler = async (event) => {
         held: !st.finished, heldWhy, overlong: !!st.overlong, minutes, sittings: norms.length,
         strike, fromEa, outsideWindow, unpublish, posts,
         /* v4.36: a merge with one linked side links the opponent's EA club from these sittings; the confirm says so */
-        links: derivedOpp ? { team: (home.ea_club_id == null ? home : away).code, eaId: derivedOpp.id, name: derivedOpp.name } : null,
+        links: derivedOpp ? { team: (ourLinked.side === "home" ? away : home).code, eaId: derivedOpp.id, name: derivedOpp.name } : null,
         current: { status: game.status, score: game.status === "final" ? `${game.home_score}-${game.away_score}` : null } }) };
     /* v4.36: a short merge onto a FINAL game takes its published result off the standings and holds the game, and
        nothing is posted (the old final stays in #game-scores). That used to happen silently on any merge; now it
@@ -2178,7 +2331,7 @@ export const handler = async (event) => {
     /* Evidence linkage: attaching these sittings to this fixture proves the opponent's EA club.
        Link it so auto-imports cover them from now on; staff are told either way. */
     if (derivedOpp) {
-      const oppTeam = home.ea_club_id == null ? home : away;
+      const oppTeam = ourLinked.side === "home" ? away : home;   /* v4.37: the side with no club, own or recorded */
       await sbSend("PATCH", `teams?id=eq.${oppTeam.id}`, { ea_club_id: derivedOpp.id }, "return=minimal");
       await tellStaff(`🔗 **EA club linked by evidence** — merging sittings into ${away.code} @ ${home.code} established that ` +
         `${oppTeam.code}'s EA club is “${derivedOpp.name || derivedOpp.id}” (${derivedOpp.id}). Auto-imports now cover ${oppTeam.code}. ` +
@@ -2283,7 +2436,7 @@ async function closeOutAbandoned(ctx, summary, batch) {
   const seenAt = new Map();
   for (const m of batch) for (const c of clubsOf(m)) {
     if (!seenAt.has(c)) seenAt.set(c, []);
-    seenAt.get(c).push({ ts: m.ts || 0, pair: pairOf(m) });
+    seenAt.get(c).push({ ts: m.ts || 0, pair: pairOf(m), ids: clubsOf(m) });
   }
   /* The abandoned game's OWN pair is the one NOT in this delivery, so the search starts from each
      club in the delivery and looks at its recent finals against anyone. */
@@ -2312,18 +2465,29 @@ async function closeOutAbandoned(ctx, summary, batch) {
         }
       } catch { continue; }
       if (!ps.length) continue;                       /* not judgeable without the payloads */
+      /* the raw reading first: a game it finds complete is complete by side too, so the sweep reads substitutions only
+         for the rare unfinished or mixed game, never for every filed game on every poll (v4.37 review: game-night load) */
+      const raw0 = sittingsState(ps);
+      if (!raw0.error && raw0.finished) continue;
+      /* v4.37: read by side (fixtureSides): a club recorded for this game under Rule 4.6 IS that side, so a game whose
+         sittings mix a club's own EA club and a borrowed one is judged like any other, and a later match between the two
+         sides is the same game resuming, never a club moving on */
+      let subsG = [];
+      try { subsG = (await sbGet(`game_club_substitutions?game_id=eq.${g.id}&select=ea_club_id,team_id`)) || []; } catch { continue; }
+      const sidesG = fixtureSides({ id: g.home_team_id, ea_club_id: cHome }, { id: g.away_team_id, ea_club_id: cAway }, subsG);
       /* the same finished test as everywhere else (sittingsState) */
-      const stA = sittingsState(ps);
+      const stA = sittingsState(bySide(ps, sidesG));
       if (stA.error || stA.finished) continue;       /* finished, or unreadable */
       const last = stA.last, total = stA.total;
-      /* the score the sittings add up to, from the home and away clubs' side: a held game has no
-         score on its row, and a published one is read the same way for consistency */
-      const hClub = stA.merged.clubs.find((c) => String(c.ea_club_id) === cHome);
-      const aClub = stA.merged.clubs.find((c) => String(c.ea_club_id) === cAway);
+      /* the score the sittings add up to, from the home and away sides: a held game has no score on its row, and a
+         published one is read the same way for consistency */
+      const hClub = stA.merged.clubs.find((c) => c.ea_club_id === "H");
+      const aClub = stA.merged.clubs.find((c) => c.ea_club_id === "A");
       if (!hClub || !aClub) continue;
       const hs = hClub.score || 0, as = aClub.score || 0;
-      /* did either club play a DIFFERENT opponent after the last sitting? */
-      const movedOn = [cHome, cAway].some((c) => (seenAt.get(c) || []).some((x) => x.pair !== pair && x.ts > (last.ts || 0)));
+      /* did either club play a DIFFERENT opponent after the last sitting? (by side, as above) */
+      const sameGame = (ids) => ids.length === 2 && ((sidesG.home.has(ids[0]) && sidesG.away.has(ids[1])) || (sidesG.home.has(ids[1]) && sidesG.away.has(ids[0])));
+      const movedOn = [cHome, cAway].some((c) => (seenAt.get(c) || []).some((x) => x.pair !== pair && !sameGame(x.ids) && x.ts > (last.ts || 0)));
       if (!movedOn) continue;                         /* still resumable: leave it for the merge */
       done.add(g.id);
       const mins = Math.round(total / 60);
