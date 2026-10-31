@@ -101,7 +101,9 @@ async function postWebhook(url, content, opts = {}) {
      its last ~20 games AND the whole Featured Matchups block while the job reported success.
      Split on line boundaries and post every part; the first part decides ok/failed. */
   const text = String(content == null ? "" : content);
-  const mentions = opts.ping ? { parse: ["users", "roles"] } : { parse: [] };
+  /* v4.39: `roles` pings exactly the listed role ids and nothing else in the copy; `ping` keeps the broad parse */
+  const mentions = (opts.roles && opts.roles.length) ? { parse: [], roles: opts.roles.map(String) }
+    : opts.ping ? { parse: ["users", "roles"] } : { parse: [] };
   if (text.length <= 1990) {
     return postWithRetry(url, { "Content-Type": "application/json" }, { content: text, allowed_mentions: mentions });
   }
@@ -666,6 +668,9 @@ async function caseworkNudge(cfg, teamById, et, dry, errors, unconfigured) {
 // carries the deadline and the link — and now mentions nobody: postWebhook without `ping` sends
 // allowed_mentions {parse:[]}, so even a stray <@&…> in the copy could not fire a notification.
 // The ROLE itself stays: discord-sync still uses it for channel permissions and the GIF carve-out.
+// v4.39 (commissioner, 2026-10-31): "ensure you tag the not signed up role in the season signup reminders." The ping is
+// back, for that ONE role only: allowed_mentions names its id ({parse:[], roles:[id]}), so nothing else in the copy can
+// fire. The role is the stored one, named for the season (S2 Not Signed Up, v4.38).
 /* ---------- (G) tonight's lineups, due when the night's first game locks ----------
    Commissioner's ruling (2026-09-22): a club sets its lines the DAY OF, not for the whole week at
    once. Each game day the office asks for that night's sheets by the moment the night's FIRST game
@@ -963,6 +968,15 @@ export async function runAvailabilityReminder({ dry = false } = {}) {
   const availability = await availabilityReminder(w.season, w.games, w.teamById, w.cfg, new Date(), dry, true, errors, unconfigured);
   return { availability, errors, unconfigured, ok: errors.length === 0 };
 }
+/* v4.39: the sign-up reminder, same door: /api/discord-ops?post=signup-reminder (&dry=1 to look first). The window
+   claim still holds, so it can never post a window twice; re-sending one means releasing that window's claim first. */
+export async function runSignupReminder({ dry = false } = {}) {
+  const w = await loadWorld();
+  if (!w) return { skipped: "no season" };
+  const errors = [], unconfigured = [];
+  const signups = await signupReminder(w.cfg, etParts(new Date()), dry, errors, unconfigured);
+  return { signups, errors, unconfigured, ok: errors.length === 0 };
+}
 /* the club game-night post, same door: /api/discord-ops?post=game-night (&dry=1 to look first).
    It cannot be forced EARLY: night_board still refuses to hand out a night that has not locked,
    which is the point of putting the gate in the database. This door is for re-sending a night
@@ -1029,11 +1043,15 @@ async function signupReminder(cfg, et, dry, errors, unconfigured) {
   const deadline = s.signup_deadline_at || s.registration_deadline || null;
   /* v4.38: the reminder came back on (commissioner, 2026-10-31: "every 3 days starting today ... in the new channel")
      in the house style for anything posted: no em dashes */
-  const content = `⏰ **${s.name} sign-ups are open.** ${remaining} member${remaining === 1 ? " hasn't" : "s haven't"} registered yet.\n` +
+  /* v4.39: the sign-up role is tagged (the (E) note above); a missing or malformed id posts untagged and says so */
+  const nsu = String(cfg.discord_not_signed_up_role_id || "").trim();
+  const tag = /^\d{15,25}$/.test(nsu) ? `<@&${nsu}> ` : "";
+  if (!tag) unconfigured.push("sign-up reminder ping (discord_not_signed_up_role_id)");
+  const content = `${tag}⏰ **${s.name} sign-ups are open.** ${remaining} member${remaining === 1 ? " hasn't" : "s haven't"} registered yet.\n` +
     ((deadline && new Date(deadline).getTime() > Date.now())
       ? `Sign up before **${fmtDay(deadline)}** to go into the draft. After that you can still join, and you'll be placed on a club: https://chelgamingleague.com/#/register`
       : `Grab your spot: https://chelgamingleague.com/#/register`);
-  if (dry) return { would_post: content, remaining, everyDays: EVERY };
+  if (dry) return { would_post: content, pings: tag ? [nsu] : [], remaining, everyDays: EVERY };
   /* Every N days rather than daily (commissioner's call, 2026-08-19: 3). The claim is keyed on the
      WINDOW, not the date, which matters — keying on et.ymd would post once per day, and gating on
      `dayNum % N === 0` would skip the whole window whenever the 18:00 tick was missed on the one
@@ -1041,9 +1059,9 @@ async function signupReminder(cfg, et, dry, errors, unconfigured) {
      are refused, so a missed tick simply catches up the next evening. */
   const windowRef = `w${EVERY}-${Math.floor(etDayNum(et.ymd) / EVERY)}`;
   if (!(await claim("signup_reminder", windowRef))) return `already posted this ${EVERY}-day window`;
-  const res = await postWebhook(url, content);   /* no `ping` → allowed_mentions {parse:[]} → mentions nobody */
+  const res = await postWebhook(url, content, tag ? { roles: [nsu] } : {});   /* only the sign-up role can be pinged */
   if (!res.ok) { errors.push(`signup reminder: ${res.error}`); if (!res.ambiguous) await release("signup_reminder", windowRef); return `post failed: ${res.error}`; }
-  return `posted the sign-up notice, no ping (${remaining} remaining, every ${EVERY} days)`;
+  return `posted the sign-up notice, ${tag ? "tagging the sign-up role" : "untagged (no sign-up role id)"} (${remaining} remaining, every ${EVERY} days)`;
 }
 
 function json(o, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { "content-type": "application/json" } }); }

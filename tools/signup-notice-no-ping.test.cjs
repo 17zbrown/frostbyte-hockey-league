@@ -1,11 +1,12 @@
-/* The recurring #season-signups notice must never @-ping anyone (commissioner, 2026-09-08).
+/* The recurring #season-signups notice pings the sign-up role and NOTHING else.
    Run: node tools/signup-notice-no-ping.test.cjs
 
-   It used to mention the bot-maintained "Not Signed Up" role every window. The role still exists and
-   discord-sync still uses it for channel permissions and the GIF carve-out — only the ping is gone.
-   Two independent guards, because either alone would let a ping back in:
-     1. no role mention in the copy, and
-     2. no `ping` option on the post, which sends allowed_mentions {parse:[]} so a stray mention is inert. */
+   History: it mentioned the bot-maintained "Not Signed Up" role every window until the commissioner removed the ping on
+   2026-09-08, and this file then pinned "mentions nobody". v4.39 (commissioner, 2026-10-31: "ensure you tag the not
+   signed up role in the season signup reminders") reverses that ruling, so these pins are inverted with intent: the
+   name stays so the history is findable. Two independent guards, because either alone would let a wider ping in:
+     1. the copy tags exactly the stored sign-up role, and
+     2. the post sends allowed_mentions {parse:[], roles:[that id]} (no broad `ping`), so nothing else can fire. */
 const fs = require("fs"), path = require("path");
 const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
 const sched = R("jobs/discord-scheduler.js");
@@ -17,13 +18,14 @@ const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"}
 const fn = sched.slice(sched.indexOf("async function signupReminder"));
 const body = fn.slice(0, fn.indexOf("\nfunction json("));
 
-console.log("— the sign-up notice mentions nobody");
-A("no role mention in the copy", !/<@&/.test(body));
-A("...and the not-signed-up role id is not even read", !/discord_not_signed_up_role_id/.test(body));
-A("the post carries no ping option", !/postWebhook\(url, content, \{ ping: true \}\)/.test(body));
-A("...it posts with mentions suppressed", /postWebhook\(url, content\);/.test(body));
-A("the result line no longer claims a ping", !/pinged the not-signed-up role/.test(body) &&
-  /posted the sign-up notice, no ping/.test(body));
+console.log("— the sign-up notice tags the sign-up role and nothing else (v4.39)");
+A("the role id comes from the stored sign-up role", /String\(cfg\.discord_not_signed_up_role_id \|\| ""\)\.trim\(\)/.test(body));
+A("...used only when it is a real id", /\/\^\\d\{15,25\}\$\/\.test\(nsu\)/.test(body));
+A("the copy opens with that one mention", /const tag = [^\n]*`<@&\$\{nsu\}> `/.test(body) && /const content = `\$\{tag\}/.test(body));
+A("the post names exactly that role, never the broad ping", /postWebhook\(url, content, tag \? \{ roles: \[nsu\] \} : \{\}\)/.test(body) && !/ping: true/.test(body));
+A("postWebhook turns a role list into parse:[] plus that list",
+  /\(opts\.roles && opts\.roles\.length\) \? \{ parse: \[\], roles: opts\.roles\.map\(String\) \}/.test(sched));
+A("a missing id is reported, not silent", /unconfigured\.push\("sign-up reminder ping \(discord_not_signed_up_role_id\)"\)/.test(body));
 A("the notice still carries the deadline and the sign-up link",
   /sign-ups are open/.test(body) && /#\/register/.test(body));
 

@@ -1,8 +1,9 @@
 // The recurring sign-up notice. Run: node tools/signup-reminder.test.mjs
 //
-// It posts every N days (commissioner's setting, currently 3) and, since 2026-09-08, pings NOBODY —
-// the "Not Signed Up" role mention was removed. This file is the runtime half of that guarantee:
-// it asserts the actual posted body AND its allowed_mentions, which a static grep cannot see.
+// It posts every N days (commissioner's setting, currently 3). From 2026-09-08 it pinged nobody; since v4.39
+// (commissioner, 2026-10-31: "ensure you tag the not signed up role in the season signup reminders") it tags the
+// sign-up role and ONLY that role. This file is the runtime half of that guarantee: it asserts the actual posted body
+// AND its allowed_mentions, which a static grep cannot see.
 //
 // This exists because of a silent four-day outage: the v2.8 rule change (the sign-up deadline is a
 // draft cutoff, not a hard close) removed the `deadline` binding while the message below still
@@ -31,8 +32,8 @@ function reset(over = {}) {
   posts = []; claims = [];
   cfgRows = [
     { key: "discord_signup_webhook", value: "https://discord.com/api/webhooks/x/y" },
-    /* deliberately still present: the notice must not mention it even when it IS configured */
-    { key: "discord_not_signed_up_role_id", value: "ROLE1" },
+    /* v4.39: the role the notice tags (a real snowflake shape; anything else posts untagged) */
+    { key: "discord_not_signed_up_role_id", value: "123456789012345678" },
   ];
 }
 reset();
@@ -75,10 +76,11 @@ console.log("— it posts at all (the regression)");
   A("the run records no error", !body.error, body.error);
   A("...specifically not a ReferenceError", !/is not defined/.test(String(body.error || "")));
   A("a reminder is actually posted", posts.length === 1);
-  A("...mentioning nobody — the role ping was removed 2026-09-08", !/<@&/.test(posts[0].content));
-  A("...and suppressed at the API level, so a stray mention could not fire",
-    JSON.stringify(posts[0].allowed_mentions) === JSON.stringify({ parse: [] }),
+  A("...tagging the sign-up role, first thing (v4.39)", posts[0].content.startsWith("<@&123456789012345678> "), posts[0].content.slice(0, 40));
+  A("...and only that role can fire at the API level (no broad parse, no users, no everyone)",
+    JSON.stringify(posts[0].allowed_mentions) === JSON.stringify({ parse: [], roles: ["123456789012345678"] }),
     JSON.stringify(posts[0].allowed_mentions));
+  A("...and the result says so", /tagging the sign-up role/.test(String(body.signups)), String(body.signups));
   A("...while still naming how many are outstanding", /2 members haven't registered/.test(posts[0].content),
     posts[0].content.split("\n")[0]);
   A("...and only the unregistered are counted", /2 remaining/.test(String(body.signups)), String(body.signups));
@@ -119,6 +121,20 @@ console.log("\n— the off switch");
   cfgRows.push({ key: "signup_reminder_enabled", value: "on" });
   body = await (await call()).json();
   A("...and \"on\" turns it back on with no deploy", posts.length === 1, String(body.signups));
+}
+
+console.log("\n— no usable role id: it still posts, untagged, and says the ping is unconfigured");
+{
+  for (const v of [null, "ROLE1", "<@&1> everyone"]) {
+    reset();
+    cfgRows = cfgRows.filter((r) => r.key !== "discord_not_signed_up_role_id");
+    if (v !== null) cfgRows.push({ key: "discord_not_signed_up_role_id", value: v });
+    const body = await (await call()).json();
+    A(`role id ${JSON.stringify(v)}: posted with no mention and nothing pingable`,
+      posts.length === 1 && !/<@/.test(posts[0].content) && JSON.stringify(posts[0].allowed_mentions) === JSON.stringify({ parse: [] }),
+      posts[0] && JSON.stringify(posts[0].allowed_mentions));
+    A("...and reported as unconfigured", (body.unconfigured || []).some((u) => /sign-up reminder ping/.test(u)), JSON.stringify(body.unconfigured));
+  }
 }
 
 console.log("\n— the quiet cases stay quiet");
