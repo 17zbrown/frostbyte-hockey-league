@@ -26,7 +26,8 @@ import { fileURLToPath } from "node:url";
    sides importing one module is what stops the two processes from ever disagreeing about what a
    member's roles should be — they can only disagree about when. */
 import { STAFF_DEPARTMENTS, POS_LABEL, POSITION_ROLES, MANAGED_STATIC,
-  desiredRolesFor, applyManagedRoles, managedRoleIds } from "../shared/roles.mjs";
+  desiredRolesFor, applyManagedRoles, managedRoleIds,
+  NOT_SIGNED_UP, notSignedUpName, roleIdMap, notSignedUpStrays } from "../shared/roles.mjs";
 import { buildDepartureEmbed } from "../shared/departure-card.mjs";
 import { buildNoticeEmbed } from "../bot/club-notices.mjs";
 import { noLinkPreviews, noLinkPreviewsEdit } from "../shared/discord-links.cjs";
@@ -889,6 +890,17 @@ async function syncRoleIcons(guildRoles, teams, roleId, sum) {
 // Staff used to be granted posting here too). Its webhook is stored so the site can post league
 // news without a bot token. Creation only — if the channel already exists under Information we
 // adopt it and just make sure the hook is on file.
+/* v4.38 (commissioner, 2026-10-31: "delete the season signups channel and remake it. Re enable the sign up reminders
+   every 3 days starting today as well in the new channel"): #season-signups is the second feed kept this way. Before,
+   nothing created it: it existed only because it was made by hand, so a remade channel would have had no webhook and
+   the sign-up reminder and the "Registration is OPEN" announcement (both on discord_signup_webhook) would have posted
+   nowhere. Now the sweep adopts it by name or builds it under Information, and keeps a "CGHL Sign-ups" hook on file. */
+const INFO_FEEDS = [
+  { name: "announcements", topic: "League announcements from the commissioners. Read-only: discussion goes in the forums or #general.",
+    hookName: "CGHL Announcements", cfgKey: "discord_announcements_webhook", sumKey: "announcements" },
+  { name: "season-signups", topic: "Season sign-ups: when they open, the deadline, and reminders. Sign up at chelgamingleague.com/#/register",
+    hookName: "CGHL Sign-ups", cfgKey: "discord_signup_webhook", sumKey: "signups" },
+];
 async function ensureAnnouncements(guildChannels, roleId, sum) {
   const office = ["commissioner"].map((n) => roleId[n]).filter(Boolean);
   if (office.length < 1) return;                       // role not provisioned yet — try next run
@@ -900,31 +912,33 @@ async function ensureAnnouncements(guildChannels, roleId, sum) {
       guildChannels.push(cat); sum.infoCatCreated = 1;
     } catch (e) { sum.errors.push({ infoCat: String(e.message || e) }); return; }
   }
-
-  let ch = guildChannels.find((c) => c.type !== 4 && (c.name || "").toLowerCase() === "announcements");
+  for (const feed of INFO_FEEDS) await ensureInfoFeed(guildChannels, office, cat, feed, sum);
+}
+/* one definition of an Information feed: the channel (everyone reads; the commissioners may post) and its webhook */
+async function ensureInfoFeed(guildChannels, office, cat, feed, sum) {
+  let ch = guildChannels.find((c) => c.type !== 4 && (c.name || "").toLowerCase() === feed.name);
   if (!ch) {
     try {
       ch = await dApi("POST", `/guilds/${GUILD}/channels`, {
-        name: "announcements", type: 0, parent_id: cat.id,
-        topic: "League announcements from the commissioners. Read-only — discussion goes in the forums or #general.",
+        name: feed.name, type: 0, parent_id: cat.id, topic: feed.topic,
         permission_overwrites: [
           { id: GUILD, type: 0, allow: String(INFO_EVERYONE_ALLOW), deny: String(INFO_EVERYONE_DENY) },   // everyone: read; no messages, no threads
           ...office.map((id) => ({ id, type: 0, allow: String(INFO_POSTER_ALLOW), deny: "0" })),
         ],
       });
-      guildChannels.push(ch); sum.announcementsCreated = 1;
-    } catch (e) { sum.errors.push({ announcements: String(e.message || e) }); return; }
+      guildChannels.push(ch); sum[feed.sumKey + "Created"] = 1;
+    } catch (e) { sum.errors.push({ [feed.sumKey]: String(e.message || e) }); return; }
   }
 
   try {
     const hooks = await dApi("GET", `/channels/${ch.id}/webhooks`);
-    let hook = Array.isArray(hooks) ? hooks.find((h) => h.name === "CGHL Announcements" && h.token) : null;
-    if (!hook) hook = await dApi("POST", `/channels/${ch.id}/webhooks`, { name: "CGHL Announcements" });
+    let hook = Array.isArray(hooks) ? hooks.find((h) => h.name === feed.hookName && h.token) : null;
+    if (!hook) hook = await dApi("POST", `/channels/${ch.id}/webhooks`, { name: feed.hookName });
     if (hook && hook.id && hook.token) {
-      await sbUpsertCfg("discord_announcements_webhook", `https://discord.com/api/webhooks/${hook.id}/${hook.token}`);
-      sum.announcementsHook = 1;
+      await sbUpsertCfg(feed.cfgKey, `https://discord.com/api/webhooks/${hook.id}/${hook.token}`);
+      sum[feed.sumKey + "Hook"] = 1;
     }
-  } catch (e) { sum.errors.push({ announcementsHook: String(e.message || e) }); }
+  } catch (e) { sum.errors.push({ [feed.sumKey + "Hook"]: String(e.message || e) }); }
 }
 
 // Community + game-night channels: a public #pickup-games and #draft-hub, per-club voice rooms (private to
@@ -1197,7 +1211,9 @@ const DENY_GRANT_NAMED = EMBED_LINKS;                            /* the GIF pick
 const POST_ALLOW_STATIC = ["player", "free agent", "commissioner", "staff", "owner",
   "general manager", "assistant general manager"];
 
-async function enforcePostingPolicy(guildRoles, teams, sum) {
+async function enforcePostingPolicy(guildRoles, teams, sum, roleId) {
+  /* v4.38: the sign-up role is named for its season ("S2 Not Signed Up"), so it is matched by its id, not its name */
+  const nsuId = roleId && roleId[NOT_SIGNED_UP];
   const allow = new Set(POST_ALLOW_STATIC);
   for (const p of POSITION_ROLES) allow.add(p.toLowerCase());
   for (const d of STAFF_DEPARTMENTS) allow.add(d.role.toLowerCase());
@@ -1206,7 +1222,7 @@ async function enforcePostingPolicy(guildRoles, teams, sum) {
   for (const r of guildRoles || []) {
     let perms;
     try { perms = BigInt(r.permissions || 0); } catch (e) { continue; }
-    const name = String(r.name || "").toLowerCase();
+    const name = r.id === nsuId ? NOT_SIGNED_UP : String(r.name || "").toLowerCase();
     const isEveryone = r.id === GUILD;
     /* integration roles belong to their app and Discord refuses to PATCH them */
     if (r.managed) continue;
@@ -1976,7 +1992,7 @@ export const ops = {
   // "The sync reported no errors" is not the same as "the roles are right" — this proves it.
   async diagRolecheck() {
     const roles = await dApi("GET", `/guilds/${GUILD}/roles`);
-    const rid = {}; for (const r of roles) rid[(r.name || "").toLowerCase()] = r.id;
+    const rid = roleIdMap(roles, (await sbCfgMany(["discord_not_signed_up_role_id"])).discord_not_signed_up_role_id);   /* v4.38 */
     const members = [];
     let after = "0";
     for (let page = 0; page < 10; page++) {
@@ -2346,8 +2362,8 @@ export async function runSweep(opts = {}) {
   const roleColorById = Object.fromEntries(guildRoles.map((r) => [r.id, r.color]));
   const roleMentionableById = Object.fromEntries(guildRoles.map((r) => [r.id, !!r.mentionable]));
   const roleObjById = Object.fromEntries(guildRoles.map((r) => [r.id, r]));
-  const roleId = {};
-  for (const r of guildRoles) roleId[r.name.toLowerCase()] = r.id;
+  /* v4.38: "not signed up" is the STORED role (shared/roles.mjs roleIdMap), whatever its season name says */
+  const roleId = roleIdMap(guildRoles, (await sbCfgMany(["discord_not_signed_up_role_id"])).discord_not_signed_up_role_id);
   const guildChannels = await dApi("GET", `/guilds/${GUILD}/channels`);
   const chanNameById = Object.fromEntries(guildChannels.map((c) => [c.id, c.name]));
 
@@ -2423,7 +2439,7 @@ export async function runSweep(opts = {}) {
      permission changed by hand in the UI, or a role recreated from a template, silently reopens
      the hole and nothing would say so. `teams` (line above) supplies the club role ids; both it
      and `sum` are declared before this point — see the TDZ note above, that mistake cost a sweep. */
-  try { await enforcePostingPolicy(guildRoles, teams, sum); }
+  try { await enforcePostingPolicy(guildRoles, teams, sum, roleId); }
   catch (e) { sum.errors.push({ postingPolicy: String(e.message || e) }); }
   /* Elevated bits (events, expressions, thread creation) come off every role the sweep owns, and
      the thread bits off @everyone, every sweep — same reasoning as the two policies above. */
@@ -2558,11 +2574,15 @@ export async function runSweep(opts = {}) {
     if (reapCfg && reapCfg[0] && reapCfg[0].value) {
       const reap = JSON.parse(reapCfg[0].value);
       for (const rid of (reap.roles || [])) {
-        try { await dApi("DELETE", `/guilds/${GUILD}/roles/${rid}`); sum.reapedRoles = (sum.reapedRoles || 0) + 1; }
+        try { await dApi("DELETE", `/guilds/${GUILD}/roles/${rid}`); sum.reapedRoles = (sum.reapedRoles || 0) + 1;
+          const gi = guildRoles.findIndex((r) => r.id === String(rid)); if (gi >= 0) guildRoles.splice(gi, 1); }
         catch (e) { sum.errors.push({ reapRole: rid, error: String(e.message || e) }); }
       }
       for (const cid of (reap.channels || [])) {
-        try { await dApi("DELETE", `/channels/${cid}`); sum.reapedChannels = (sum.reapedChannels || 0) + 1; }
+        /* v4.38: dropped from this run's list too, so a reaped channel the sweep keeps (#season-signups) is rebuilt in
+           this same run instead of the next one finding it gone */
+        try { await dApi("DELETE", `/channels/${cid}`); sum.reapedChannels = (sum.reapedChannels || 0) + 1;
+          const gi = guildChannels.findIndex((c) => c.id === String(cid)); if (gi >= 0) guildChannels.splice(gi, 1); }
         catch (e) { sum.errors.push({ reapChannel: cid, error: String(e.message || e) }); }
       }
       /* consumed — errors above are surfaced but do NOT re-run forever on a dead id (dApi maps
@@ -2873,16 +2893,28 @@ export async function runSweep(opts = {}) {
   // Current-season registration drives the three participation roles. `registered` is populated
   // year-round (not only while the window is open) so Player and Free Agent stay coherent all
   // season; `regOpen` is the narrower "sign-ups still open" flag that drives Not Signed Up.
-  let regOpen = false; const registered = new Set(), playing = new Set(); let regSeasonId = null;
+  let regOpen = false; const registered = new Set(), playing = new Set(); let regSeasonId = null, regNumber = null;
   try {
-    const s = (await sbGet("seasons?select=id,registration_open&registration_open=is.true&order=number.desc&limit=1"))[0]
-      || (await sbGet("seasons?select=id,registration_open,status&status=neq.complete&order=number.asc&limit=1"))[0];   /* v2.36: the season in play, never the newest */
+    const s = (await sbGet("seasons?select=id,number,registration_open&registration_open=is.true&order=number.desc&limit=1"))[0]
+      || (await sbGet("seasons?select=id,number,registration_open,status&status=neq.complete&order=number.asc&limit=1"))[0];   /* v2.36: the season in play, never the newest */
     if (s) {
       regOpen = !!s.registration_open;   /* Rule 1.1 (v2.8): the deadline never closes registration */
+      regNumber = s.number || null;
       for (const r of await sbGet(`season_registrations?season_id=eq.${s.id}&select=profile_id`)) registered.add(r.profile_id);
       regSeasonId = s.id;
     }
   } catch (e) { inputsOk = false; inputsErr.push("registrations"); sum.errors.push({ regStatus: String(e.message || e) }); }
+  /* v4.38: the sign-up role carries the number of the season taking sign-ups ("S2 Not Signed Up"). Renamed only while
+     a season takes sign-ups; between windows nobody wears it and the last name stands. Any other role that looks like
+     it is reported (signupRoleStrays) for the office to reap by id, never deleted here. */
+  if (regOpen && regNumber && roleId[NOT_SIGNED_UP]) {
+    const rid = roleId[NOT_SIGNED_UP], want = notSignedUpName(regNumber);
+    if (roleNameById[rid] && roleNameById[rid] !== want) {
+      try { await dApi("PATCH", `/guilds/${GUILD}/roles/${rid}`, { name: want }); roleNameById[rid] = want; sum.signupRoleRenamed = want; }
+      catch (e) { sum.errors.push({ signupRoleName: String(e.message || e) }); }
+    }
+  }
+  { const strays = notSignedUpStrays(guildRoles, roleId); if (strays.length) sum.signupRoleStrays = strays; }
   /* v3.98 (commissioner): the season IN PLAY keeps its registrants Player and Free Agent until it ends (shared/roles.mjs).
      A failed load leaves managed roles untouched this run, like every other input, rather than stripping them. */
   try {
@@ -2946,6 +2978,7 @@ export async function runSweep(opts = {}) {
         signupsRemoved: (sum.signupsRemoved || []).length,
         roleGradients: sum.roleGradients || 0, roleGradientUnsupported: sum.roleGradientUnsupported || null,
         roleIcons: sum.roleIcons || 0,
+        signupRoleRenamed: sum.signupRoleRenamed || null, signupRoleStrays: sum.signupRoleStrays || null,
         automodExempted: sum.automodExempted || 0, automodMgmtExempted: sum.automodMgmtExempted || 0, automodChannels: sum.automodChannels || 0,
         automodCreated: sum.automodCreated || null, automodGifAllow: sum.automodGifAllow || 0,
         automodMissing: sum.automodMissing || null, boardsLocked: sum.boardsLocked || 0, infoLocked: sum.infoLocked || 0,

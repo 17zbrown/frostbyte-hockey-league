@@ -32,7 +32,7 @@
 //
 // Dependency-free of discord.js so tools/role-sync.test.mjs can drive it with a stubbed fetch.
 
-import { desiredRolesFor, applyManagedRoles, managedRoleIds } from "../shared/roles.mjs";
+import { desiredRolesFor, applyManagedRoles, managedRoleIds, roleIdMap } from "../shared/roles.mjs";
 import { timedFetch, SB_TIMEOUT_MS, DISCORD_TIMEOUT_MS } from "./handlers.mjs";
 
 export function createRoleSyncer(env, opts = {}) {
@@ -97,14 +97,15 @@ export function createRoleSyncer(env, opts = {}) {
   let slow = null, slowAt = 0;
   async function slowCtx() {
     if (slow && Date.now() - slowAt < 60_000) return slow;
-    const [guildRoles, seasons, rfaCfg] = await Promise.all([
+    const [guildRoles, seasons, rfaCfg, nsuCfg] = await Promise.all([
       dApi("GET", `/guilds/${GUILD}/roles`),
       sbGet("seasons?select=id,number,status,registration_open,format&status=neq.complete&order=number.asc"),
       sbGet("app_config?key=eq.rfa_offseasons&select=value"),
+      sbGet("app_config?key=eq.discord_not_signed_up_role_id&select=value"),
     ]);
     if (!Array.isArray(guildRoles)) throw new Error("guild roles unavailable");
-    const roleId = {};
-    for (const r of guildRoles) roleId[String(r.name || "").toLowerCase()] = r.id;
+    /* v4.38: the sign-up role is named for its season ("S2 Not Signed Up"); the sweep's stored id finds it, as there */
+    const roleId = roleIdMap(guildRoles, nsuCfg && nsuCfg[0] && nsuCfg[0].value);
     /* same season selection as the sweep (v2.36): the registration_open season drives Player/FA/
        Not Signed Up and sign-up positions; the season IN PLAY — active, else the lowest-numbered
        open season, never the newest, which a next season created ahead of time would be — drives

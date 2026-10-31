@@ -1027,9 +1027,11 @@ async function signupReminder(cfg, et, dry, errors, unconfigured) {
      four days: the template below still referenced it, so every run threw ReferenceError before
      reaching the post. Keep the date in the copy, but say what it actually means. */
   const deadline = s.signup_deadline_at || s.registration_deadline || null;
-  const content = `⏰ **${s.name} sign-ups are open** — ${remaining} member${remaining === 1 ? " hasn't" : "s haven't"} registered yet.\n` +
+  /* v4.38: the reminder came back on (commissioner, 2026-10-31: "every 3 days starting today ... in the new channel")
+     in the house style for anything posted: no em dashes */
+  const content = `⏰ **${s.name} sign-ups are open.** ${remaining} member${remaining === 1 ? " hasn't" : "s haven't"} registered yet.\n` +
     ((deadline && new Date(deadline).getTime() > Date.now())
-      ? `Sign up before **${fmtDay(deadline)}** to go into the draft — after that you can still join, you'll just be placed on a club: https://chelgamingleague.com/#/register`
+      ? `Sign up before **${fmtDay(deadline)}** to go into the draft. After that you can still join, and you'll be placed on a club: https://chelgamingleague.com/#/register`
       : `Grab your spot: https://chelgamingleague.com/#/register`);
   if (dry) return { would_post: content, remaining, everyDays: EVERY };
   /* Every N days rather than daily (commissioner's call, 2026-08-19: 3). The claim is keyed on the

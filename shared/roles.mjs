@@ -44,6 +44,39 @@ export function managedRoleIds(roleId, teams) {
   return ids;
 }
 
+/* v4.38 (commissioner, 2026-10-31): "I would like the not signed up role to be specific to the season that is eligible
+   to be signed up for ... keep 1 role and rename it depending on what season the signups are attached to." The role is
+   named for the season taking sign-ups ("S2 Not Signed Up"), so nothing may find it by name any more. It is the role
+   whose id the sweep keeps in app_config.discord_not_signed_up_role_id, filed under the logical key "not signed up" in
+   every role map, so desiredRolesFor, managedRoleIds, the posting policy and the reminders read it unchanged.
+   THE TRAP (2026-10-25): the role was renamed by hand to "S2 Not Signed Up". Every lookup was by name, so the sweep
+   found no "Not Signed Up", built a second one, and left the first frozen on every member who wore it that day. */
+export const NOT_SIGNED_UP = "not signed up";
+export const notSignedUpName = (seasonNumber) => (seasonNumber ? `S${seasonNumber} Not Signed Up` : "Not Signed Up");
+const NSU_LIKE = /^(s\d+ )?not signed up$/i;
+
+/* guild role name (lowercased) -> id, with "not signed up" pointing at the stored role. With no stored id (a fresh
+   server, or the role was deleted) it falls back to a role named exactly "Not Signed Up", then to the ONE role that
+   looks like the sign-up role; two look-alikes and no stored id is never guessed between. */
+export function roleIdMap(guildRoles, storedNsuId) {
+  const roleId = {};
+  for (const r of guildRoles || []) roleId[String(r.name || "").toLowerCase()] = r.id;
+  const stored = storedNsuId ? String(storedNsuId) : "";
+  const like = (guildRoles || []).filter((r) => NSU_LIKE.test(String(r.name || "")));
+  const exact = like.find((r) => String(r.name || "").toLowerCase() === NOT_SIGNED_UP);
+  const pick = (stored && (guildRoles || []).some((r) => r.id === stored)) ? stored
+    : exact ? exact.id : (like.length === 1 ? like[0].id : null);
+  if (pick) roleId[NOT_SIGNED_UP] = pick; else delete roleId[NOT_SIGNED_UP];
+  return roleId;
+}
+
+/* every OTHER role that looks like the sign-up role (a hand-made copy, or one orphaned by a rename). The sweep reports
+   them and never deletes one on its own; the office reaps one by explicit id (app_config.discord_reap). */
+export function notSignedUpStrays(guildRoles, roleId) {
+  return (guildRoles || []).filter((r) => NSU_LIKE.test(String(r.name || "")) && r.id !== roleId[NOT_SIGNED_UP])
+    .map((r) => ({ id: r.id, name: r.name }));
+}
+
 /* The desired managed roles for one member.
    `m` is a discord_links row (profile_id, role, team_id); `ctx` is everything true about the
    league right now:
