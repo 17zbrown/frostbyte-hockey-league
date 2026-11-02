@@ -15,6 +15,8 @@ const ROOT = path.join(__dirname, "..");
 const R = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
 const live = R("src/live/part_live.js"), pub2 = R("src/live/part5b_public2.js"), survey = R("src/live/part11_survey.js");
 const sql = R("sql/2026-10-24-season2-move-up-v431.sql");
+/* v4.42: the playoff draw moved into the database; its week anchor and holiday skip are pinned in that SQL record */
+const draw = R("sql/2026-11-01-playoff-autopilot-v442.sql");
 const code = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--[^\n]*/g, "");
 const rx = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -32,8 +34,8 @@ A("Veterans Day 2026 is Wednesday, November 11, a game night, and new seasons ne
 /* the playoff generator: Round 1 from playoffs_start_at, later rounds two days after the last playoff game, three
    nights from the season's own holiday list. Pinned so the rounds below model the real generator. */
 A("the generator anchors Round 1 on playoffs_start_at and later rounds two days after the last playoff game, over the season's holidays",
-  /var anchor = s\.playoffs_start_at \? CG\.etYMD\(s\.playoffs_start_at\)/.test(live) && /anchor=CG\.dayAdd\(CG\.etYMD\(new Date\(last\)\.toISOString\(\)\),2\);/.test(live) &&
-  /var plan=CG\.gameNights\(anchor, 3, shpP\.nights, CG\.seasonHolidayKeys\(s\)\);/.test(live));
+  /v_anchor := greatest\(coalesce\(\(s\.playoffs_start_at at time zone 'America\/New_York'\)::date, v_today \+ 2\),\s+coalesce\(v_last \+ 2, v_today \+ 1\), v_today \+ 1\);/.test(draw) &&
+  /v_nights := public\.playoff_game_week\(p_season, v_anchor\);/.test(draw) && /v_keys := coalesce\(public\.season_holiday_keys\(p_season\), '\{\}'::text\[\]\);/.test(draw));
 const rounds = (keys) => { let anchor = CG.etYMD("2026-11-05T02:00:00Z"), out = []; for (let r = 1; r <= 3; r++) { const wk = CG.gameNights(anchor, 3, 3, keys).nights[0].days; out.push(wk[0] + ".." + wk[2]); anchor = CG.dayAdd(wk[2], 2); } return out; };
 const was = rounds(BEFORE), now = rounds(AFTER);
 A("before: Round 2 skipped Veterans Day week and the final fell on December 2 to 4", JSON.stringify(was) === JSON.stringify(["2026-11-04..2026-11-06", "2026-11-18..2026-11-20", "2026-12-02..2026-12-04"]), was);

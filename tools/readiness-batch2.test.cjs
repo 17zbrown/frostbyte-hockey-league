@@ -6,6 +6,9 @@ const live = R("src/live/part_live.js");
 const pub = R("src/live/part5a_public.js");
 const desks = R("src/live/part9_staffdesks.js");
 const ingest = R("netlify/functions/ingest-stats.js");
+/* v4.42: the playoff draw moved into the database (public._draw_playoff_round and its helpers) */
+const draw = R("sql/2026-11-01-playoff-autopilot-v442.sql");
+const winner = R("sql/2026-09-28-forfeit-rulings-v352.sql");
 
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
@@ -23,13 +26,15 @@ console.log("— the public site stops publishing wrong numbers");
 
 console.log("\n— playoff series are counted the way games are actually won");
 {
-  A("seriesWinners honors a forfeit", /if \(res\.forfeit\) w = \(res\.forfeit===g\.home\) \? g\.away : g\.home;/.test(live));
-  A("...and refuses to award a tie", /else if \(res\.score\[g\.away\] > res\.score\[g\.home\]\) w = g\.away;/.test(live));
+  A("the draw counts a series with game_winner, which honors a forfeit",
+    /then public\.game_winner\(g\.home_team_id, g\.away_team_id, g\.home_score, g\.away_score, g\.forfeit_team_id, g\.voided\) end as w/.test(draw) &&
+    /when p_forfeit is not null then case when p_forfeit = p_home then p_away/.test(winner));
+  A("...and refuses to award a tie", /when p_hs > p_as then p_home\s+when p_as > p_hs then p_away\s+end/.test(winner));
   A("the public bracket uses the same rule", /if \(res\.forfeit\) winner = \(res\.forfeit===g\.home\) \? g\.away : g\.home;/.test(pub));
-  A("a later round refuses while a division is unfinished", /division hasn|divisions haven/.test(live) &&
-    /every division must be decided before round/.test(live));
-  A("playoff games use the season's own puck-drop times", /CG\.etISO\(day, CG\.playoffSlot\(shpP, k\)\)/.test(live));
-  A("...and never reuse a slot for two games of one series", /mins = \(parseInt\(parts\[0\],10\)\|\|21\)\*60/.test(live));
+  A("a later round waits while a series is unfinished", /a series of the round before is still being played/.test(draw) &&
+    /a division has %s clubs left for round %s where the bracket expects %s/.test(draw));
+  A("playoff games use the season's own puck-drop times", /v_slots := array\(select btrim\(x\) from unnest\(string_to_array\(coalesce\(s\.night_slots, ''\), ','\)\)/.test(draw));
+  A("...and never reuse a slot for two games of one series", /make_interval\(mins => 35 \* \(v_kk - array_length\(v_slots, 1\) \+ 1\)\)/.test(draw));
   A("Clear season counts only what it deletes", /g\.stage!=="preseason" && g\.stage!=="playoff"/.test(live));
 }
 

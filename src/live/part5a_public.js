@@ -1822,7 +1822,7 @@ CG.playoffBracket = function(){
       var byes = rd===1 ? byeCodes.map(byeCard).join("") : "";
       return '<div><span class="eyebrow" style="display:block;margin-bottom:10px">'+esc(roundName(rd))+'</span>'+
         (list.length || byes ? '<div class="stack" style="gap:10px">'+byes+list.map(seriesCard).join("")+'</div>'
-                     : '<div style="border:1px dashed var(--line);border-radius:var(--r-s);padding:20px 14px;text-align:center"><span class="caption">Set from the Control Center once the previous round ends.</span></div>')+'</div>'; };
+                     : '<div style="border:1px dashed var(--line);border-radius:var(--r-s);padding:20px 14px;text-align:center"><span class="caption">Drawn automatically once every series of the previous round is decided (Rule 8.3).</span></div>')+'</div>'; };
     var champ = null;
     (Object.keys(seriesByRound[K]||{})).forEach(function(k){ var s=seriesByRound[K][k]; if(s.aw>=need) champ=s.a; else if(s.bw>=need) champ=s.b; });
     return '<div class="card" style="margin-bottom:22px"><div class="card-h"><h3>Playoff bracket</h3>'+

@@ -10663,7 +10663,7 @@ CG.hubComplaintDetail = function(caseId){
 CG._auditLabel = function(a){
   var m = { role_change:"changed a member’s role", season_rollover:"ran the season rollover",
     case_assign:"assigned a case", discipline_from_case:"issued discipline from a case",
-    season_award_finalized:"finalized a season award", playoff_round:"generated a playoff round",
+    season_award_finalized:"finalized a season award", playoff_round:"generated a playoff round", playoff_round_drawn:"drew a playoff round",
     playoff_clear:"cleared a playoff round", season_status:"changed a season’s status",
     team_upsert:"edited a club", division_upsert:"edited a division", ea_reingest:"re-ran an EA import" };
   return m[a] || String(a||"acted").replace(/_/g," ");
@@ -12853,6 +12853,7 @@ CG.AUTOMATIONS = [
   { key:"latecomer-assign", staleAfterMin:20, name:"Late sign-up placement",    every:"Every 5 min inside the database", desc:"Places anyone who registered after the eligibility deadline (or joined mid-season) on a club with an open spot.", rpc:"auto_assign_latecomers" },
   { key:"contract-enforcement", staleAfterMin:45, name:"Contract sign-up enforcement", every:"Every 15 min inside the database", desc:"After the sign-up deadline: an unsigned contract holds its club’s cap as dead money; if the club changed owners, the deal is voided and the player suspended for its remaining term (Rule 2.5).", rpc:"enforce_unsigned_contracts" },
   { key:"staff-briefing", staleAfterMin:2160, name:"Staff briefing", every:"Daily inside the database", desc:"Posts the standing backlog (open cases, pending applications, unmatched EA imports, finals missing box scores, active suspensions) to #staff-general — suppressed when nothing needs attention.", rpc:"staff_briefing" },
+  { key:"playoff-autopilot", staleAfterMin:20, name:"Playoff draw", every:"Every 5 min inside the database", desc:"Draws each playoff round on its own: round 1 from the final table as soon as the last regular-season game is final, each later round once every series before it is decided, into the next game-week the season plays (Rules 8.1 and 8.3). A tie no tiebreaker breaks, or a change to the final table after seeding, is sent to the commissioners. Pause it under Schedule, Playoffs.", rpc:"playoff_autopilot" },
   { key:"night-recap", staleAfterMin:45,       name:"Game night recap",          every:"Every 15 min inside the database", desc:"Posts each game night once to the news channel: the best stories of the night, the results and the three stars. It goes out when the last game is final, or four hours after the last puck drop if a game is still held.", rpc:"night_recap_sweep" },
   { key:"weekly-potw", staleAfterMin:11520,      name:"Players of the Week",       every:"Mondays inside the database", desc:"Names the week’s best forward, defenseman and goaltender from the imported box scores (at least three games that week, all at that position), and publishes the announcement.", rpc:"compute_potw_guarded" },
   { key:"owner-decision-watch", noRun:true, staleAfterMin:120, name:"Owner decision deadline", every:"Hourly inside the database", desc:"Once a season's owner applications close, tells the commissioners and the applications department two days before the decision deadline, and at it, which applications are still pending and which clubs' Owners are not yet approved for the season (Chapter S2)." },
@@ -14329,7 +14330,8 @@ CG.playoffFieldSize = function(){ return CG.playoffDivisions().length * CG.playo
    everybody plays (1vN, 2v(N-1), …). When it is not, the bracket opens with a play-in among the
    lowest seeds and the top seeds sit out that round — six qualifiers give 3v6 and 4v5 with seeds
    1 and 2 waiting, which is the shape this league used before it went divisional. Byes only ever
-   happen in round 1; from round 2 on the survivor count is always a power of two. */
+   happen in round 1; from round 2 on the survivor count is always a power of two. v4.42: public._draw_playoff_round pairs
+   round 1 by this same shape; this copy draws the projected bracket and the panel's blurb. */
 CG.playoffRound1 = function(divSeeds){
   var n = (divSeeds || []).length;
   if (!n) return { pairs: [], byes: [] };
@@ -14374,7 +14376,7 @@ CG.playoffRoundName = function(round){
 };
 /* v3.63 (Q64): fixed by the format in every format. Mirrors public.playoff_best_of(). */
 CG.playoffBestOf = function(){ return CG.fmt("playoff_best_of") || 7; };
-/* seeds are FROZEN when the quarter-finals are generated — later rounds must
+/* seeds are FROZEN when round 1 is drawn (by the database since v4.42); later rounds must
    never re-derive them from a table that can still move (a late-ingested
    regular-season final would otherwise rewrite the bracket mid-playoffs) */
 CG.frozenSeeds = function(){
@@ -14395,7 +14397,8 @@ CG.admPlayoffsLive = function(){
   var regLeft = regDone.filter(function(g){ return g.status!=="final"; }).length;
 
   var h = '<div style="margin-bottom:16px"><h2 class="h-sec">Playoffs</h2>'+
-    '<p class="lede" style="margin-top:6px">Seed the bracket from the final table, then set each round. Clinches, series wins, and the champion are detected automatically — decided series drop their extra games on their own.</p></div>';
+    '<p class="lede" style="margin-top:6px">The bracket draws itself (v4.42): round 1 as soon as the last regular-season game is final, each later round once every series before it is decided, checked every five minutes inside the database. Clinches, series wins and the champion are detected automatically, and decided series drop their extra games on their own.</p></div>';
+  h += CG.playoffAutoCard();
 
   /* series length control — locked once any playoff game exists so a live
      series can't be stranded by a mid-round change */
@@ -14426,12 +14429,20 @@ CG.admPlayoffsLive = function(){
     '<p class="caption" style="margin-top:6px"><b>This is published law.</b> Rule 8.1 fixes the number for the format. Seeds freeze when round 1 is built.</p></div></div>';
 
   /* seeds */
-  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+(frozen?"Seeding — locked at the quarter-finals":"Seeding — from the final table")+'</h3><span class="chip">'+(frozen?"locked in":regLeft?regLeft+" regular games left":"regular season complete")+'</span></div><div class="card-b">';
+  h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+(frozen?"Seeding, locked with round 1":"Seeding from the final table")+'</h3><span class="chip">'+(frozen?"locked in":regLeft?regLeft+" regular games left":"regular season complete")+'</span></div><div class="card-b">';
   if (seeds.length===CG.playoffFieldSize()){
     h += '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">'+
       seeds.map(function(r,i){ return '<div style="display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:var(--r-s);padding:8px 11px">'+
         '<b class="num" style="width:16px">'+(i+1)+'</b>'+CG.crest(r.code,20)+'<b class="mono" style="font-size:12px">'+esc(r.code)+'</b><span class="caption num" style="margin-left:auto">'+r.pts+'</span></div>'; }).join("")+'</div>'+
       '<p class="caption" style="margin-top:10px">'+esc(CG.playoffBracketBlurb())+'</p>';
+    /* v4.42: until a playoff game is final, the frozen seeds and the table can only disagree when a ruling moved the final
+       table after the draw (the database tells the commissioners too); say so where the seeds are shown */
+    var liveSeeds = CG.playoffSeeds().map(function(r){ return r.code; });
+    if (frozen && liveSeeds.length === frozen.length && liveSeeds.join() !== frozen.join() &&
+        !pog.some(function(g){ return g.status==="final"; })){
+      h += '<div class="note" style="margin-top:12px"><b>The standings changed after the bracket was seeded.</b> The table now seeds '+
+        esc(liveSeeds.join(", "))+'. Seeding does not move on its own (Rule 8.1): clear the opening round below and it is drawn again from the corrected table within five minutes.</div>';
+    }
   } else { h += '<p class="caption">Every division needs at least '+CG.playoffPerDiv()+' clubs to seed a bracket. Right now '+
     CG.playoffDivisions().map(function(dv){ return dv+' has '+(CG.TEAMS||[]).filter(function(t){ return t.div===dv; }).length; }).join(', ')+'.</p>'; }
   h += '</div></div>';
@@ -14445,7 +14456,7 @@ CG.admPlayoffsLive = function(){
     list.forEach(function(g){ var k=[g.home,g.away].sort().join("~"); (pairs[k]=pairs[k]||[]).push(g); });
     var pairKeys = Object.keys(pairs);
     h += '<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>'+rm[1]+'</h3>'+
-      (pairKeys.length?'<span class="chip chip-win">'+pairKeys.length+' series</span>':'<span class="chip">not set</span>')+'</div><div class="card-b">';
+      (pairKeys.length?'<span class="chip chip-win">'+pairKeys.length+' series</span>':'<span class="chip">not drawn yet</span>')+'</div><div class="card-b">';
     if (pairKeys.length){
       h += pairKeys.map(function(k){ var gs=pairs[k], a=gs[0], finals=gs.filter(function(x){return x.status==="final";}).length;
         return '<div style="display:flex;align-items:center;gap:10px;padding:6px 0;flex-wrap:wrap"><span class="teamcell">'+CG.crest(a.home,20)+'<b class="mono" style="font-size:12px">'+esc(a.home)+'</b></span><span class="caption">vs</span><span class="teamcell">'+CG.crest(a.away,20)+'<b class="mono" style="font-size:12px">'+esc(a.away)+'</b></span>'+
@@ -14453,8 +14464,8 @@ CG.admPlayoffsLive = function(){
         '<div style="margin-top:12px"><button class="btn btn-ghost btn-sm" data-po-clear="'+rd+'">Clear this round</button></div>';
     } else {
       h += '<p class="caption" style="margin-bottom:12px">'+rm[2]+'. '+
-        (rd===1?'Generates from the seeds above.':'Generates once '+CG.playoffRoundName(rd-1).toLowerCase()+' are decided.')+'</p>'+
-        '<button class="btn btn-chrome btn-sm" data-po-gen="'+rd+'">'+CG.ic("plus",14)+'Generate '+rm[1].toLowerCase()+'</button>';
+        (rd===1?'Draws itself from the final table once the last regular-season game is final.':'Draws itself once the '+CG.playoffRoundName(rd-1).toLowerCase()+' are decided.')+'</p>'+
+        '<button class="btn btn-chrome btn-sm" data-po-gen="'+rd+'">'+CG.ic("plus",14)+'Draw now</button>';
     }
     h += '</div></div>';
   });
@@ -14483,214 +14494,98 @@ CG.AFTER._admPlayoffs = function(){
     });
   }); });
   document.querySelectorAll("[data-po-gen]").forEach(function(b){ b.addEventListener("click", function(){ CG.generatePlayoffRound(parseInt(this.getAttribute("data-po-gen"),10)); }); });
+  CG.bindPlayoffAuto();
   document.querySelectorAll("[data-po-clear]").forEach(function(b){ b.addEventListener("click", function(){ CG.clearPlayoffRound(parseInt(this.getAttribute("data-po-clear"),10)); }); });
 };
-/* winner of a decided series in a round, by club code (null if none/undecided) */
-/* The k-th game of a playoff night. If the season defines fewer slots than the night needs, step
-   35 minutes past the last one rather than reusing it — two games of the SAME series at the same
-   minute would be unplayable and would also make the EA matcher's job impossible. */
-CG.playoffSlot = function(shp, k){
-  var slots = (shp && shp.slots && shp.slots.length) ? shp.slots : (CG.NIGHT_SLOTS || ["21:00"]);
-  if (slots[k]) return slots[k];
-  var last = slots[slots.length-1] || "21:00";
-  var parts = String(last).split(":");
-  var mins = (parseInt(parts[0],10)||21)*60 + (parseInt(parts[1],10)||0) + 35*(k - slots.length + 1);
-  mins = ((mins % 1440) + 1440) % 1440;
-  return ("0"+Math.floor(mins/60)).slice(-2)+":"+("0"+(mins%60)).slice(-2);
+/* v4.42 (commissioner, 2026-11-01: "auto generate every playoff round"): the draw lives in the database,
+   public._draw_playoff_round, which the playoff-autopilot job runs every five minutes. It seeds, pairs and schedules as
+   the browser copy it replaces did (Rules 8.1 to 8.3: the 2-2-3 week, home by game 2-2-1-1-1, the final's home club by the
+   league-wide table), so the browser keeps no second copy of the bracket. That copy could not write by then anyway: every
+   insert into games from a browser was refused ("permission denied for table games", fixed at the root in v4.42). */
+CG.playoffDrawWhy = function(v){
+  var t = String((v && (v.error || v.wait)) || "the database gave no reason");
+  t = t.charAt(0).toUpperCase() + t.slice(1) + (/\.$/.test(t) ? "" : ".");
+  /* v4.42: a wait reads on its own ("The division finals are already drawn."); only an error needs a commissioner */
+  return (v && v.error ? "The draw needs a commissioner. " : "") + t;
 };
-/* v3.59 (Q33): home in a playoff series by game number, the NHL's 2-2-1-1-1. gi is 0-based: the higher
-   seed hosts games 1 and 2, the lower seed 3 and 4, then they alternate starting with the higher seed. */
-CG.playoffHostHigher = function(gi){
-  if (gi < 2) return true;
-  if (gi < 4) return false;
-  return (gi - 4) % 2 === 0;
-};
-CG.seriesWinners = function(round){
-  var need = Math.floor(CG.playoffBestOf()/2)+1;
-  var pairs = {};
-  (CG.lg.playoffGames||[]).filter(function(g){ return (g.week||1)===round; }).forEach(function(g){
-    var k=[g.home,g.away].sort().join("~"); var p=pairs[k]||(pairs[k]={a:[g.home,g.away].sort()[0],b:[g.home,g.away].sort()[1],aw:0,bw:0});
-    var res=(CG.lg.allResults||[]).find(function(r){ return r.id===g.id; });
-    /* A forfeit decides the game (Rule 3.2), and an equal score with no forfeit is not a
-       result at all — the old expression silently handed every tie to the away club. */
-    if(res){
-      var w = null;
-      if (res.forfeit) w = (res.forfeit===g.home) ? g.away : g.home;
-      else if (res.score[g.home] > res.score[g.away]) w = g.home;
-      else if (res.score[g.away] > res.score[g.home]) w = g.away;
-      if (w){ if(w===p.a) p.aw++; else p.bw++; }
-    }
-  });
-  return Object.keys(pairs).map(function(k){ var p=pairs[k];
-    return p.aw>=need ? {code:p.a,opp:p.b} : p.bw>=need ? {code:p.b,opp:p.a} : null; }).filter(Boolean);
-};
+/* the Control Center's Draw now: a preview (p_dry) for the confirm, then the same draw the autopilot runs */
 CG.generatePlayoffRound = function(round){
-  var s=CG.SEASON; if(!s||!s.id){ CG.toast("No active season","err"); return; }
-  if ((CG.lg.playoffGames||[]).some(function(g){ return (g.week||1)===round; })){
-    CG.toast("That round already exists — clear it first to regenerate","err"); return; }
-  var bestOf=CG.playoffBestOf();
-  var seedCodes, freezeAfter=false;
-  if (round===1){
-    /* the table must be FINAL before the bracket exists — a straggler game
-       auto-ingested later would silently re-seed a bracket already in play */
-    var regLeft=(CG.lg.schedule||[]).filter(function(g){ return g.stage==="regular" && g.status!=="final"; }).length;
-    if (regLeft){ CG.toast(regLeft+" regular-season game"+(regLeft===1?"":"s")+" still unplayed — finish or clear them before seeding the bracket","err"); return; }
-    var live=CG.playoffSeeds(), need=CG.playoffFieldSize();
-    if (live.length<need){ CG.toast("Need "+need+" seeds — every division must hold at least "+CG.playoffPerDiv()+" clubs to fill the bracket","err"); return; }
-    seedCodes=live.map(function(r){ return r.code; });
-    freezeAfter=true;
-  } else {
-    /* rounds 2-3 read the seeds locked at quarter-final time, never the live table */
-    seedCodes=CG.frozenSeeds();
-    if (!seedCodes){ CG.toast("Seeds aren’t locked — generate the quarter-finals first","err"); return; }
-  }
-  var seedRank={}; seedCodes.forEach(function(c,i){ seedRank[c]=i+1; });
-  var matchups=[]; /* [[homeCode, awayCode], ...] higher seed = home */
-  /* Rule 8.1: each division plays its own bracket to a champion, then the two champions meet.
-     seedCodes is division-major in blocks of `per`, so the blocks ARE the divisions. Everything
-     below is derived from the qualifier setting rather than assuming a shape. */
-  var per = CG.playoffPerDiv(), K = CG.playoffRounds();
-  var divOf = function(code){ return (CG.TEAM[code]||{}).div || "?"; };
-  var bySeed = function(a,b){ return (seedRank[a]||99)-(seedRank[b]||99); };
-  /* the clubs that sat out round 1 — a pure function of the seeds, so nothing has to be stored */
-  var round1Byes = function(){
-    var out=[];
-    for (var b=0; b+per<=seedCodes.length; b+=per) out = out.concat(CG.playoffRound1(seedCodes.slice(b,b+per)).byes);
-    return out;
-  };
-  if (round === K){
-    /* the final: the two division champions, i.e. whoever won the last divisional round */
-    var champs = CG.seriesWinners(K-1).map(function(r){ return r.code; });
-    if (champs.length < 2){ CG.toast("Both division finals must finish first","err"); return; }
-    /* v3.59 (Q34, commissioner: "do it based off regular season points"): the higher seed in the final
-       is the champion with more regular-season points, then the Rule 8.2 tiebreakers, which is the
-       order of the league-wide table. Seed rank was division-major, so the first-listed division's
-       champion was always home. */
-    var tbl = CG.standings(CG.lg).map(function(r){ return r.code || (r.team && r.team.code); });
-    champs.sort(function(a, b){ return tbl.indexOf(a) - tbl.indexOf(b); });
-    matchups = [[champs[0], champs[1]]];
-  } else if (round === 1){
-    matchups = [];
-    for (var b2=0; b2+per<=seedCodes.length; b2+=per){
-      CG.playoffRound1(seedCodes.slice(b2,b2+per)).pairs.forEach(function(p){ matchups.push(p); });
-    }
-  } else {
-    /* a later divisional round: whoever won the previous one, plus anyone who had a round-1 bye */
-    var adv = CG.seriesWinners(round-1).map(function(r){ return r.code; });
-    if (round === 2) adv = adv.concat(round1Byes());
-    var byDiv = {};
-    adv.forEach(function(code){ (byDiv[divOf(code)] = byDiv[divOf(code)] || []).push(code); });
-    /* EVERY division must have finished the previous round. Generating while one is still playing
-       used to write a half-round for the division that WAS done, and the "that round already
-       exists" guard then blocked the retry — permanently stranding the other division with no way
-       forward short of deleting played games. */
-    /* How many clubs SHOULD have come out of the previous round in each division. Round 2 is
-       round-1 winners plus byes; a later round halves the field. A floor of 2 under-detected
-       whenever byes exist (Top-5/Top-6 qualifiers), writing the half-round it exists to prevent. */
-    var expectedIn = {};
-    for (var eb=0; eb+per<=seedCodes.length; eb+=per){
-      var block = seedCodes.slice(eb, eb+per);
-      var dvName = divOf(block[0]);
-      var r1 = CG.playoffRound1(block);
-      var afterR1 = r1.pairs.length + r1.byes.length;      /* survivors entering round 2 */
-      var want = afterR1;
-      for (var rr=3; rr<=round; rr++) want = Math.ceil(want/2);
-      expectedIn[dvName] = want;
-    }
-    var stillPlaying = Object.keys(expectedIn).filter(function(dv){
-      return (byDiv[dv]||[]).length < expectedIn[dv];
-    });
-    if (stillPlaying.length){
-      CG.toast("The "+stillPlaying.join(" and ")+" "+(stillPlaying.length===1?"division hasn":"divisions haven")+
-        "’t finished round "+(round-1)+" yet — every division must be decided before round "+round+" is drawn.","err");
-      return;
-    }
-    matchups = [];
-    Object.keys(byDiv).sort().forEach(function(dv){
-      var line = byDiv[dv].slice().sort(bySeed);
-      /* best vs worst, working inwards — standard reseeding inside the division */
-      for (var i=0; i*2 < line.length-1; i++) matchups.push([line[i], line[line.length-1-i]]);
-    });
-    if (!matchups.length){ CG.toast("The previous round has to finish first","err"); return; }
-  }
-  /* Schedule the series 2-2-3 inside ONE game week (Rule 8.3): two games Wednesday, two Thursday,
-     up to three Friday. v3.59 (Q33, commissioner: "higher seed home for the first 2, same as real
-     life"): home follows the NHL's 2-2-1-1-1 by GAME, not by night, so the higher seed (m[0]) hosts
-     games 1, 2, 5 and 7 and the lower seed games 3, 4 and 6 (CG.playoffHostHigher). All seven slots are laid down now; trg_conclude_series deletes the ones a 4-win
-     series never reaches. The three nights come from the season's own game-night set, so a holiday
-     week is stepped over the same way the regular schedule steps over it. */
-  var anchor = s.playoffs_start_at ? CG.etYMD(s.playoffs_start_at) : CG.etYMD(new Date(CG.now()+2*86400000).toISOString());
-  var priorPlayoff = (CG.lg.playoffGames||[]);
-  if (priorPlayoff.length){ var last=priorPlayoff.reduce(function(m,g){ return Math.max(m,g.at); },0); anchor=CG.dayAdd(CG.etYMD(new Date(last).toISOString()),2); }
-  var shpP = CG.seasonShape(s);
-  var plan=CG.gameNights(anchor, 3, shpP.nights, CG.seasonHolidayKeys(s));
-  var wk=[]; plan.nights.forEach(function(n){ n.days.forEach(function(d){ wk.push(d); }); });   /* [Wed, Thu, Fri] */
-  /* 2-2-3: at most 2 on night 1, 2 on night 2, the remainder on night 3. Generalizes for any
-     best-of-N, but for the league's best-of-seven it is exactly 2 / 2 / 3. */
-  var perNight=[Math.min(2,bestOf), Math.min(2,Math.max(0,bestOf-2)), Math.max(0,bestOf-4)];
-  /* v3.59: by game number (2-2-1-1-1), not by night */
-  var rows=[];
-  matchups.forEach(function(m){
-    var gi=0;
-    for (var ni=0; ni<3; ni++){
-      for (var k=0; k<perNight[ni] && gi<bestOf; k++, gi++){
-        var host = CG.playoffHostHigher(gi) ? m[0] : m[1];
-        var away = host===m[0] ? m[1] : m[0];
-        var day = wk[ni] || CG.dayAdd(wk[wk.length-1]||anchor, (ni+1)*2);
-        rows.push({ season_id:s.id, week:round, stage:"playoff",
-          home_team_id:(CG.lg._codeToId||{})[host], away_team_id:(CG.lg._codeToId||{})[away],
-          scheduled_at:CG.etISO(day, CG.playoffSlot(shpP, k)), status:"scheduled" });
-      }
-    }
-  });
+  var s = CG.SEASON; if (!s || !s.id){ CG.toast("No active season","err"); return; }
   var rn = CG.playoffRoundName(round).toLowerCase();
-  CG.confirm("Generate the "+rn+"?",
-    matchups.map(function(m){ return m[0]+" vs "+m[1]; }).join(" · ")+" — best of "+bestOf+", "+rows.length+" games."+
-    (freezeAfter?" Seeding locks in with this bracket.":"")+" Unneeded games disappear once a series is decided.",
-    "Generate "+rn, function(){
-    CG.sb.from("games").insert(rows).then(function(r){
-      if(r.error){ CG.toast("Couldn’t generate: "+r.error.message,"err"); return; }
-      var done=function(){ CG.toast(rn.charAt(0).toUpperCase()+rn.slice(1)+" set — "+rows.length+" games","ok"); CG.reloadLeague(); };
-      if (freezeAfter){
-        var key="playoff_seeds_"+((s&&s.number)||1);
-        CG.sb.from("site_config").upsert({ key:key, value:seedCodes },{ onConflict:"key" }).then(function(r2){
-          if (r2.error) CG.toast("Bracket set, but seed lock failed: "+r2.error.message,"err");
-          else { CG._siteCfg = CG._siteCfg||{}; CG._siteCfg[key]=seedCodes; }
-          done();
-        });
-      } else done();
+  CG.sb.rpc("draw_playoff_round", { p_season:s.id, p_round:round, p_dry:true }).then(function(r){
+    if (r.error){ CG.toast("Couldn’t preview the draw: "+r.error.message,"err"); return; }
+    var v = r.data || {};
+    if (!v.ok){ CG.toast(CG.playoffDrawWhy(v),"err"); CG.reloadLeague(); return; }
+    var ats = (v.plan || []).map(function(g){ return Date.parse(g.at); }).filter(function(t){ return !isNaN(t); });
+    var when = ats.length ? ", "+CG.fmtDay(Math.min.apply(null, ats))+" to "+CG.fmtDay(Math.max.apply(null, ats)) : "";
+    CG.confirm("Draw the "+rn+" now?",
+      (v.series||[]).map(function(m){ return m.home+" vs "+m.away; }).join(" · ")+": best of "+v.best_of+", "+v.games+" games"+when+"."+
+      (round===1 ? " Seeding locks in with this bracket." : "")+" Unneeded games come off once a series is decided.",
+      "Draw "+rn, function(){
+      CG.sb.rpc("draw_playoff_round", { p_season:s.id, p_round:round }).then(function(r2){
+        if (r2.error){ CG.toast("Couldn’t draw: "+r2.error.message,"err"); return; }
+        var d = r2.data || {};
+        if (!d.ok){ CG.toast(CG.playoffDrawWhy(d),"err"); CG.reloadLeague(); return; }
+        CG.toast(rn.charAt(0).toUpperCase()+rn.slice(1)+" drawn: "+d.games+" games","ok");
+        CG.reloadLeague();
+      });
     });
   });
 };
+/* v4.42: the automatic draw's switch. playoff_autopilot leaves a season alone while site_config playoff_auto_<n> reads
+   {"paused": true}; Draw now still works. The card repaints in place, never through the router. */
+CG.playoffAutoKey = function(){ return "playoff_auto_"+((CG.SEASON&&CG.SEASON.number)||1); };
+CG.playoffAutoPaused = function(){
+  var v = CG._siteCfg && CG._siteCfg[CG.playoffAutoKey()];
+  return !!(v && v.paused === true);
+};
+CG.playoffAutoCard = function(){
+  var paused = CG.playoffAutoPaused();
+  return '<div class="card" id="poAuto" style="margin-bottom:18px"><div class="card-h"><h3>Automatic draw</h3>'+
+    '<span class="chip '+(paused?"chip-warn":"chip-win")+'">'+(paused?"Paused":"On")+'</span></div><div class="card-b">'+
+    '<p class="caption" style="margin-bottom:12px;max-width:74ch">'+(paused
+      ? 'Paused for this season: no round is drawn on its own until you resume. Draw now on a round still works.'
+      : 'Each round is drawn by the database within five minutes of being ready, from the final table and the series results, into the next game-week the season plays (Rules 8.1 and 8.3). A tie no Rule 8.2 tiebreaker breaks stops it and tells the commissioners. Pause it to hold a round, for instance to move it.')+'</p>'+
+    '<button class="btn '+(paused?"btn-chrome":"btn-ghost")+' btn-sm" data-po-auto="'+(paused?"resume":"pause")+'">'+(paused?"Resume automatic draws":"Pause automatic draws")+'</button></div></div>';
+};
+CG.bindPlayoffAuto = function(){
+  var btn = document.querySelector("[data-po-auto]");
+  if (!btn) return;
+  btn.addEventListener("click", function(){
+    var pause = this.getAttribute("data-po-auto") === "pause", key = CG.playoffAutoKey(), val = { paused: pause };
+    btn.disabled = true;
+    CG.sb.from("site_config").upsert({ key:key, value:val },{ onConflict:"key" }).select("key").then(function(r){
+      btn.disabled = false;
+      if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
+      if (!(r.data||[]).length){ CG.toast("Nothing was saved: the database refused the change. Sign out and back in, then retry.","err"); return; }
+      CG._siteCfg = CG._siteCfg || {}; CG._siteCfg[key] = val;
+      CG.toast(pause ? "Automatic draws paused for this season" : "Automatic draws resumed","ok");
+      var host = document.getElementById("poAuto");
+      if (host){ host.outerHTML = CG.playoffAutoCard(); CG.bindPlayoffAuto(); }
+    });
+  });
+};
+/* v4.42: one database call (clear_playoff_round) under the draw's own lock. It used to be two requests from here, the
+   games and then the frozen seeds, and a five-minute draw landing between them could redraw the round and lose its
+   seeds. The call also drops the series results kept for the round, so a redrawn series reports and trims as it should. */
 CG.clearPlayoffRound = function(round){
   var s=CG.SEASON; if(!s||!s.id) return;
   var mine=(CG.lg.playoffGames||[]).filter(function(g){ return (g.week||1)===round; });
   var played=mine.filter(function(g){ return g.status==="final"; }).length;
   CG.confirm("Clear this playoff round?",
-    mine.length+" games go"+(played?", including "+played+" finals with their box scores":"")+". This can’t be undone.",
+    mine.length+" games go"+(played?", including "+played+" finals with their box scores":"")+". This can’t be undone."+
+    (CG.playoffAutoPaused() ? " Automatic draws are paused, so the round stays empty until you draw it."
+      : " Unless you pause automatic draws first, the round is drawn again within five minutes from the "+(round===1?"current table":"current results")+"."),
     "Clear round", function(){
-    /* same fail-loud rule as the schedule clear: a blocked DELETE is 0 rows and no error */
-    CG.assertCommissioner().then(function(){
-      return CG.sb.from("games").delete().eq("season_id",s.id).eq("stage","playoff").eq("week",round).select("id");
-    }).then(function(r){
-      if(r.error){ CG.toast("Couldn’t clear: "+r.error.message,"err"); return; }
-      if(!(r.data||[]).length && mine.length){
-        CG.toast("Nothing was cleared — the database refused the delete, so all "+mine.length+
-          " games are still there. Sign out and back in, then retry.","err");
-        CG.reloadLeague(); return;
-      }
-      if (round===1){
-        /* clearing the quarter-finals unlocks the seeding again */
-        var key="playoff_seeds_"+((s&&s.number)||1);
-        CG.sb.from("site_config").delete().eq("key",key).select("key").then(function(r){
-          if (r.error || !(r.data||[]).length){ CG.toast("Round cleared, but the seeding lock is still in place"+(r.error?" — "+r.error.message:" — nothing was deleted; sign out and back in, then retry"),"err"); CG.reloadLeague(); return; }
-          if (CG._siteCfg) delete CG._siteCfg[key];
-          CG.toast("Round cleared — seeding unlocked","ok"); CG.reloadLeague();
-        });
-        return;
-      }
-      CG.toast("Round cleared","ok"); CG.reloadLeague();
-    }).catch(function(e){ CG.toast("Nothing was cleared — "+e.message,"err"); });
+    CG.sb.rpc("clear_playoff_round", { p_season:s.id, p_round:round }).then(function(r){
+      if (r.error){ CG.toast("Nothing was cleared: "+r.error.message,"err"); CG.reloadLeague(); return; }
+      var d = r.data || {};
+      /* fail loud: the games the page showed must be the games the database took */
+      if (mine.length && !d.games){ CG.toast("Nothing was cleared: the database found no games in that round. Reload and check.","err"); CG.reloadLeague(); return; }
+      if (round===1 && CG._siteCfg) delete CG._siteCfg["playoff_seeds_"+((s&&s.number)||1)];
+      CG.toast("Round cleared: "+(d.games||0)+" game"+(d.games===1?"":"s")+(d.seeds_unlocked?", seeding unlocked":""),"ok");
+      CG.reloadLeague();
+    });
   });
 };
 

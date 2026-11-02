@@ -5,12 +5,16 @@ const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
 let fail = 0, n = 0;
 const A = (name, cond, got) => { n++; if (cond) console.log("ok   " + name); else { fail++; console.log("FAIL " + name + (got === undefined ? "" : "  got: " + String(got).slice(0, 220))); } };
 const live = R("src/live/part_live.js");
-const src = live.slice(live.indexOf("CG.playoffHostHigher = function"), live.indexOf("CG.seriesWinners = function"));
-const CGp = {}; vm.runInNewContext(src, { CG: CGp });
-const pattern = [0,1,2,3,4,5,6].map((gi) => CGp.playoffHostHigher(gi) ? "H" : "L").join("");
+/* v4.42: the draw moved into the database (public._draw_playoff_round). The home test is read out of its SQL and run. */
+const draw = R("sql/2026-11-01-playoff-autopilot-v442.sql");
+const hostSql = (draw.match(/if (v_gi < 2 or \(v_gi >= 4 and \(v_gi - 4\) % 2 = 0\)) then v_host := v_hi\[v_i\]; v_away := v_lo\[v_i\];/) || [])[1] || "false";
+const hostHigher = vm.runInNewContext("(function(v_gi){ return " + hostSql.replace(/ or /g, " || ").replace(/ and /g, " && ").replace(/ = /g, " === ") + "; })");
+const pattern = [0,1,2,3,4,5,6].map((gi) => hostHigher(gi) ? "H" : "L").join("");
 A("games 1-7 go H H L L H L H", pattern === "HHLLHLH", pattern);
-A("the generator uses it per game", /var host = CG\.playoffHostHigher\(gi\) \? m\[0\] : m\[1\];/.test(live) && !/hostHigher\[ni\]/.test(live));
-A("the final is ordered by the league-wide table (points, then Rule 8.2)", /var tbl = CG\.standings\(CG\.lg\)\.map/.test(live) && /champs\.sort\(function\(a, b\)\{ return tbl\.indexOf\(a\) - tbl\.indexOf\(b\); \}\);/.test(live) && !/champs\.sort\(bySeed\)/.test(live));
+A("the draw uses it per game", hostSql !== "false" && /while v_kk < v_per_night\[v_ni \+ 1\] and v_gi < v_best loop/.test(draw));
+A("the final is ordered by the league-wide table (points, then Rule 8.2)",
+  /v_champs := array\(select x\.code from public\.standings_order\(p_season, null\) x where x\.code = any\(v_adv\) order by x\.pos\);/.test(draw) &&
+  /v_hi := array\[v_champs\[1\]\]; v_lo := array\[v_champs\[2\]\];/.test(draw) && !/champs\.sort\(bySeed\)/.test(live));
 A("the Control Center caption says so", /the higher seed is home for games 1, 2, 5 and 7, the lower seed for games 3, 4 and 6 \(Rule 8\.3\)/.test(live));
 global.window = {}; global.CG = {}; eval(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook, secs = {};

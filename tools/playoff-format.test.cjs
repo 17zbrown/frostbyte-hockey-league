@@ -4,16 +4,18 @@
    The scheduler used to lay one game per night, alternating home — contradicting a rulebook that
    already described best-of-7 2-2-3, and a DB trigger (trg_conclude_series) that already ends a
    series at four wins and deletes the rest. Only the client scheduler was wrong; this pins its
-   2-2-3 shape and the corrected series-cap flag. */
+   2-2-3 shape and the corrected series-cap flag. v4.42: the draw moved into the database
+   (public._draw_playoff_round), so the shape is pinned there now; the packing below is its logic. */
 const fs = require("fs"), path = require("path");
 const live = fs.readFileSync(path.join(__dirname, "..", "src/live/part_live.js"), "utf8");
 const pub2 = fs.readFileSync(path.join(__dirname, "..", "src/live/part5b_public2.js"), "utf8");
 const content = fs.readFileSync(path.join(__dirname, "..", "src/live/part3_content.js"), "utf8");
+const draw = fs.readFileSync(path.join(__dirname, "..", "sql/2026-11-01-playoff-autopilot-v442.sql"), "utf8");
 
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
 
-/* the exact packing logic from CG.generatePlayoffRound, replicated to drive it */
+/* the exact packing logic of the draw (CG.generatePlayoffRound until v4.42, public._draw_playoff_round since), replicated to drive it */
 function schedule(bestOf, higher, lower) {
   const SLOTS = ["21:00", "21:35", "22:10"], wk = ["Wed", "Thu", "Fri"];
   const perNight = [Math.min(2, bestOf), Math.min(2, Math.max(0, bestOf - 2)), Math.max(0, bestOf - 4)];
@@ -37,9 +39,10 @@ console.log("— best-of-7 lays out exactly 2-2-3");
   A("lower seed home games 3, 4 and 6", [3, 4, 6].every((n) => g[n - 1].home === "BOS"));
   A("each night uses distinct time slots", new Set(fri.map((r) => r.slot)).size === 3 && new Set(wed.map((r) => r.slot)).size === 2);
   A("the source schedules by night with a 2/2/rest split, not one-per-night alternating",
-    /var perNight=\[Math\.min\(2,bestOf\), Math\.min\(2,Math\.max\(0,bestOf-2\)\), Math\.max\(0,bestOf-4\)\];/.test(live) &&
-    /var host = CG\.playoffHostHigher\(gi\) \? m\[0\] : m\[1\];/.test(live));
+    /v_per_night := array\[least\(2, v_best\), least\(2, greatest\(0, v_best - 2\)\), greatest\(0, v_best - 4\)\];/.test(draw) &&
+    /if v_gi < 2 or \(v_gi >= 4 and \(v_gi - 4\) % 2 = 0\) then v_host := v_hi\[v_i\]; v_away := v_lo\[v_i\];/.test(draw));
   A("...and the old alternating one-per-night loop is gone", !/host = gi%2===0 \? m\[0\] : m\[1\]/.test(live));
+  A("...and the browser keeps no second copy of the draw (v4.42)", !/var perNight=\[/.test(live) && !/from\("games"\)\.insert\(rows\)/.test(live));
 }
 
 console.log("\n— the config and copy agree on best-of-7");

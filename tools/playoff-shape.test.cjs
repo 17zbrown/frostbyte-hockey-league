@@ -8,6 +8,8 @@
    every qualifier accounted for in each round, and exactly one champion at the end. */
 const fs = require("fs"), vm = require("vm"), path = require("path");
 const src = fs.readFileSync(path.join(__dirname, "..", "src", "live", "part_live.js"), "utf8");
+/* v4.42: the draw itself moved into the database (public._draw_playoff_round); its shape is pinned in the SQL record */
+const draw = fs.readFileSync(path.join(__dirname, "..", "sql/2026-11-01-playoff-autopilot-v442.sql"), "utf8");
 
 let ok = true;
 const A = (l, p, x) => { if (!p) ok = false; console.log(`${p ? "ok  " : "FAIL"} ${l}${x ? "  — " + x : ""}`); };
@@ -138,9 +140,11 @@ console.log("\n— the generator and the UI read the setting, not a constant");
 {
   A("the old hardcoded constant is gone", !/CG\.PLAYOFF_PER_DIV\b(?!_DEFAULT)/.test(src));
   A("the b+3 pairing that only worked for four is gone", !/seedCodes\[b\+3\]/.test(src));
-  A("round 1 is built by playoffRound1", /CG\.playoffRound1\(seedCodes\.slice/.test(src));
-  A("the final is round K, not hardcoded 3", /if \(round === K\)/.test(src));
-  A("round-1 byes rejoin in round 2", /if \(round === 2\) adv = adv\.concat\(round1Byes\(\)\)/.test(src));
+  A("round 1 is built by playoffRound1's shape (in the database draw since v4.42)",
+    /v_games1 := case when v_per = v_pow then v_per \/ 2 else v_per - v_pow end;/.test(draw) &&
+    /v_hi := v_hi \|\| v_block\[v_byes \+ v_i \+ 1\];/.test(draw) && /v_lo := v_lo \|\| v_block\[v_per - v_i\];/.test(draw));
+  A("the final is round K, not hardcoded 3", /if p_round = v_k then/.test(draw));
+  A("round-1 byes rejoin in round 2", /if p_round = 2 then[\s\S]{0,120}v_adv := v_adv \|\| v_seeds\[v_blk \* v_per \+ 1 : v_blk \* v_per \+ v_byes\];/.test(draw));
   A("the setting merges instead of overwriting the series length",
     /Object\.assign\(\{\}, cur, \{ perDiv:n \}\)/.test(src) && /Object\.assign\(\{\}, cur0, \{ bestOf:n \}\)/.test(src));
   A("the panel warns that this is published law", /This is published law/.test(src));

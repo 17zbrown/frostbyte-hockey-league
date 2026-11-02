@@ -10,6 +10,8 @@ const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
 const html = R("index.html");
 const content = R("src/live/part3_content.js");
 const live = R("src/live/part_live.js");
+/* v4.42: the playoff draw moved into the database (public._draw_playoff_round); its field and round-1 pins read the SQL record */
+const draw = fs.readFileSync(path.join(__dirname, "..", "sql/2026-11-01-playoff-autopilot-v442.sql"), "utf8");
 const fmtBlockOf = (src) => src.slice(src.indexOf("CG.FORMAT_RULES = {"), src.indexOf("CG.FORMAT_NAME"));
 const engine = R("src/live/part2_engine.js");
 const hub = R("src/live/part6_hub.js");
@@ -92,9 +94,9 @@ console.log("\n— the code agrees with the rulebook");
      and the bracket shape is derived from it rather than hardcoded (see playoff-shape.test.cjs) */
   A("the rulebook's four-per-division is the shipped default", /CG\.PLAYOFF_PER_DIV_DEFAULT = 4/.test(live));
   A("...the qualifier count is read as a setting", /CG\.playoffPerDiv = function/.test(live));
-  A("...the bracket needs a full field before it will build", /Need \"\+need\+\" seeds/.test(live));
+  A("...the bracket needs a full field before it will build", /the %s division has %s clubs and the bracket takes %s from each/.test(draw));
   A("...frozen seeds are validated against that field size", /v\.length===CG\.playoffFieldSize\(\)/.test(live));
-  A("...round 1 is derived per division, not hardcoded to four", /CG\.playoffRound1\(seedCodes\.slice/.test(live));
+  A("...round 1 is derived per division, not hardcoded to four", /v_block := v_seeds\[v_blk \* v_per \+ 1 : v_blk \* v_per \+ v_per\];/.test(draw) && /v_hi := v_hi \|\| v_block\[v_byes \+ v_i \+ 1\];/.test(draw));
   A("...and the round names are derived too", /CG\.playoffRoundName = function/.test(live));
   A("the pre-season requirement is mirrored client-side", /CG\.PRESEASON_MIN_GP = 3/.test(live));
   A("...the draft desk filters the pool by it", /pool\.filter\(function\(r\)\{ return CG\.isDraftEligible\(r\.profile_id\); \}\)/.test(live));
