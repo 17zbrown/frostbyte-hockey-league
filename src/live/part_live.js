@@ -226,6 +226,26 @@ CG.floorGp = function(lg, pid){
   var s = ((lg && lg.pstats) || {})[pid], c = (lg && lg.gpCredits) || {};
   return ((s && s.gp) || 0) + (c[pid] || 0);
 };
+/* v4.43 (commissioner, 2026-11-01: "lock out the ineligible players in playoffs so teams cannot place them on lineups"):
+   the one test the lineup builder, the line creator and Dress tonight share for a playoff game. It mirrors the gate in
+   set_game_lineup (Rule 8.3): games toward the floor (games played plus any league office credit) under the player's
+   own floor, prorated for a late joiner, unless the player is a goaltender seated after signings closed (Rule 2.4's
+   emergency provision, public.fa_moves_close_at). Null when the player may be dressed, else {gp, min, why}. The database
+   refuses the same player whatever a page shows; this only stops a club picking someone it cannot dress. */
+CG.playoffLockout = function(lg, p, game){
+  if (!p || !game || game.stage !== "playoff") return null;
+  var min = CG.playoffFloorFor(p.id);
+  if (!min) return null;
+  var gp = CG.floorGp(lg, p.id);
+  if (gp >= min) return null;
+  var s = CG.SEASON || {}, closes = [];
+  if (s.fa_moves_closed_at) closes.push(Date.parse(s.fa_moves_closed_at));
+  var dl = CG.movementDeadlineTs ? CG.movementDeadlineTs() : null;
+  if (dl) closes.push(dl);
+  closes = closes.filter(function(t){ return !isNaN(t); });
+  if (p.pos === "G" && p.spotAt && closes.length && p.spotAt > Math.min.apply(null, closes)) return null;
+  return { gp: gp, min: min, why: p.tag+" has "+gp+" of the "+min+" regular-season games the playoffs need, so they cannot be dressed in a playoff game (Rule 8.3)." };
+};
 CG.playoffRoad = function(lg, clubCode){
   var out = [];
   if (!CG.playoffMinGp() || !lg || !lg.byTeam || !lg.byTeam[clubCode]) return out;
@@ -1088,7 +1108,9 @@ CG.buildLiveLeague = async function(opts){
         term: c ? Math.max(1, (c.end_season||1) - (c.start_season||1) + 1) : 1,
         mgmt: mgmt, mgmtSalary: (mgmt==="owner"||mgmt==="gm"),
         onBlock: !!rs.on_block, status: rs.status || "active", origin: rs.origin || "assigned",
-        spotId: rs.id, squad: rs.squad || "pro", squadMoves: rs.squad_moves || 0
+        spotId: rs.id, squad: rs.squad || "pro", squadMoves: rs.squad_moves || 0,
+        /* v4.43: when this roster spot was made, for Rule 2.4's emergency goaltender (CG.playoffLockout) */
+        spotAt: rs.created_at ? Date.parse(rs.created_at) : null
       };
     })
     .filter(Boolean);
@@ -14073,7 +14095,8 @@ CG.seasonForm = function(id){
     '<label class="fld"><span>GM salary ($M)</span><input id="ssGmSal" type="number" min="0" step="0.25" value="'+(((s.gm_salary==null?0:s.gm_salary))/1e6)+'"></label>'+
     '<label class="fld"><span>AGM salary ($M)</span><input id="ssAgmSal" type="number" min="0" step="0.25" value="'+(((s.agm_salary==null?2000000:s.agm_salary))/1e6)+'"></label>'+
     /* v4.01 (Rule 8.3): 30% of the season's regular-season games, worked out from its length; not typed */
-    '<label class="fld"><span>Playoff eligibility floor (30% of the season)</span><input id="ssPoMin" type="number" value="'+CG.fmt("playoff_min_gp", s)+'" readonly title="Rule 8.3: thirty percent of the season’s regular-season games, a fraction of .4 or less rounded down: the schedule once it is built, else the weeks, nights and puck-drop times. The full format has no floor."></label>'+
+    /* v4.43: a floor the commissioner ruled for one season (seasons.playoff_floor_ruled, Season 1: fourteen) stands over the thirty percent */
+    '<label class="fld"><span>Playoff eligibility floor ('+(s && s.playoff_floor_ruled != null ? 'set by the commissioner for this season' : '30% of the season')+')</span><input id="ssPoMin" type="number" value="'+CG.fmt("playoff_min_gp", s)+'" readonly title="'+(s && s.playoff_floor_ruled != null ? 'Rule 8.3: the commissioner set this season’s floor; a player placed after opening night needs the same share of it. The full format has no floor.' : 'Rule 8.3: thirty percent of the season’s regular-season games, a fraction of .4 or less rounded down: the schedule once it is built, else the weeks, nights and puck-drop times. The full format has no floor.')+'"></label>'+
     '<label class="fld"><span>Roster max</span><input id="ssRoster" type="number" min="6" max="30" value="'+(s.roster_max||CG.fmt("roster_max", s))+'" readonly title="Set by the season format (Rule 2.1): '+CG.FORMAT_RULES.basic.roster_max+' basic, '+CG.FORMAT_RULES.full.roster_max+' full"></label>'+
     '<label class="fld"><span>Trade deadline (week)</span><input id="ssTdw" type="number" min="1" max="20" value="'+(s.trade_deadline_week||CG.fmt("trade_deadline_week", s))+'"></label>'+
     '<label class="fld"><span>Roster moves</span><select id="ssMoves">'+["auto","locked","open"].map(function(x){ return '<option'+(s.moves_lock_override===x?" selected":"")+'>'+x+'</option>'; }).join("")+'</select></label>'+

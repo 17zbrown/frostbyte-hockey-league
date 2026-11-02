@@ -1002,14 +1002,16 @@ CG.hubLineup = function(qs){
       var avv = avKey && CG.avGame ? CG.avGame(av, avKey, game.id) : "nr";
       var un = avv === "no", noAns = !avKey || avv === "nr";
       var used = assigned.indexOf(p.id)>=0;
-      var dis = suspended[p.id];
-      var reason = dis ? "Suspended: cannot be scheduled until it is served (Rule 7.2)" : un ? "Marked not available for this game; you may still dress him" : noAns ? "No availability answer for this game" : "";
+      /* v4.43: in a playoff game a player short of the Rule 8.3 floor is locked out, like a suspended one */
+      var poOut = CG.playoffLockout ? CG.playoffLockout(lg, p, game) : null;
+      var dis = suspended[p.id] || !!poOut;
+      var reason = suspended[p.id] ? "Suspended: cannot be scheduled until it is served (Rule 7.2)" : poOut ? poOut.why : un ? "Marked not available for this game; you may still dress him" : noAns ? "No availability answer for this game" : "";
       return groupHead + '<div class="bp'+(used?" dis":"")+(dis?" dis":"")+(un?" warn":"")+'" data-bench="'+p.id+'" draggable="'+(!locked&&!used&&!dis)+'" '+(reason?'title="'+esc(reason)+'"':"")+'>'+
         CG.crest(p.team,20)+'<b style="font-size:13px">'+esc(p.tag)+'</b><span class="mono" style="font-size:10px;color:var(--steel)">'+p.pos+'</span>'+(CG.isCamp(p)?CG.campChip("xs"):"")+
-        (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':un?'<span class="chip chip-warn" style="font-size:9px">UNAVAIL</span>':noAns?'<span class="chip chip-ink" style="font-size:9px">NO ANSWER</span>':used?'<span class="chip chip-win" style="font-size:9px">IN</span>':"")+
+        (suspended[p.id]?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':poOut?'<span class="chip chip-loss" style="font-size:9px" title="'+esc(poOut.gp+' of '+poOut.min+' regular-season games (Rule 8.3)')+'">NOT ELIGIBLE</span>':un?'<span class="chip chip-warn" style="font-size:9px">UNAVAIL</span>':noAns?'<span class="chip chip-ink" style="font-size:9px">NO ANSWER</span>':used?'<span class="chip chip-win" style="font-size:9px">IN</span>':"")+
         '<span class="bp-meta">OVR '+lg.ratings[p.id].ovr+'</span></div>';
     }).join("")+'</div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption" id="luMsg">Assignments validate position, suspension, the weekly cap and duplicates. Availability is shown as a guide, not a gate: you may dress anyone on the roster, and a player marked out is flagged when you place him.</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption" id="luMsg">Assignments validate position, suspension, the weekly cap, playoff eligibility and duplicates. Availability is shown as a guide, not a gate: you may dress anyone on the roster, and a player marked out is flagged when you place him.</span></div></div>';
   var hist = saved && saved.rev && saved.rev.length
     ? '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Revision history</h3></div>'+
       saved.rev.map(function(rv){ return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic("clock",14)+'</span><span><b>'+esc(rv.what)+'</b></span><span class="nf-t">'+CG.fmtTime(rv.at)+'</span></div>'; }).join("")+'</div>'
@@ -1068,6 +1070,9 @@ CG.AFTER._lineup = function(){
     if (!flex(p) && CG.posGroup(p.pos)!==CG.posGroup(pos))
       return p.tag+" is a "+(CG.POS_NAME[p.pos]||p.pos)+" — this slot needs a "+CG.POS_NAME[pos]+". Only training-camp players"+(preGame?" and, in the pre-season, the Owner, GM and AGM":"")+" fill any position (Rule 2.1).";
     if (lg.suspensions.some(function(s){ return s.playerId===p.id && s.status==="active"; })) return p.tag+" is suspended and cannot be assigned (Rule 7.2).";
+    /* v4.43: short of the playoff floor in a playoff game (the same test set_game_lineup makes) */
+    var poOut = CG.playoffLockout ? CG.playoffLockout(lg, p, game) : null;
+    if (poOut) return poOut.why;
     /* v2.76: a player marked out is dressable; avWarn() names him when he is placed */
     if (Object.values(state.slots).indexOf(p.id)>=0) return p.tag+" is already in the lineup.";
     /* Rule 5.2 (v2.55): stop the assignment at the cap, the way the database will — the count is
@@ -1455,6 +1460,11 @@ CG.hubLines = function(qs){
   var roster = lg.byTeam[club];
   var suspended = {};
   lg.suspensions.forEach(function(s){ if (s.status==="active" && s.scope!=="staff") suspended[s.playerId]=true; });   /* v3.51: status is the database's own "running"; lifted and served never lock. v4.25: a staff-only suspension never locks a lineup either (guard_lineup_suspended reads public.is_suspended, scope play or both) */
+  /* v4.43: while the club's next game is a playoff game, a player short of the Rule 8.3 floor is locked out of the lines,
+     as a suspended one is, and Dress tonight will not send them */
+  var poNext = ((CG.lineNights(club)[0] || {}).game) || null;
+  var poOut = {};
+  if (poNext && poNext.stage === "playoff" && CG.playoffLockout) roster.forEach(function(p){ var x = CG.playoffLockout(lg, p, poNext); if (x) poOut[p.id] = x; });
   var slotsOf = function(n){ return (CG._lcDraft && CG._lcDraft[n]) ? CG._lcDraft[n] : CG.lineFromRow((lg._teamLines||{})[n]); };
   var dirtyN = 0; [1,2,3].forEach(function(n){ if (CG._lcDraft && CG._lcDraft[n]) dirtyN++; });
   /* which lines each player is on, for the roster board's L1..L4 chips */
@@ -1503,7 +1513,7 @@ CG.hubLines = function(qs){
            then the name, then the rating. The avatar competed with the name in a 6-across grid
            and the position was only implied by the column header. */
         '<span class="sl-pos">'+CG.POS_NAME[pos]+'</span>'+
-        (pl ? '<span class="sl-name">'+esc(pl.tag)+'</span><span class="sl-sub">OVR '+lg.ratings[pid].ovr+(suspended[pid]?' · SUSP':'')+
+        (pl ? '<span class="sl-name">'+esc(pl.tag)+'</span><span class="sl-sub">OVR '+lg.ratings[pid].ovr+(suspended[pid]?' · SUSP':'')+(poOut[pid]?' · NOT ELIGIBLE':'')+
                 (cst ? (cst.level === "over" ? ' · OVER LIMIT' : ' · MAY GO OVER') : '')+'</span>'
             : '<span class="sl-sub">Empty</span>')+'</div>';
     });
@@ -1532,16 +1542,16 @@ CG.hubLines = function(qs){
     '<div class="card-b"><div class="lc-board">'+POS.map(function(pos){
       return '<div class="lc-col"><div class="lc-ch">'+CG.POS_NAME[pos]+'</div>'+
         (byPos[pos]||[]).map(function(p){
-          var dis = suspended[p.id];
+          var dis = suspended[p.id] || !!poOut[p.id];
           return '<div class="lc-pc'+(dis?" dis":"")+capCls(p.id)+'" data-rcard="'+p.id+'" draggable="'+(!dis)+'" tabindex="0" role="button" '+
-            (dis?'title="Suspended: cannot be scheduled until it is served (Rule 7.2)"':(capSt[p.id]?'title="'+esc(capSt[p.id].why)+'"':''))+' aria-label="'+esc(p.tag)+', '+CG.POS_NAME[p.pos]+(capSt[p.id]?". "+esc(capSt[p.id].why):"")+'">'+
+            (suspended[p.id]?'title="Suspended: cannot be scheduled until it is served (Rule 7.2)"':poOut[p.id]?'title="'+esc(poOut[p.id].why)+'"':(capSt[p.id]?'title="'+esc(capSt[p.id].why)+'"':''))+' aria-label="'+esc(p.tag)+', '+CG.POS_NAME[p.pos]+(capSt[p.id]?". "+esc(capSt[p.id].why):"")+'">'+
             CG.lcAv(p,34)+
             /* v2.91: the name owns the first row; position, line chips and the week load share the
                second. They used to compete for one line, so every name was cut to an initial and
                "GOALTENDER" was clipped mid-word. */
             '<span class="two"><b>'+esc(p.tag)+'</b><span class="ln2"><span class="ps">'+CG.POS_NAME[p.pos]+'</span>'+
               (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+
-              (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':(CG.weekLoadChip?CG.weekLoadChip(loadOf(p),"xs"):""))+
+              (suspended[p.id]?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':poOut[p.id]?'<span class="chip chip-loss" style="font-size:9px">NOT ELIGIBLE</span>':(CG.weekLoadChip?CG.weekLoadChip(loadOf(p),"xs"):""))+
               (CG.lcAvStrip?CG.lcAvStrip(club,p):"")+
               '</span></span>'+
             '<span class="ov">'+lg.ratings[p.id].ovr+'</span></div>';
@@ -1549,13 +1559,13 @@ CG.hubLines = function(qs){
     }).join("")+'</div>'+
     (camp.length ? '<div class="lc-ch" style="margin-top:14px">Training camp — fills any position (Rule 2.1)</div>'+
       '<div class="lc-board" style="margin-top:8px">'+camp.map(function(p){
-        var dis = suspended[p.id];
+        var dis = suspended[p.id] || !!poOut[p.id];
         return '<div class="lc-pc'+(dis?" dis":"")+capCls(p.id)+'" data-rcard="'+p.id+'" draggable="'+(!dis)+'" tabindex="0" role="button" '+
-          (dis?'title="Suspended: cannot be scheduled until it is served (Rule 7.2)"':(capSt[p.id]?'title="'+esc(capSt[p.id].why)+'"':''))+' aria-label="'+esc(p.tag)+', training camp'+(capSt[p.id]?". "+esc(capSt[p.id].why):"")+'">'+
+          (suspended[p.id]?'title="Suspended: cannot be scheduled until it is served (Rule 7.2)"':poOut[p.id]?'title="'+esc(poOut[p.id].why)+'"':(capSt[p.id]?'title="'+esc(capSt[p.id].why)+'"':''))+' aria-label="'+esc(p.tag)+', training camp'+(capSt[p.id]?". "+esc(capSt[p.id].why):"")+'">'+
           CG.lcAv(p,34)+
           '<span class="two"><b>'+esc(p.tag)+'</b><span class="ln2"><span class="ps">Camp · '+CG.POS_NAME[p.pos]+'</span>'+
             (memb[p.id]||[]).map(function(n){ return '<span class="lnc">L'+n+'</span>'; }).join("")+
-            (dis?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':(CG.weekLoadChip?CG.weekLoadChip(loadOf(p),"xs"):""))+
+            (suspended[p.id]?'<span class="chip chip-loss" style="font-size:9px">SUSP</span>':poOut[p.id]?'<span class="chip chip-loss" style="font-size:9px">NOT ELIGIBLE</span>':(CG.weekLoadChip?CG.weekLoadChip(loadOf(p),"xs"):""))+
             (CG.lcAvStrip?CG.lcAvStrip(club,p):"")+
             '</span></span>'+
           '<span class="ov">'+lg.ratings[p.id].ovr+'</span></div>';
@@ -1669,6 +1679,7 @@ CG.AFTER._lines = function(qs){
   var preAhead = !!(CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club));
   function fits(pid, pos){
     var p = CG.playerById(lg, pid); if (!p) return "no longer rostered";
+    if (poOut[pid]) return poOut[pid].why;   /* v4.43 */
     /* Rule 2.1 groups, with the builder's training-camp exception: a camp player fills any slot —
        and while the club's next game is a pre-season game, so does its Owner, GM or AGM (v2.39).
        set_team_line makes the same test; dressing the line into a regular-season game is
@@ -1861,11 +1872,18 @@ CG.AFTER._lines = function(qs){
       });
     });
   });
+  /* v4.43: a playoff game is not sent with a player short of the Rule 8.3 floor; the line is named and kept */
+  function playoffRefusal(gq, row, slot){
+    var outs = (gq.stage === "playoff" && CG.playoffLockout) ? ["center","lw","rw","ld","rd","goalie"].map(function(k){
+      return row[k] ? CG.playoffLockout(lg, CG.playerById(lg, row[k]), gq) : null; }).filter(Boolean) : [];
+    return outs.length ? outs.map(function(o){ return o.why; }).join(" ")+" Swap them out of "+(row.name||("Line "+slot))+" first." : null;
+  }
   /* one night's dressing, shared by the per-night button and Dress-the-week */
   function dressGame(gameId, slot, done){
     var row = (lg._teamLines||{})[slot]; if (!row || !tid){ done("no line"); return; }
     /* v2.38: under "Owner approves" the dressing is queued (done(null, "queued")) — never claimed dressed */
     var gq = (lg.schedule||[]).find(function(x){ return x.id===gameId; })||{}, oppq = gq.home===club ? gq.away : gq.home;
+    var poWhy = playoffRefusal(gq, row, slot); if (poWhy){ done(poWhy); return; }   /* v4.43 */
     CG.mgmtQueue("set_game_lineup", { p_game:gameId, p_center:row.center||null, p_lw:row.lw||null, p_rw:row.rw||null, p_ld:row.ld||null, p_rd:row.rd||null, p_goalie:row.goalie||null, p_emergency:false },
       "dress "+(row.name||("Line "+slot))+" vs "+((CG.TEAM[oppq]||{}).name||oppq||"?")+(gq.at?" · "+CG.fmtDay(gq.at)+" "+CG.fmtTime(gq.at):""), { quiet:true }).then(function(q){
       if (q===true){ done(null, "queued"); return; }
