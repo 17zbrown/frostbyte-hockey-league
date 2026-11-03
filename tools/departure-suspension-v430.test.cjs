@@ -128,12 +128,13 @@ A("the block is the one definition: the Honors tab and the off-roster profile bo
   && (pub.match(/<b style="display:block;font-family:var\(--f-disp\)">Discipline record<\/b>/g) || []).length === 1
   && /<div id="acctHdr" class="note">Loading account…<\/div>'\+\s+\/\*[^*]*\*\/\s+CG\.disciplineRecordHtml\(lg\.suspensions\.find\(function\(x\)\{ return x\.playerId===pid && x\.status!=="lifted"; \}\)\)/.test(pub));
 A("Team HQ's tooltip uses the same length", /: s\.mode==="seasons" \? "for the "\+CG\.suspensionLen\(s\)/.test(hub));
-A("the Register page says it, keeping the v2.47 words", /withdrawn automatically after about a day \(Rule 1\.1\), and you are suspended through the next season \(Rule 7\.2\)\. Rejoining after that does not lift the suspension; only a granted appeal does\./.test(live)
-  && /Staying in the server keeps your sign-up alive/.test(live) && !/You must be in the Chel Gaming Discord to register —/.test(live));
-A("the pool caption, the account switch card, the office's archive card and the appeal form say it", /withdraws a pending sign-up and brings a suspension through the next season \(Rule 1\.1\)/.test(live)
-  && /withdrawn after about a day out of the server \(Rule 1\.1\) and you are suspended through the next season \(Rule 7\.2\), so join now\./.test(live)
-  && !/otherwise the member simply rejoins and signs up again/.test(live)
-  && /Appeal a ruling within 48 hours, or a suspension for leaving the Discord at any time while it runs \(Rule 7\.6\)\./.test(live));
+/* v4.44 (commissioner, 2026-11-03): "can you remove the auto suspension feature for players leaving the league?", and
+   for the seven members already serving one, "Keep them running". The copy and rule text this file pinned for the
+   v4.30 promise of a suspension no longer exist; tools/departure-no-suspension-v444.test.cjs pins their v4.44 wording.
+   What still serves the seven running suspensions (the appeal at any time, 7.2 paragraph 7 as a transitional
+   paragraph, 7.6 paragraph 3) stays pinned here. */
+A("the appeal form still says a departure suspension may be appealed at any time", /Appeal a ruling within 48 hours, or a suspension for leaving the Discord at any time while it runs \(Rule 7\.6\)\./.test(live)
+  && /Staying in the server keeps your sign-up alive/.test(live));
 
 console.log("\n4. The rulebook, as rendered");
 global.window = global; global.CG = {}; eval(R("src/live/part3_content.js"));
@@ -142,26 +143,17 @@ eval(R("src/live/part5b_public2.js").match(/CG\.rulebookForFormat = function\(rb
 const book = (fmt) => JSON.stringify(CG.rulebookForFormat(rb, fmt).chapters);
 for (const fmt of ["basic", "full"]) {
   const b = book(fmt);
-  A("the " + fmt + " book suspends a withdrawn sign-up and lifts it only on appeal", /A player whose sign-up is withdrawn after that notice is also suspended for the remainder of the current season, including the playoffs, and for the whole of the following season, or, if the sign-up is withdrawn between seasons, for the whole of the season about to begin \(Rule 7\.2\)\./.test(b)
-    && /it is lifted only when the league office grants the player's appeal \(Rule 7\.6\)/.test(b) && !/Rejoining the server restores nothing by itself/.test(b));
-  A("the " + fmt + " book has the new 7.2 paragraph 7 and 7.6 paragraph 3", /A member is suspended automatically, without a ruling by an official, when, after a notice that warned that a suspension follows, their sign-up is withdrawn/.test(b) && /Where the season ends before those hours run out, the member keeps their place on the finished season's roster and is suspended all the same\./.test(b) && /may be appealed at any time while it runs, not only within the forty-eight \(48\) hours/.test(b));
+  A("the " + fmt + " book keeps 7.6 paragraph 3 for the suspensions already running", /may be appealed at any time while it runs, not only within the forty-eight \(48\) hours/.test(b));
 }
 const p11 = sec("1.1").paragraphs;
-A("1.1.5: the club's notice warns, the removal suspends, the front office and commissioners are left to the office",
-  /naming the player and the deadline and warning that a player who does not rejoin in time is removed and suspended \(Rule 7\.2\)/.test(p11[4])
-  && /the spot is free for the club to fill, and they are suspended exactly as the preceding paragraph provides\./.test(p11[4])
-  && /\(Owner, General Manager or Assistant General Manager\) is never removed automatically, nor suspended under this rule;/.test(p11[4])
-  && /a commissioner who leaves is referred to the commissioners and is not suspended automatically/.test(p11[4]));
+A("1.1.5: the front office is still left to the office", /\(Owner, General Manager or Assistant General Manager\) is never removed automatically;/.test(p11[4]));
 const p72 = sec("7.2").paragraphs, p76 = sec("7.6").paragraphs;
-A("7.2: appended, so the pinned paragraphs keep their places", p72.length === 7 && /^A member is told of a sanction at the moment it is imposed/.test(p72[5]) && /^A member is suspended automatically/.test(p72[6]));
-A("7.2.7 states the length, the between-seasons case, no DM, the appeal, the exemptions and the date", /for the whole of the following season; a member suspended between seasons, before the next season has begun, is suspended for the whole of that season only\./.test(p72[6])
-  && /no direct message is sent/.test(p72[6]) && /it is lifted only when the league office grants the member's appeal under Rule 7\.6/.test(p72[6])
-  && /are never suspended under this paragraph/.test(p72[6]) && /No member warned or removed before this paragraph took effect is suspended under it\./.test(p72[6]));
+A("7.2: paragraph 7 keeps its place, now the transitional paragraph", p72.length === 7 && /^A member is told of a sanction at the moment it is imposed/.test(p72[5]) && /^No member is suspended for leaving the league Discord\./.test(p72[6]));
+A("7.2.7 still says how a running departure suspension is lifted", /It is lifted only when the league office grants the member's appeal under Rule 7\.6, and lifting it restores no roster spot or sign-up by itself\./.test(p72[6]));
 A("7.2: paragraph 7 is a commissioner-level length named in paragraph 1, and the one exception to one at a time", /other than under paragraph 4 or paragraph 7 of this rule,/.test(p72[0])
   && /A member is under one suspension at a time/.test(p72[3]) && /is the one exception to holding one suspension at a time/.test(p72[3]));
 A("7.6: appended; 48 hours and once still stand for every other sanction", p76.length === 3 && /forty-eight \(48\) hours/.test(p76[0]) && /Each sanction may be appealed once/.test(p76[0]) && /It may still be appealed only once/.test(p76[2]));
-A("0.3 in both formats", /withdrawn automatically after one day's grace and is suspended through the following season \(Rules 1\.1 and 7\.2\)/.test(sec("0.3").paragraphs.join(" "))
-  && /after a day's grace \(Rule 1\.1\), and also brings a suspension through the following season \(Rule 7\.2\)/.test((sec("0.3").full || []).join(" ")));
+A("0.3 in both formats keeps the day of grace", /withdrawn automatically after one day's grace \(Rule 1\.1\)\./.test(sec("0.3").paragraphs.join(" ")) && /after a day's grace \(Rule 1\.1\)\./.test((sec("0.3").full || []).join(" ")));
 const changed = JSON.stringify(["0.3", "1.1", "7.2", "7.6"].map((k) => [sec(k).paragraphs, sec(k).full || []]));
 A("no dash as punctuation and no gendered pronoun in the changed sections", !/[—–]| - /.test(changed) && !/\b(he|his|him|she|her|hers)\b/i.test(changed));
 
