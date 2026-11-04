@@ -626,7 +626,7 @@ CG.PROFILE_PUBLIC_COLS = "id,gamertag,display_name,avatar_url,role,created_at,tw
    clubs (or in the league office) and the night's first game is within 30 minutes. A "*" select on
    games now fails outright, which is the point — the code cannot leak by accident again. */
 CG.GAME_PUBLIC_COLS = "id,season_id,week,home_team_id,away_team_id,scheduled_at,home_score,away_score,went_ot,status,"+
-  "twitch_url,created_at,ea_match_id,home_ppg,home_ppo,away_ppg,away_ppo,stage,forfeit_team_id,voided,limit_week,limits_exempt,"+
+  "twitch_url,created_at,ea_match_id,home_ppg,home_ppo,away_ppg,away_ppo,home_shots,away_shots,stage,forfeit_team_id,voided,limit_week,limits_exempt,"+
   /* v4.07: the original puck drop of a game the office moved (sql/2026-10-14-rescheduled-games-v407.sql) */
   "rescheduled_from";
 
@@ -1135,7 +1135,8 @@ CG.buildLiveLeague = async function(opts){
       code:cc.game_code||null, server:cc.server||null, status:g.status,
       homeScore:g.home_score, awayScore:g.away_score, ot:!!g.went_ot,
       forfeit:g.forfeit_team_id?id2code[g.forfeit_team_id]:null, voided:!!g.voided,
-      eaMatchId:g.ea_match_id||null };
+      eaMatchId:g.ea_match_id||null,
+      homeShots:g.home_shots, awayShots:g.away_shots };   /* v4.45: EA's club shot counts, read by CG.aggregate through r.shots */
   }).filter(function(g){ return g.home && g.away && g.at; });
 
   /* weeks-played counts, per stage. The engine uses CG.SEASON.completedWeeks two
@@ -1177,6 +1178,7 @@ CG.buildLiveLeague = async function(opts){
          numbers are kept, but the club that forfeited takes the loss */
       var forfeit = g.forfeit || null;
       var box={}; box[g.home]={}; box[g.away]={};
+      var shots={}; shots[g.home]=g.homeShots; shots[g.away]=g.awayShots;   /* v4.45: keyed by club code, as box is */
       (statsByGame[g.id]||[]).forEach(function(r){
         var code = id2code[r.team_id]; if(!code || !box[code]) return;
         var opp = code===g.home ? g.away : g.home;
@@ -1204,7 +1206,7 @@ CG.buildLiveLeague = async function(opts){
       });
       var stars = cand.sort(function(a,b){ return b.val-a.val || b.g-a.g; }).slice(0,3).map(function(x){ return { pid:x.pid, team:x.team }; });
       return { id:g.id, week:g.week, stage:g.stage, home:g.home, away:g.away, at:g.at,
-        ot:g.ot, score:score, box:box, stars:stars, entered:true, forfeit:forfeit };
+        ot:g.ot, score:score, box:box, shots:shots, stars:stars, entered:true, forfeit:forfeit };
     });
 
   /* stage split: pre-season keeps its own standings and player lines, the regular

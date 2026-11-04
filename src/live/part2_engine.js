@@ -586,9 +586,23 @@ CG.clubStatPlayers = function(lg, code){
 CG.aggregate = function(lg, overrides){
   var W = (overrides && overrides.weights) || CG.DEFAULT_WEIGHTS;
   var teams = {}, pstats = {}, glog = {};
-  /* gsv/gsa: the club's goalie lines, whoever played in goal (team save percentage) */
+  /* gsv/gsa: the club's goalie lines, whoever played in goal (team save percentage). sgp/sgf (v4.45): the games with a shot
+     count and the goals in them, the base of a club's shots per game and shooting percentage */
   CG.TEAMS.forEach(function(t){ teams[t.code] = { code:t.code, gp:0,w:0,l:0,otl:0,rw:0,gf:0,ga:0,
-    hw:0,hl:0,aw:0,al:0, res:[], sf:0, sa:0, gsv:0, gsa:0 }; });
+    hw:0,hl:0,aw:0,al:0, res:[], sf:0, sa:0, sgp:0, sgf:0, gsv:0, gsa:0 }; });
+  /* v4.45 (commissioner, 2026-11-04, on the team shot numbers: "fix them", and on the real site too: "yes"): a club's shots in a
+     game are EA's own club count. The skaters' lines add up to about 11% less (6,343 against 7,128 across the archive), while
+     the club count equals what the other goaltender faced in 355 of 400 club rows and is within one in 397. A game filed
+     without one (a hand-filed box score) adds up the skating lines. v4.08: that counts EVERY skating line, a goalie's skating
+     line, a player no longer rostered and one EA could not link included (shots for used to skip them while shots against
+     counted them). A no-show forfeit has neither: null, so it is no game in the shot figures, and a club is not charged a
+     shotless game per game. */
+  var clubShots = function(r, code){
+    if (r.shots && r.shots[code] != null) return r.shots[code];
+    var pids = Object.keys(r.box[code] || {}); if (!pids.length) return null;
+    return pids.reduce(function(s,pid){
+      return s + CG.boxLines(r.box[code][pid]).reduce(function(x, b){ return x + (b.goalie ? 0 : (b.shots||0)); }, 0); },0);
+  };
   CG.statPlayers(lg).forEach(function(p){
     pstats[p.id] = CG.blankStatLine();
     pstats[p.id].byClub = {};   /* v4.13: his line for each club he played for, the same shape */
@@ -611,6 +625,9 @@ CG.aggregate = function(lg, overrides){
       if (won){ t.w++; if (ff || !r.ot) t.rw++; (code===r.home?t.hw++:t.aw++); t.res.push("W"); }
       else if (!ff && r.ot){ t.otl++; t.res.push("OT"); }
       else { t.l++; (code===r.home?t.hl++:t.al++); t.res.push("L"); }
+      var sf = clubShots(r, code), sa = clubShots(r, opp);
+      if (sf != null){ t.sf += sf; t.sgp++; t.sgf += r.score[code]; }
+      if (sa != null) t.sa += sa;
       Object.keys(r.box[code]).forEach(function(pid){
         var s = pstats[pid], c = null;
         /* v4.11: the entry is the GAME (gp once), each of its lines adds to its own role (sgp, gs) */
@@ -622,10 +639,8 @@ CG.aggregate = function(lg, overrides){
           c.gp++; c.last = r.at; c.wkLast = r.week;
         }
         CG.boxLines(r.box[code][pid]).forEach(function(b){
-          /* v4.08: the club's totals count EVERY line, including a player no longer rostered or one EA could not link
-             (shots for used to skip them while shots against counted them) */
+          /* v4.08: the club's save totals count EVERY line, including a player no longer rostered or one EA could not link */
           if (b.goalie){ t.gsv += (b.sv||0); t.gsa += (b.sa||0); }
-          else t.sf += (b.shots||0);
           if (!s) return;
           /* v4.13: every line to the season line and to the club line, through the one adder */
           CG.addStatLine(s, b, r.week);
@@ -637,14 +652,6 @@ CG.aggregate = function(lg, overrides){
           glog[pid].push({ game:r.id, week:r.week, team:code, opp:opp, line:b });
         });
       });
-    });
-  });
-  /* shots against: every skating line of the opponent, a goalie's skating line included */
-  lg.results.forEach(function(r){
-    [ [r.home,r.away], [r.away,r.home] ].forEach(function(pair){
-      var code=pair[0], opp=pair[1];
-      teams[code].sa += Object.keys(r.box[opp]).reduce(function(s,pid){
-        return s + CG.boxLines(r.box[opp][pid]).reduce(function(x, b){ return x + (b.goalie ? 0 : (b.shots||0)); }, 0); },0);
     });
   });
   /* streaks + last5 */

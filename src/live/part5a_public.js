@@ -2196,14 +2196,15 @@ CG.ROUTES.team = function(code, qs){
     } else {
       /* v4.08: the club's own goalie lines (s.gsv/s.gsa), whoever played in goal for it; an older stored season without
          them falls back to its registered goalies */
-      var _gp = Math.max(1,s.gp), _goalies = roster.filter(function(p){ return p.pos==="G"; }),
+      /* v4.45: shots per game count the games with a shot count; a season stored before it has no sgp */
+      var _gp = Math.max(1,s.gp), _sgp = Math.max(1, s.sgp != null ? s.sgp : s.gp), _goalies = roster.filter(function(p){ return p.pos==="G"; }),
           _svp = s.gsa != null ? (s.gsv||0) / Math.max(1, s.gsa)
                : _goalies.reduce(function(a,p){ return a+SD.pstats[p.id].sv; },0) / Math.max(1,_goalies.reduce(function(a,p){ return a+SD.pstats[p.id].sa; },0));
       teamStats = '<h3 class="h-sec" style="font-size:18px;margin:0 0 14px">Team stats</h3>'+
         '<div class="grid g4 team-stats" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">'+
         [["Goals per game",(s.gf/_gp).toFixed(2)],["Goals against per game",(s.ga/_gp).toFixed(2)],
-         ["Team save percentage",_svp.toFixed(3).replace(/^0/,"")],["Shots per game",(s.sf/_gp).toFixed(1)],
-         ["Shots against per game",(s.sa/_gp).toFixed(1)],["Home record",s.hw+"-"+s.hl],["Road record",s.aw+"-"+s.al],
+         ["Team save percentage",_svp.toFixed(3).replace(/^0/,"")],["Shots per game",(s.sf/_sgp).toFixed(1)],
+         ["Shots against per game",(s.sa/_sgp).toFixed(1)],["Home record",s.hw+"-"+s.hl],["Road record",s.aw+"-"+s.al],
          ["Points percentage",(s.ptsPct*100).toFixed(0)+"%"]].map(function(kv){
           return '<div class="kpi" style="cursor:default"><b class="num">'+kv[1]+'</b><span>'+kv[0]+'</span></div>';
         }).join("")+'</div>'+
@@ -3654,13 +3655,14 @@ CG.ROUTES.stats = function(param, qs){
     table = '<table class="tbl keepcols" id="statTbl"><caption>'+(PO?"Playoff team":"Team")+' statistics</caption><thead><tr>'+
       '<th class="tleft">Club</th><th class="sortable">GP</th><th class="sortable">GF/GP</th><th class="sortable">GA/GP</th><th class="sortable sorted">DIFF</th><th class="sortable">S/GP</th><th class="sortable">SA/GP</th><th class="sortable">S%</th><th class="sortable">Home</th><th class="sortable">Road</th><th class="sortable">'+(PO?"W%":"PTS%")+'</th></tr></thead><tbody>'+
       teamRows.map(function(r){
-        var gp = Math.max(1,r.gp);
+        /* v4.45: S/GP, SA/GP and S% count the games with a shot count: a no-show forfeit has no shots and its goal is not a shot's */
+        var gp = Math.max(1,r.gp), sgp = Math.max(1, r.sgp != null ? r.sgp : r.gp), sgf = r.sgf != null ? r.sgf : r.gf;
         return '<tr class="rowlink" style="--tc:'+r.team.color+'" data-go="#/team/'+r.code+'">'+
         '<td class="tleft"><span class="teamcell">'+CG.crest(r.code,24)+'<span class="nm">'+esc(r.team.name)+'</span></span></td>'+
         '<td data-v="'+r.gp+'">'+r.gp+'</td><td data-v="'+(r.gf/gp).toFixed(2)+'">'+(r.gf/gp).toFixed(2)+'</td><td data-v="'+(r.ga/gp).toFixed(2)+'">'+(r.ga/gp).toFixed(2)+'</td>'+
         '<td data-v="'+r.diff+'" class="pts" style="color:'+(r.diff>0?"var(--green)":r.diff<0?"var(--red)":"inherit")+'">'+(r.diff>0?"+":"")+r.diff+'</td>'+
-        '<td data-v="'+(r.sf/gp).toFixed(1)+'">'+(r.sf/gp).toFixed(1)+'</td><td data-v="'+(r.sa/gp).toFixed(1)+'">'+(r.sa/gp).toFixed(1)+'</td>'+
-        '<td data-v="'+(r.sf?100*r.gf/r.sf:0).toFixed(1)+'">'+(r.sf?(100*r.gf/r.sf).toFixed(1):"—")+'</td>'+
+        '<td data-v="'+(r.sf/sgp).toFixed(1)+'">'+(r.sf/sgp).toFixed(1)+'</td><td data-v="'+(r.sa/sgp).toFixed(1)+'">'+(r.sa/sgp).toFixed(1)+'</td>'+
+        '<td data-v="'+(r.sf?100*sgf/r.sf:0).toFixed(1)+'">'+(r.sf?(100*sgf/r.sf).toFixed(1):"—")+'</td>'+
         '<td data-v="'+r.hw+'">'+r.hw+"-"+r.hl+'</td><td data-v="'+r.aw+'">'+r.aw+"-"+r.al+'</td>'+
         (PO ? '<td data-v="'+(100*r.w/gp).toFixed(0)+'">'+(100*r.w/gp).toFixed(0)+'%</td></tr>'
             : '<td data-v="'+(r.ptsPct*100).toFixed(0)+'">'+(r.ptsPct*100).toFixed(0)+'%</td></tr>'); }).join("")+
@@ -3668,7 +3670,7 @@ CG.ROUTES.stats = function(param, qs){
   }
   return head + _partial + tabs + '<div class="card"><div class="tblwrap">'+table+'</div></div>'+
     (PO ? '<p class="caption" style="margin:14px 0 0">Playoff lines are kept apart from the regular season (Rule 6.1). They never count toward regular-season totals, the statistical titles (Rule 9.2) or the playoff eligibility floor (Rule 8.3).</p>' : '')+
-    '<p class="caption" style="margin:14px 0 40px">Definitions: P/GP points per game · S% shooting percentage · TK takeaways · GV giveaways · GWG game-winning goals · FO% faceoffs won out of faceoffs taken · QS quality starts (≥.885 SV% in a start) · TOI/GP time on ice per game · Pass% pass completion · SAT shot attempts · INT interceptions · PD penalties drawn · OFF/DEF/TP EA offense / defense / team-play ratings · Brk% breakaway save rate. Everything is auto-imported from EA box scores; metrics the data can’t support aren’t shown.</p></div>';
+    '<p class="caption" style="margin:14px 0 40px">Definitions: P/GP points per game · S% shooting percentage · TK takeaways · GV giveaways · GWG game-winning goals · FO% faceoffs won out of faceoffs taken · QS quality starts (≥.885 SV% in a start) · TOI/GP time on ice per game · Pass% pass completion · SAT shot attempts · INT interceptions · PD penalties drawn · OFF/DEF/TP EA offense / defense / team-play ratings · Brk% breakaway save rate. A club’s S/GP and SA/GP are EA’s own club shot count per game with a box score, so they can run above what its players’ shots add up to, and a no-show forfeit counts in neither. Everything is auto-imported from EA box scores; metrics the data can’t support aren’t shown.</p></div>';
 };
 CG.AFTER.stats = function(param, qs){
   var tab = qs.tab||"skaters";

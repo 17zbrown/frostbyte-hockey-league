@@ -12,7 +12,7 @@ const BOOT = [
   "/rest/v1/teams?select=*", "/rest/v1/divisions?select=*&order=sort_order", "/rest/v1/seasons?select=*&order=number.desc",
   "/rest/v1/profiles?select=id,gamertag,display_name,avatar_url,role,created_at,twitch,live,overall,banned,ea_id,platform,jersey_number,in_guild,departments,timezone&order=id&limit=1000",
   "/rest/v1/roster_spots?select=*&order=id&limit=1000", "/rest/v1/contracts?select=*&order=id&limit=1000",
-  "/rest/v1/games?select=id,season_id,week,home_team_id,away_team_id,scheduled_at,home_score,away_score,went_ot,status,twitch_url,created_at,ea_match_id,home_ppg,home_ppo,away_ppg,away_ppo,stage,forfeit_team_id,voided&order=scheduled_at&limit=1000", "/rest/v1/transactions?select=*&order=occurred_at.desc&limit=1000",
+  "/rest/v1/games?select=id,season_id,week,home_team_id,away_team_id,scheduled_at,home_score,away_score,went_ot,status,twitch_url,created_at,ea_match_id,home_ppg,home_ppo,away_ppg,away_ppo,home_shots,away_shots,stage,forfeit_team_id,voided&order=scheduled_at&limit=1000", "/rest/v1/transactions?select=*&order=occurred_at.desc&limit=1000",
   "/rest/v1/news?select=*&order=published_at.desc&limit=1000",
   "/rest/v1/draft_picks?select=id,season_number,round,original_team_id,current_team_id,player_id,used,overall_pick,skipped&order=season_number,round&limit=1000",
   "/rest/v1/leagues?select=*&order=sort_order", `/rest/v1/game_stats?select=*&season_id=eq.${S1}&order=id&limit=1000`,
@@ -56,7 +56,7 @@ if (scenario === "herd" || scenario === "all") {
      1–9 s wait. Three finals ~20 s apart on a slot end. */
   const tabs = +(process.env.TABS || 150), GAME = "2d09cb6e-7bd3-47a3-bc1b-7c09935209b9";
   const DELTA = [
-    "/rest/v1/games?select=id,season_id,week,home_team_id,away_team_id,scheduled_at,home_score,away_score,went_ot,status,twitch_url,created_at,ea_match_id,home_ppg,home_ppo,away_ppg,away_ppo,stage,forfeit_team_id,voided&order=scheduled_at&limit=1000",
+    "/rest/v1/games?select=id,season_id,week,home_team_id,away_team_id,scheduled_at,home_score,away_score,went_ot,status,twitch_url,created_at,ea_match_id,home_ppg,home_ppo,away_ppg,away_ppo,home_shots,away_shots,stage,forfeit_team_id,voided&order=scheduled_at&limit=1000",
     `/rest/v1/game_stats?select=*&game_id=in.(${GAME})`,
     "/rest/v1/games_public?select=id,game_code,server&scheduled_at=gte.2026-09-17T00:00:00Z&scheduled_at=lte.2026-09-19T00:00:00Z",
   ];

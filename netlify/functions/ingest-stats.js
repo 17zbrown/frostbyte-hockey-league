@@ -140,7 +140,11 @@ function normalizeMatch(raw) {
     return { ea_club_id: String(cid), name: c.details ? c.details.name : null,
              score: scored, ea_score: eaScore, score_disputed: scored !== eaScore, dnf, gfraw,
              goalie_dnf: +(c.winnerByGoalieDnf || 0) === 1,
-             ppg: +(c.ppg || 0), ppo: +(c.ppo || 0), result: +(c.result || 0), players };
+             ppg: +(c.ppg || 0), ppo: +(c.ppo || 0), result: +(c.result || 0),
+             /* v4.45: EA's own club shot count (commissioner, 2026-11-04, on the team shot numbers: "fix them"). The skaters'
+                lines add up to about 11% less; this one agrees with what the other goaltender faced. Null if EA ever sends
+                none, and the site then adds up the lines. */
+             shots: c.shots != null && c.shots !== "" ? +c.shots : null, players };
   };
   const clubs = [club(clubIds[0]), club(clubIds[1])];
   /* v3.83 (commissioner, 2026-10-02: DET v NYI Oct 1 was filed 6-1; EA's official result, and the Islanders'
@@ -454,6 +458,7 @@ function mergeSegments(segments) {
       unattributed: parts.reduce((a, x) => a + (x.unattributed || 0), 0),
       ppg: parts.reduce((a, x) => a + (x.ppg || 0), 0),
       ppo: parts.reduce((a, x) => a + (x.ppo || 0), 0),
+      shots: parts.some((x) => x.shots == null) ? null : parts.reduce((a, x) => a + x.shots, 0),   // v4.45: every sitting added together
       result: parts[parts.length - 1].result,
       players: merged
     };
@@ -983,7 +988,7 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
   if (!complete) {
     await sbSend("PATCH", `games?id=eq.${game.id}`,
       { ea_match_id: norm.ea_match_id,
-        home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo },
+        home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo, home_shots: homeClub.shots, away_shots: awayClub.shots },
       "return=minimal");
     ctx.filed.set(String(norm.ea_match_id), game.id);
     const fsh = finalStretchHold(game, st1);   // v3.88: a stop inside the final five minutes (Rule 4.3.6)
@@ -1005,7 +1010,7 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
   await sbSend("PATCH", `games?id=eq.${game.id}`,
     { status: "final", home_score: homeScore, away_score: awayScore, ea_match_id: norm.ea_match_id,
       went_ot: !!st1.wentOt,
-      home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo },
+      home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo, home_shots: homeClub.shots, away_shots: awayClub.shots },
     "return=minimal");
   ctx.filed.set(String(norm.ea_match_id), game.id);
 
@@ -1222,7 +1227,7 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
       else summary.errors.push({ ea_match_id: p2.ea_match_id, error: `restart: sitting ${p2.ea_match_id} could not be marked struck; the next poll may try to file it again` });
     }
     const stR = sittingsState([norm]);
-    const ppgR = { home_ppg: hC.ppg, home_ppo: hC.ppo, away_ppg: aC.ppg, away_ppo: aC.ppo };
+    const ppgR = { home_ppg: hC.ppg, home_ppo: hC.ppo, away_ppg: aC.ppg, away_ppo: aC.ppo, home_shots: hC.shots, away_shots: aC.shots };
     (summary.warnings = summary.warnings || []).push({ game_id: cand.id,
       warning: `restarted from the beginning: ${priors.length} sitting${priors.length === 1 ? "" : "s"} of ${struckMins} minute${struckMins === 1 ? "" : "s"} struck with their statistics (Rule 4.3)` });
     if (stR.finished) {
@@ -1305,7 +1310,7 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
        archive, not these rows), the game keeps no result, and this sitting is archived as merged so
        the next continuation counts it. */
     await sbSend("PATCH", `games?id=eq.${cand.id}`,
-      { home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo },
+      { home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo, home_shots: homeClub.shots, away_shots: awayClub.shots },
       "return=minimal");
     const fshM = officeHold ? null : finalStretchHold(cand, st);
     const why = officeHold
@@ -1337,7 +1342,7 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
      the clock's (sittingsState.wentOt). */
   await sbSend("PATCH", `games?id=eq.${cand.id}`,
     { status: "final", home_score: homeClub.score, away_score: awayClub.score, went_ot: !!st.wentOt,
-      home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo },
+      home_ppg: homeClub.ppg, home_ppo: homeClub.ppo, away_ppg: awayClub.ppg, away_ppo: awayClub.ppo, home_shots: homeClub.shots, away_shots: awayClub.shots },
     "return=minimal");
   /* the first sitting was archived 'incomplete' while the game was held; it owns a finished game now */
   await touchAttempt(cand.ea_match_id, "ingested", `first sitting of a game completed by a Rule 4.3 merge (${priors.length + 1} sittings, ${totalLen}s of game clock)`, cand.id);
@@ -2321,10 +2326,10 @@ export const handler = async (event) => {
     await sbSend("PATCH", `games?id=eq.${game.id}`, st.finished
       ? { status: "final", home_score: homeClub.score, away_score: awayClub.score,
           ea_match_id: merged.ea_match_id, went_ot: !!st.wentOt,
-          home_ppg: homeClub.ppg || 0, home_ppo: homeClub.ppo || 0, away_ppg: awayClub.ppg || 0, away_ppo: awayClub.ppo || 0 }
+          home_ppg: homeClub.ppg || 0, home_ppo: homeClub.ppo || 0, away_ppg: awayClub.ppg || 0, away_ppo: awayClub.ppo || 0, home_shots: homeClub.shots, away_shots: awayClub.shots }
       : { status: "scheduled", home_score: null, away_score: null, went_ot: false,
           ea_match_id: merged.ea_match_id,
-          home_ppg: homeClub.ppg || 0, home_ppo: homeClub.ppo || 0, away_ppg: awayClub.ppg || 0, away_ppo: awayClub.ppo || 0 },
+          home_ppg: homeClub.ppg || 0, home_ppo: homeClub.ppo || 0, away_ppg: awayClub.ppg || 0, away_ppo: awayClub.ppo || 0, home_shots: homeClub.shots, away_shots: awayClub.shots },
       "return=minimal");
     if (st.finished) await noteGameLength(game, st, { warnings: [] });
     if (st.finished) await noteUnattributed(game, homeClub, awayClub, { warnings: [] });
