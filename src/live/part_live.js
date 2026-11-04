@@ -8970,7 +8970,7 @@ CG.AFTER._admEAStats = function(){
   document.querySelectorAll("[data-reopen-final]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-reopen-final"), label=this.getAttribute("data-label");
     CG.confirm("Re-open "+label+"?",
-      "The final score and every box-score stat for this game are cleared and it returns to the schedule. Use this when the EA match that claimed the slot was actually a different game (a scrim between the same clubs). The archived payload stays replayable below.",
+      "The final score and every box-score stat for this game are cleared and it returns to the schedule. Use this when the EA match that claimed the slot was actually a different game (a scrim between the same clubs). The archived payload stays replayable below. A sitting struck when the game restarted stays struck.",
       "Re-open the game", function(){
       CG.sb.rpc("reopen_game_final",{ p_game:id }).then(function(r){
         if(r.error){ CG.toast("Couldn’t re-open: "+r.error.message,"err"); return; }
