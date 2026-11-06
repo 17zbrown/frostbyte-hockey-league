@@ -1103,7 +1103,7 @@ CG.buildLiveLeague = async function(opts){
         /* v3.74: the headline row is written in the same transaction as profiles.overall, and a games
            delta re-reads it, so it is the fresher of the two after a final */
         overall: (posOvr && posOvr[p.id] && posOvr[p.id].head && posOvr[p.id][posOvr[p.id].head])
-          ? posOvr[p.id][posOvr[p.id].head].ovr : (p.overall || 70),
+          ? posOvr[p.id][posOvr[p.id].head].ovr : (p.overall || CG.OVR_CENTER),
         eaId: p.ea_id || "", avatar: p.avatar_url || null,
         banned: !!p.banned,
         salary: (c && c.salary!=null) ? c.salary : (rs.salary||0),
@@ -1483,7 +1483,7 @@ CG.buildLiveLeague = async function(opts){
   lg.teamRatings = lg.teamRatings || {};
   CG.TEAMS.forEach(function(t){
     var r = byTeam[t.code];
-    var ovr = r.length ? Math.round(r.reduce(function(s,p){ return s+p.overall; },0)/r.length) : 70;
+    var ovr = r.length ? Math.round(r.reduce(function(s,p){ return s+p.overall; },0)/r.length) : CG.OVR_CENTER;
     lg.teamRatings[t.code] = lg.teamRatings[t.code] || {};
     lg.teamRatings[t.code].ovr = ovr;
   });
@@ -5977,7 +5977,7 @@ CG.applyPickToRoster = function(row){
   (lg._draftPicksRaw||[]).forEach(function(k){ if (k.season_number === sn && (k.round||1) > rounds) rounds = k.round; });
   var entry = { id: row.player_id, tag: (lg._profName||{})[row.player_id] || prof.gamertag || "Player", team: code,
     pos: reg.position || "C", depth: 99, jersey: prof.jersey_number || 0, platform: prof.platform || "", arch: "", shoots: "", joined: "",
-    twitch: prof.twitch || "", twitchLive: false, overall: prof.overall || 70, eaId: prof.ea_id || "", avatar: prof.avatar_url || "",
+    twitch: prof.twitch || "", twitchLive: false, overall: prof.overall || CG.OVR_CENTER, eaId: prof.ea_id || "", avatar: prof.avatar_url || "",
     banned: false, salary: CG.draftRoundSalary ? CG.draftRoundSalary(row.round||1, rounds) : 750000, term: 1, mgmt: null, mgmtSalary: 0,
     onBlock: false, status: "active", origin: "draft", spotId: null, squad: "pro", squadMoves: 0, rookie: true, _provisional: true };
   lg.players = lg.players || []; lg.players.push(entry);
@@ -14004,7 +14004,7 @@ CG.declareForfeitPrompt = function(id){
 CG.admRatingsLive = function(){
   var lg = CG.lg;
   var list = lg.players.slice().sort(function(a,b){ return (lg.ratings[b.id].ovr||0)-(lg.ratings[a.id].ovr||0); });
-  return '<div style="margin-bottom:16px"><h2 class="h-sec">Overall ratings</h2><p class="lede" style="margin-top:6px">Overalls are <b>fully automated</b>: recomputed from CGHL box scores after every final, each player measured against the league at every position he plays, held toward 70 until his sixth game at a position; the overall shown is the one at the position he signed up at. Scouting values are set per player in <a href="#/admin/preseason" style="font-weight:700;border-bottom:2px solid var(--chrome)">'+(CG.isBasic()?"Draft &amp; placement":"Pre-season Central")+'</a>.</p></div>'+
+  return '<div style="margin-bottom:16px"><h2 class="h-sec">Overall ratings</h2><p class="lede" style="margin-top:6px">Overalls are <b>fully automated</b>: recomputed from CGHL box scores after every final, each player measured against the league at every position they play, held toward '+CG.OVR_CENTER+' until their sixth game at a position; the overall shown is the one at the position they signed up at. Scouting values are set per player in <a href="#/admin/preseason" style="font-weight:700;border-bottom:2px solid var(--chrome)">'+(CG.isBasic()?"Draft &amp; placement":"Pre-season Central")+'</a>.</p></div>'+
     '<div class="card"><div class="card-h"><h3>Current overalls</h3><span class="chip">'+list.length+' rostered</span></div>'+
     '<div class="tblwrap"><table class="tbl keepcols"><caption>Rostered players by overall</caption><thead><tr><th class="tleft">Player</th><th>POS</th><th class="tleft">Club</th><th>GP</th><th>OVR</th></tr></thead><tbody>'+
     list.map(function(p){ var s=lg.pstats[p.id];
@@ -14013,7 +14013,7 @@ CG.admRatingsLive = function(){
         '<td class="tnum">'+p.pos+'</td><td class="tleft">'+esc(CG.TEAM[p.team].code)+'</td><td>'+(s?s.gp:0)+'</td>'+
         '<td><span class="ovrbox '+CG.ovrClass(lg.ratings[p.id].ovr)+'" style="min-width:34px;height:24px;font-size:13px">'+lg.ratings[p.id].ovr+'</span></td></tr>';
     }).join("")+'</tbody></table></div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">A rating is held toward 70 until a player’s sixth game at a position (player_rating returns a provisional flag until then). The engine lives in the database (the cghl_* functions, v3.49): every stat is scored against the league’s own distribution at the player’s position, weighted into Shooting, Passing, Hand-eye, Physicality and Defense (Reflexes, Consistency and Clutchness for goaltenders), and the composite is placed on a 50 to 99 curve where the league median is 70 and 90 sits two standard deviations clear. It reruns for everyone after every final. Nobody hand-edits a rating, the commissioner included (Rule 6.1, v3.67).</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">A rating is held toward '+CG.OVR_CENTER+' until a player’s sixth game at a position (player_rating returns a provisional flag until then). The engine lives in the database (the cghl_* functions, v3.49): every stat is scored against the league’s own distribution at the player’s position, weighted into Shooting, Passing, Hand-eye, Physicality and Defense (Reflexes, Consistency and Clutchness for goaltenders), and the composite is placed on a '+CG.OVR_FLOOR+' to 99 curve where the league median is '+CG.OVR_CENTER+' and 95 sits two standard deviations clear. Offense (Shooting, Passing, Hand-eye) to defense (Defense, Physicality) is 75:25 at wing, 60:40 at center and 30:70 on defense (v4.48). It reruns for everyone after every final. Nobody hand-edits a rating, the commissioner included (Rule 6.1, v3.67).</span></div></div>';
 };
 
 /* ================================================================
@@ -15904,13 +15904,15 @@ CG.tradeStats = function(pid){
     w:s.w||0, l:s.l||0, otl:s.otl||0, svp:svp, gaa:gaa, so:s.so||0, line:line };
 };
 /* One number per player, in the open, so a lopsided offer shows before it is accepted. Scouted
-   overall carries most of it (10 per overall above 60); this season's production adds to it once
+   overall carries most of it (10 per overall above 60 on the old scale, about 21 per point on the v4.48 scale); this season's production adds to it once
    he has games (weighted in over his first five); the cap hit costs 8 per $1M. A reading for the
    two front offices and the transactions department, not a rule. */
 CG.tradeValue = function(pid){
   var p = CG.tPlayer(pid); if (!p) return { value:0, ovr:0, prod:0, cap:0, missing:true };
   var st = CG.tradeStats(pid);
-  var ovr = Math.max(0, (p.overall||70) - 60) * 10, prod = 0;
+  /* v4.48: the overall moved to a median of 85 (new = 99 - (99 - old) * 14 / 29). Read back onto the old scale here, or a
+     typical player would jump from 100 to 250 and overall would drown out production and the cap hit in every reading. */
+  var ovr = Math.round(Math.max(0, 39 - (99 - (p.overall||CG.OVR_CENTER)) * 29 / 14) * 10), prod = 0;
   if (st.gp >= 1){
     /* v4.08: production from each role he played, weighted by its games. v4.11: over the role games (sgp + gs), which
        count a game played in both roles twice where gp counts it once, so the weights still sum to one. */
@@ -15928,7 +15930,7 @@ CG.tradeSide = function(pids){
     var pl = CG.tPlayer(pid), v = CG.tradeValue(pid), st = pl ? CG.tradeStats(pid) : null;
     out.n++; out.value += v.value;
     if (!pl){ out.missing++; return; }
-    out.ovrSum += pl.overall||70; out.salary += pl.salary||0; if (CG.isCamp(pl)) out.camp++;
+    out.ovrSum += pl.overall||CG.OVR_CENTER; out.salary += pl.salary||0; if (CG.isCamp(pl)) out.camp++;
     out.gp += st.gp; if (st.goalie) out.goalies++;
     out.g += st.g; out.a += st.a; out.p += st.p;   /* v4.08: a goalie's skating points are points too */
   });
@@ -15957,7 +15959,7 @@ CG.tradePlayerRow = function(pid, opts){
 
       (sx?'<span class="chip chip-chrome chip-xs">signed S'+esc(String(sx.start_season))+'–S'+esc(String(sx.end_season))+'</span>':'')+'</span>'+
     '<span class="tr-stats mono">'+(st ? esc(st.line) : '—')+'</span>'+
-    '<span class="tr-ovr"><b class="num">'+(p ? (p.overall||70) : '—')+'</b><small>OVR</small></span>'+
+    '<span class="tr-ovr"><b class="num">'+(p ? (p.overall||CG.OVR_CENTER) : '—')+'</b><small>OVR</small></span>'+
     (opts.value !== false && v ? '<span class="tr-val" title="Overall '+v.ovr+' · production '+v.prod+' · cap '+v.cap+'"><b class="num">'+v.value+'</b><small>value</small></span>' : '')+
     (opts.rm ? '<button type="button" class="chip" data-trade-rm="'+opts.rm+'" style="cursor:pointer" aria-label="Remove '+esc(name)+'">✕</button>' : '')+
   '</div>';
@@ -15986,7 +15988,7 @@ CG.tradeBalanceCard = function(aCode, aPids, bCode, bPids, opts){
     '<div class="card-b"><div class="tb-meter" role="img" aria-label="'+esc(aName)+' sends '+A.value+' of value, '+esc(bName)+' sends '+B.value+'"><i style="width:'+aPct+'%"></i></div>'+
     '<div class="tb-legend"><span>'+CG.crest(aCode,16)+' '+esc(aName)+' sends <b class="num">'+A.value+'</b></span><span>'+CG.crest(bCode,16)+' '+esc(bName)+' sends <b class="num">'+B.value+'</b></span></div>'+
     '<div class="grid g2" style="gap:16px;margin-top:14px">'+col(aCode, A, aName+" sends")+col(bCode, B, bName+" sends")+'</div>'+
-    '<p class="caption" style="margin-top:12px">Value per player: 10 for every scouted overall above 60, plus this season\'s production once he has games (a skater\'s points per game × 40, a goaltender\'s save percentage above .880 plus 3 a win, weighted in over his first five games), minus 8 per $1M of cap hit. A reading, not a rule: the transactions department may still reverse a trade it judges not to be a hockey deal (Rule 2.3).</p>'+
+    '<p class="caption" style="margin-top:12px">Value per player: about 21 for every overall point above 80, plus this season\'s production once they have games (a skater\'s points per game × 40, a goaltender\'s save percentage above .880 plus 3 a win, weighted in over their first five games), minus 8 per $1M of cap hit. A reading, not a rule: the transactions department may still reverse a trade it judges not to be a hockey deal (Rule 2.3).</p>'+
     '</div></div>';
 };
 CG.tradeDetailModal = function(t, opts){
@@ -16020,7 +16022,7 @@ CG.tradePicker = function(side){
   var players=CG.tRoster(code).filter(function(p){ return alreadyP.indexOf(p.id)<0; })
     .sort(function(a,b){ return (CG.isCamp(a)?1:0)-(CG.isCamp(b)?1:0) || (b.overall||0)-(a.overall||0); });
   var picks=CG.tPicks(code).filter(function(k){ return alreadyK.indexOf(k.id)<0; });
-  var pHtml=players.map(function(p){ var sx=CG.signedExtensionOf?CG.signedExtensionOf(p.id):null; return '<button class="gamecard" data-tpick-p="'+p.id+'" style="grid-template-columns:auto 1fr auto;text-align:left;cursor:pointer;width:100%"><span class="nf-ic">'+CG.crest(p.team,20)+'</span><span style="min-width:0"><b>'+esc(p.tag)+'</b>'+(CG.isCamp(p)?' '+CG.campChip("xs"):'')+CG.tradeSuspChip(p.id)+'<span class="caption" style="display:block">'+p.pos+' · OVR '+(p.overall||70)+' · '+esc(CG.tradeStats(p.id).line)+(sx?' · signed S'+esc(String(sx.start_season))+'–S'+esc(String(sx.end_season))+' at '+CG.fmtMoney(sx.salary):'')+'</span></span><span><b>'+CG.fmtMoney(p.salary)+'</b></span></button>'; }).join("");
+  var pHtml=players.map(function(p){ var sx=CG.signedExtensionOf?CG.signedExtensionOf(p.id):null; return '<button class="gamecard" data-tpick-p="'+p.id+'" style="grid-template-columns:auto 1fr auto;text-align:left;cursor:pointer;width:100%"><span class="nf-ic">'+CG.crest(p.team,20)+'</span><span style="min-width:0"><b>'+esc(p.tag)+'</b>'+(CG.isCamp(p)?' '+CG.campChip("xs"):'')+CG.tradeSuspChip(p.id)+'<span class="caption" style="display:block">'+p.pos+' · OVR '+(p.overall||CG.OVR_CENTER)+' · '+esc(CG.tradeStats(p.id).line)+(sx?' · signed S'+esc(String(sx.start_season))+'–S'+esc(String(sx.end_season))+' at '+CG.fmtMoney(sx.salary):'')+'</span></span><span><b>'+CG.fmtMoney(p.salary)+'</b></span></button>'; }).join("");
   var kHtml=picks.map(function(k){ return '<button class="gamecard" data-tpick-k="'+k.id+'" style="grid-template-columns:auto 1fr;text-align:left;cursor:pointer;width:100%"><span class="nf-ic">'+CG.ic("db",16)+'</span><span><b>'+esc(CG.pickLabel(k))+' pick</b><span class="caption" style="display:block">round '+k.round+'</span></span></button>'; }).join("");
   CG.modal("Add from "+esc(CG.TEAM[code].name),'<div class="stack" style="gap:6px;max-height:360px;overflow:auto"><span class="caption">Players'+(CG.minServiceGp()?' · a player needs '+CG.minServiceGp()+' regular-season games this season before he can be traded (Rule 2.4)':'')+'</span>'+(pHtml||'<span class="caption">none available</span>')+
     (CG.fmt("pick_trades") ? '<span class="caption" style="margin-top:8px">Draft picks</span>'+(kHtml||'<span class="caption">no tradeable picks</span>') : '<span class="caption" style="margin-top:8px">Players only — draft picks are not traded in the basic format (Rule 2.3).</span>')+'</div>','<button class="btn btn-ghost" data-close>Done</button>');

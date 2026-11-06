@@ -447,7 +447,8 @@ CG.ic = function(name, size){
 };
 
 /* ---------- shared render bits ---------- */
-CG.ovrClass = function(v){ return v>=88?"":"mid"; };
+/* v4.48: 88 on the old scale is 94 on the new one (new = 99 - (99 - old) * 14 / 29), so the same players keep the top badge. */
+CG.ovrClass = function(v){ return v>=94?"":"mid"; };
 /* Last-five form. Shape carries the result — filled / half / hollow — because the old green-vs-red
    dots sit at ~1.26:1 for a deuteranope, which is colour-alone encoding (SC 1.4.1). A letter inside
    an 8px dot would just trade that for a 1.4.3 failure, so the dots stay wordless and the strip is

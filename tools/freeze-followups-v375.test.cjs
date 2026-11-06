@@ -23,7 +23,7 @@ A("placement copy names the full-group case, everywhere it is shown",
   (hub.match(/unless his position group or the active roster is full, when he joins training camp instead/g) || []).length >= 2);
 A("the camp toast is skipped when the reload failed", /\.then\(function\(ok\)\{\s+if \(ok === false\) return;/.test(live) && /return true;\s+\} catch\(e\)\{ CG\.toast\("Reload failed\. Refresh the page\.","err"\); return false; \}/.test(live));
 A("the Control Center format note gives the camp limit", !/with unlimited camp, everyone/.test(live) && /" with a training camp of up to "\+r\.camp_max/.test(live));
-A("the hover note reads naturally", /" games played" \+ at \+ "\. A rating is held toward 70/.test(pub));
+A("the hover note reads naturally", /" games played" \+ at \+ "\. A rating is held toward " \+ CG\.OVR_CENTER/.test(pub));
 
 global.window = {}; global.CG = {}; eval(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook, secs = {};

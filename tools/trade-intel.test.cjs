@@ -27,14 +27,15 @@ console.log("— the value model, run for real");
   vm.createContext(ctx); vm.runInContext(live.slice(start, end), ctx);
   const CG = ctx.CG;
   CG.lg.players = [
-    { id: "a", tag: "Sniper", team: "BOS", pos: "C", overall: 85, salary: 3500000, squad: "pro" },
-    { id: "b", tag: "Wall", team: "DET", pos: "G", overall: 78, salary: 750000, squad: "tc" },
-    { id: "c", tag: "Fresh", team: "DET", pos: "LW", overall: 70, salary: 750000, squad: "pro" },
+    /* v4.48: the overall scale moved (new = 99 - (99 - old) * 14 / 29); these are the old 85 (rounded), 78 and 70 */
+    { id: "a", tag: "Sniper", team: "BOS", pos: "C", overall: 92, salary: 3500000, squad: "pro" },
+    { id: "b", tag: "Wall", team: "DET", pos: "G", overall: 89, salary: 750000, squad: "tc" },
+    { id: "c", tag: "Fresh", team: "DET", pos: "LW", overall: 85, salary: 750000, squad: "pro" },
   ];
   /* v4.08: season lines carry games per role (sgp skating, gs in goal) */
   CG.lg.pstats = { a: { gp: 10, sgp: 10, gs: 0, g: 8, a: 12, p: 20 }, b: { gp: 6, sgp: 0, gs: 6, w: 4, l: 2, otl: 0, sa: 200, sv: 184, ga: 16 }, c: { gp: 0, sgp: 0, gs: 0 } };
   const va = CG.tradeValue("a"), vb = CG.tradeValue("b"), vc = CG.tradeValue("c"), vg = CG.tradeValue("ghost");
-  A("overall carries 10 per point above 60", va.ovr === 250 && vc.ovr === 100);
+  A("overall reads back onto the old scale, 10 per old point above 60", va.ovr === 245 && vc.ovr === 100);
   A("a skater's production is points per game × 40, weighted in over five games", va.prod === 80);
   A("a goaltender's production reads save percentage above .880 plus wins", vb.prod === Math.round(((184/200 - 0.880) * 2000 + 12) * 1));
   A("the cap hit costs 8 per $1M", va.cap === -28 && vc.cap === -6);
@@ -47,7 +48,7 @@ console.log("— the value model, run for real");
   A("...and an empty side is called out", /One side is empty/.test(CG.tradeBalanceCard("BOS", ["a"], "DET", [])));
   A("the formula is printed on the card, as a reading and not a rule", /A reading, not a rule/.test(card) && /Rule 2\.3/.test(card));
   const row = CG.tradePlayerRow("b", { rm: "reqp:b" });
-  A("a player row carries the season line, the OVR, the value, the camp chip and a remove control", /4-2-0 · \.920 SV%/.test(row) && />78</.test(row) && /Camp</.test(row) && /data-trade-rm="reqp:b"/.test(row) && /href="#\/player\/b"/.test(row));
+  A("a player row carries the season line, the OVR, the value, the camp chip and a remove control", /4-2-0 · \.920 SV%/.test(row) && />89</.test(row) && /Camp</.test(row) && /data-trade-rm="reqp:b"/.test(row) && /href="#\/player\/b"/.test(row));
   A("a player no longer on a roster still renders by name", /Ghosted/.test(CG.tradePlayerRow("ghost")) && /not on a roster/.test(CG.tradePlayerRow("ghost")));
   /* v3.40: a trade no longer waits on three games, so no row carries a games-short count. The WAIVE
      minimum is untouched and still greys out the Waive button on the roster page. */

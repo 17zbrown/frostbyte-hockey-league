@@ -79,7 +79,7 @@ console.log("\n— no rulebook change, and it was checked");
   A("the client carries no twin", /The client carries no twin of the formula either/.test(flat));
   /* superseded by v3.49 (five games) and again by v3.74 (six games at a position) */
   A("...and the client copy of the day is true (v3.74: six games at a position)",
-    /A rating is held toward 70 until a player’s sixth game at a position/.test(R("src/live/part_live.js")));
+    /A rating is held toward '\+CG\.OVR_CENTER\+' until a player’s sixth game at a position/.test(R("src/live/part_live.js")));
   A("the changelog records it", rb.changelog.some((e) => e.version === "3.47"));
   A("no em dash or spaced hyphen", !/—/.test(rec) && !/ - /.test(rec));
 }

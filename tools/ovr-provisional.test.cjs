@@ -20,7 +20,8 @@ console.log("— the progress helper, driven");
   ctx.window = ctx; ctx.globalThis = ctx; ctx.CG = {};
   ctx.esc = (v) => String(v == null ? "" : v);
   vm.createContext(ctx);
-  vm.runInContext(pub.match(/CG\.OVR_SETTLE_GP = \d+;/)[0], ctx);
+  vm.runInContext(pub.match(/CG\.OVR_CENTER = \d+;/)[0], ctx); vm.runInContext(pub.match(/CG\.OVR_FLOOR = \d+;/)[0], ctx);
+    vm.runInContext(pub.match(/CG\.OVR_SETTLE_GP = \d+;/)[0], ctx);
   for (const fn of ["ovrProgress", "ovrNote"]) {
     const m = pub.match(new RegExp("CG\\." + fn + " = function[\\s\\S]*?\\n *\\};"));
     if (!m) { A("located CG." + fn, false); process.exit(1); }
@@ -48,7 +49,7 @@ console.log("— the progress helper, driven");
   A("the note counts up, not down: '2 of 6 games'", /2 of 6 games/.test(ctx.CG.ovrNote("p")));
   A("...and says the word provisional", /Provisional/.test(ctx.CG.ovrNote("p")));
   A("...the chip form is compact", /chip-warn/.test(ctx.CG.ovrNote("p", "chip")));
-  A("...the title form explains WHY it is near 70", /held toward 70 until the sixth game at a position/.test(ctx.CG.ovrNote("p", "title")));
+  A("...the title form explains WHY it is near the center (85 since v4.48)", /held toward 85 until the sixth game at a position/.test(ctx.CG.ovrNote("p", "title")));
   vm.runInContext(pub.match(/CG\.POS_VIEW_NAME = [^\n]+/)[0], ctx);
   ctx.CG.lg = { posOvr: { p: { head: "W", W: { ovr: 72, gp: 2 } } } };
   A("...and names the position when it knows it", /2 of 6 games at wing/.test(ctx.CG.ovrNote("p")));
@@ -71,7 +72,7 @@ console.log("\n— the copy no longer claims it is a scouting number");
 {
   A("the false 'scouting number from registration' line is gone", !/staff scouting number from registration/.test(pub));
   A("...and the other one too", !/The overall itself is the staff scouting number/.test(pub));
-  A("the directory explains the real rule", /measures a player against the league at the position he signed up at, from CGHL box scores alone, and stays pulled toward 70 until his sixth game there/.test(pub));
+  A("the directory explains the real rule", /measures a player against the league at the position they signed up at, from CGHL box scores alone, and stays pulled toward " \+ CG\.OVR_CENTER \+ " until their sixth game there/.test(pub));
   A("...and nothing still says three games", !/settle[s]? onto (a player's|the) real rating (over|across) (his first )?three games/.test(pub) && !/first three games/.test(live));
   A("the profile says it is recomputed after every final", /recomputed after every final/.test(pub));
   /* v3.67 (Q59): "commissioners should not be able to edit player or team overalls", so the note now says

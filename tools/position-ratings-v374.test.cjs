@@ -29,7 +29,7 @@ A("the rehearsal is recorded, both catches included", /guard_profile_role's\s+ol
 /* ---- client ---- */
 A("the boot loads the per-position ratings into its named slot", /CG\.BOOT_PPO = 17; CG\.BOOT_CAREER = 18; CG\.BOOT_CODES = 19;/.test(live) && /var posOvr = CG\._posOvrMap\(q\[CG\.BOOT_PPO\]\);/.test(live));
 A("...a games delta re-reads them", /var ppo = await CG\._posOvrLoad\(\);\s+if \(!ppo\.error\) q\[CG\.BOOT_PPO\] = ppo;/.test(live));
-A("...and a player's overall is the headline row when it is there", /\? posOvr\[p\.id\]\[posOvr\[p\.id\]\.head\]\.ovr : \(p\.overall \|\| 70\)/.test(live));
+A("...and a player's overall is the headline row when it is there", /\? posOvr\[p\.id\]\[posOvr\[p\.id\]\.head\]\.ovr : \(p\.overall \|\| CG\.OVR_CENTER\)/.test(live));
 A("the picker offers the signed-up position even before he plays it", /\|\| g\[0\] === posHead;/.test(pub) && /' · signed up'/.test(pub) && /data-head="'\+esc\(posHead\)\+'"/.test(pub));
 A("choosing a position swaps the hero overall and the breakdown in place", /ho\.innerHTML = CG\.heroOvrInner\(id, grp, /.test(pub) && /CG\.paintRatingBreak\(id, grp\);/.test(pub));
 A("...and a late answer never paints over the position chosen", /if \(cur !== \(grp \|\| ""\)\) return;/.test(pub) && /if \(pk && pk\.value !== "all" && pk\.value !== \(pk\.getAttribute\("data-head"\) \|\| ""\)\) return;/.test(pub));

@@ -9,6 +9,6 @@ const A = (name, cond, got) => { n++; if (cond) console.log("ok   " + name); els
 const rules = head.match(/[^{}\n]*\.rb-fill\{[^}]*height:100%[^}]*\}/g) || [];
 A("found the fill rules that size a bar", rules.length >= 2, rules.length);
 A("every one makes the fill a block", rules.every((r) => /display:block/.test(r)), rules.filter((r) => !/display:block/.test(r)).join(" | "));
-A("the breakdown bar still carries its width, 50 empty to 99 full", /var w = Math\.max\(0, Math\.min\(100, Math\.round\(\(c\.score - 50\) \/ 49 \* 100\)\)\);/.test(pub) && /<span class="rb-fill" style="width:'\+w\+'%">/.test(pub));
+A("the breakdown bar still carries its width, the floor empty to 99 full (floor 75 since v4.48)", /var w = Math\.max\(0, Math\.min\(100, Math\.round\(\(c\.score - CG\.OVR_FLOOR\) \/ \(99 - CG\.OVR_FLOOR\) \* 100\)\)\);/.test(pub) && /<span class="rb-fill" style="width:'\+w\+'%">/.test(pub));
 console.log(fail ? "\n" + fail + " of " + n + " FAILED" : "\nall " + n + " passed");
 process.exit(fail ? 1 : 0);
