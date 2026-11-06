@@ -109,8 +109,8 @@ console.log("\n— the code agrees with the rulebook");
      everyone in basic), so the caption reads CG.seriesCap, which falls back to the playoff-stage
      weekly cap where a format sets no series cap of its own (full). */
   A("the playoff caps caption reads its numbers live from CG.seriesCap, not a hardcoded literal",
-    /a skater may be dressed in at most '\+CG\.seriesCap\(\{ pos:"C" \}\)\+' games of a series and a goaltender in at most '\+CG\.seriesCap\(\{ pos:"G" \}\)/.test(hub) &&
-    /every player may be dressed in at most '\+CG\.seriesCap\(\{ pos:"C" \}\)\+' games of a series/.test(hub) &&
+    /a skater may play in at most '\+CG\.seriesCap\(\{ pos:"C" \}\)\+' games of a series and a goaltender in at most '\+CG\.seriesCap\(\{ pos:"G" \}\)/.test(hub) &&
+    /every player may play in at most '\+CG\.seriesCap\(\{ pos:"C" \}\)\+' games of a series/.test(hub) &&
     !/goaltenders are exempt and can play all seven/.test(hub));
   A("...and CG.seriesCap gives 4 in basic (Rule 8.3, v2.51)",
     /series_cap:4,/.test(fmtBlockOf(live)) && /CG\.seriesCap = function/.test(live));

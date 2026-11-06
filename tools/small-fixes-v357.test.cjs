@@ -18,7 +18,7 @@ A("the rehearsal is recorded", /T6\s+with moves locked, a transactions staffer r
 console.log("\n— the site");
 A("Auto-space puts the draft at 9 PM in both formats", (live.match(/put\("ssDraft",\s+CG\.etISO\(draftDay,"21:00"\)\);/g) || []).length === 2 && !/put\("ssDraft",\s+CG\.etISO\(draftDay,"19:00"\)\)/.test(live));
 A("the match page says streaming is recommended", /"Recommended, not required"/.test(pub2) && !/require at least one stream/.test(pub2));
-A("...and states the basic series cap from the format", /no player may be dressed in more than '\+\(CG\.seriesCap \? CG\.seriesCap\(\{\}\) : 4\)\+' games of this series/.test(pub2));
+A("...and states the basic series cap from the format", /no player may play in more than '\+\(CG\.seriesCap \? CG\.seriesCap\(\{\}\) : 4\)\+' games of this series/.test(pub2));
 A("the availability reminder states the fixed hour", /Rule 5\.1: 7:30 PM Eastern on the week's first game day/.test(sched));
 console.log("\n— the book");
 global.window = {}; global.CG = {}; eval(R("src/live/part3_content.js"));

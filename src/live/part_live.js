@@ -271,8 +271,9 @@ CG.playoffRoad = function(lg, clubCode){
 };
 /* Rule 5.2 (v2.55): the games already counted against a player's week (or playoff series), the
    way the database counts them in player_week_games — a final game with a box score counts by the
-   box score (he played it or he did not), every other game by the lineup his club filed. Mirrors
-   the gate in set_game_lineup so the per-game page can say no at assignment time. */
+   box score (he played it or he did not). v4.47 (commissioner, 2026-11-06): "only base scheduling off box scores":
+   a filed lineup counts toward nothing, in the regular season or the playoffs (the verdict table above, since v3.93).
+   Mirrors the gate in set_game_lineup so the per-game page can say no at assignment time. */
 /* v3.25 — a forfeit nobody skated in does not count. Mirrors the same clause in the database's
    player_week_games; if the two ever disagree the page says a player has room and the gate refuses
    him, or worse the other way round. Ice time is the test on both sides. */
@@ -344,16 +345,17 @@ CG.weekLedger = function(pid, game, club, opts){
 };
 /* Rule 5.2 (v2.55): the games already counted against a player's week (or playoff series), the
    way the database counts them in player_week_games — a final game with a box score counts by the
-   box score (he played it or he did not), every other game by the lineup his club filed. Mirrors
-   the gate in set_game_lineup so the per-game page can say no at assignment time. */
+   box score (he played it or he did not). v4.47 (commissioner, 2026-11-06): "only base scheduling off box scores":
+   a filed lineup counts toward nothing, in the regular season or the playoffs (the verdict table above, since v3.93).
+   Mirrors the gate in set_game_lineup so the per-game page can say no at assignment time. */
 CG.weekGamesFor = function(pid, game, club, opts){
   return CG.weekLedger(pid, game, club, opts).filter(function(r){ return r.counts; }).length;
 };
 /* Rule 5.2 (v2.83): a player's WHOLE week, the game in hand included — what weekGamesFor counts,
    without excluding the game being edited. This is the number a manager needs to SEE before he
-   builds a line, not after the database refuses him: the cap counts games a club has already
-   filed, not only games that have been played, so a club can run a player out of week long before
-   a puck drops. Returns null when the club has no game that week to measure against. */
+   builds a line, not after the database refuses him. v4.47: the number is games played, by the box scores; a sheet
+   filed for a game still to come is shown beside it and counts toward nothing. Returns null when the club has no game
+   that week to measure against. */
 CG.weekUsedFor = function(pid, club, game){
   if (!game) return null;
   return CG.weekGamesFor(pid, game, club, { excludeGame: "__none__" });
@@ -2094,6 +2096,7 @@ CG.notifRoute = function(view, param){
     case "draft":        return "#/hub/draft";
     case "availability": return "#/hub/availability";   /* v2.75: the closed-week nudge lands on the form */
     case "lineups":      return "#/hub/lineups";   /* the week's sheets; a single game uses view "game" */
+    case "lineup":       return p ? "#/hub/lineup?game="+encodeURIComponent(p) : "#/hub/lineups";   /* v4.47: the sheet to fix, for its club (Rule 8.3) */
     case "manager":      return "#/hub";
     case "mgmtapprovals": return "#/hub/management";
     case "transactions": return "#/home";
@@ -14730,7 +14733,7 @@ CG.AFTER._admAudit = function(){
     var names={}; (CG.lg._profilesRaw||[]).forEach(function(p){ names[p.id]=p.gamertag||p.display_name||"—"; });
     body.innerHTML = rows.map(function(x){
       var label = { role_change:"Role change", reopen_final:"Final re-opened", season_rollover:"Season rollover",
-        playoff_violation_30pct:"Playoff eligibility flag", playoff_violation_series_cap:"Series-cap flag" }[x.action] || x.action;
+        playoff_violation_30pct:"Playoff eligibility flag", playoff_violation_series_cap:"Series-cap flag", series_limit_pull:"Taken off a lineup at the series limit" }[x.action] || x.action;
       var det = x.detail ? Object.keys(x.detail).map(function(k){ return k+": "+String(x.detail[k]); }).join(" · ") : "";
       return '<div class="notif" style="cursor:default"><span class="nf-ic">'+CG.ic("eye",15)+'</span>'+
         '<span style="min-width:0"><b>'+esc(label)+(x.actor&&names[x.actor]?' — '+esc(names[x.actor]):"")+'</b><p>'+esc(det||(x.target_type+" "+(x.target_id||"")))+'</p></span>'+

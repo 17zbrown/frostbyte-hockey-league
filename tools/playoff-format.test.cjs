@@ -62,8 +62,9 @@ console.log("\n— the series-cap flag uses the right cap per position, by forma
      format-aware — basic (the league standard, v2.51): skater 6 / goalie 6 (one six-game week for
      everyone); full (shelved): skater 3 / goalie 6, the value this test used to pin as the ONLY
      behavior. (In the playoffs basic's Rule 8.3 series cap of 4 governs via CG.seriesCap.) */
-  A("the flag reads CG.weeklyCap by position, not a hardcoded number",
-    /var cap = CG\.weeklyCap\(\{ pos: isGoalie \? "G" : "C", stage:"playoff" \}\);/.test(pub2));
+  /* v4.47: this pinned CG.weeklyCap, which in basic is 6, so the box score could not flag a fifth game of a series */
+  A("the flag reads CG.seriesCap by position, not a hardcoded number",
+    /var cap = CG\.seriesCap\(\{ pos: isGoalie \? "G" : "C" \}\);/.test(pub2));
   A("...flagging strictly ABOVE the cap", /return n>cap \?/.test(pub2));
   A("...called with isGoalie at both sites", /capFlag\(row\.pid, false\)/.test(pub2) && /capFlag\(gl\.pid, true\)/.test(pub2));
   A("the old flat 'more than four' flag is gone", !/n>4 \?/.test(pub2) && !/5TH GAME/.test(pub2));

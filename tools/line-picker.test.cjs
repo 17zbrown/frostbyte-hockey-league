@@ -86,9 +86,10 @@ A("...with a tie broken by the clock, so a plain week still dresses in order",
 A("netOf counts adds minus drops against what is FILED right now",
   /var adds = six\.filter\(function\(pid\)\{ return on\.indexOf\(pid\) < 0; \}\)\.length;/.test(src) &&
   /var drops = on\.filter\(function\(pid\)\{ return six\.indexOf\(pid\) < 0; \}\)\.length;/.test(src));
-A("the pre-flight applies a night's drops before its adds, so a swap is not predicted as a conflict",
-  /Object\.keys\(drops\)\.forEach\(function\(pid\)\{ used\[pid\] = Math\.max\(0, loadOfPid\(pid\) - drops\[pid\]\); \}\);/.test(src) &&
-  src.indexOf("Object.keys(drops).forEach") < src.indexOf("Object.keys(adds).forEach"));
+/* v4.47 (commissioner, 2026-11-06, "only count box scores as games played"): this pinned drops applied before adds. A filed
+   sheet is no longer in the pre-flight's count, so a swap has nothing to give back and cannot read as a conflict. */
+A("the pre-flight gives nothing back for a drop, because a filed sheet is not in its count, so a swap is not predicted as a conflict",
+  !/Object\.keys\(drops\)\.forEach/.test(src) && /Object\.keys\(adds\)\.forEach/.test(src));
 A("dressing still goes through set_game_lineup only", !/from\("game_lineups"\)/.test(src));
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

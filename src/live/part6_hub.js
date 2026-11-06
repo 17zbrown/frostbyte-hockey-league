@@ -1075,11 +1075,11 @@ CG.AFTER._lineup = function(){
     if (poOut) return poOut.why;
     /* v2.76: a player marked out is dressable; avWarn() names him when he is placed */
     if (Object.values(state.slots).indexOf(p.id)>=0) return p.tag+" is already in the lineup.";
-    /* Rule 5.2 (v2.55): stop the assignment at the cap, the way the database will — the count is
-       played games by the box score plus games still to come by the filed lineup */
+    /* Rule 5.2 (v2.55): stop the assignment at the cap, the way the database will. v4.47: the count is games played by
+       the box scores alone, in the regular season and the playoffs (commissioner, 2026-11-06) */
     var cap = CG.gameCapFor(p, game), used = CG.weekGamesFor(p.id, game, club);
     /* v3.54: a recorded league-office exception for this player in this game lets him past it */
-    if (used >= cap && !(CG.capExceptionFor && CG.capExceptionFor(game.id, p.id))) return p.tag+" is at his "+(game.stage==="playoff"?"series":"weekly")+" limit: "+used+" of "+cap+" games already "+(game.stage==="playoff"?"played or filed":"played")+" (Rule "+(game.stage==="playoff"?"8.3":"5.2")+")."+(game.stage==="playoff"?" Drop him from a game you have already dressed to free one.":" Playing him again would forfeit the game.");
+    if (used >= cap && !(CG.capExceptionFor && CG.capExceptionFor(game.id, p.id))) return p.tag+" is at their "+(game.stage==="playoff"?"series":"weekly")+" limit: "+used+" of "+cap+" games already played (Rule "+(game.stage==="playoff"?"8.3":"5.2")+"). Playing them again would forfeit the game.";
     /* v3.80 (commissioner, 2026-10-02): the v3.65 roster-first check (Q14) is withdrawn, here and in set_game_lineup.
        A training-camp player may be dressed whoever else is available; his own weekly limit is checked above. */
     return null;
@@ -1963,17 +1963,17 @@ CG.AFTER._lines = function(qs){
     var wkRefD = (CG.lineNights(club)[0] || {}).game || null;
     var used = {}, conflicts = [];
     var loadOfPid = function(pid){
-      /* v3.93: games played plus the sheets already filed for him this week (not excepted), so the plan is
-         simulated on top of what he is already set to play, as the line builder's outline does */
+      /* v4.47 (commissioner, 2026-11-06): "only count box scores as games played." This added the sheets already filed
+         (v3.93) and then called the total "already played". The start of the walk is now games played alone. */
       if (used[pid] == null) used[pid] = wkRefD ? CG.weekLedger(pid, wkRefD, club, { excludeGame: "__none__" }).filter(function(r){
-        return r.verdict === "played" || (r.verdict === "filed" && !(CG.capExceptionFor && CG.capExceptionFor(r.id, pid)));
+        return r.verdict === "played";
       }).length : 0;
       return used[pid];
     };
     jobs.forEach(function(n){
-      /* a redress GIVES BACK every game it takes a player out of, so count the drops before the
-         adds or a straight swap reads as a conflict that never happens */
-      var adds = {}, drops = {};
+      /* v4.47: only what this plan adds is walked. A redress no longer gives anything back, because a filed sheet was
+         never in the count (a game played cannot be taken away by a change of sheet). */
+      var adds = {};
       CG.lcOpenGames(club, n.key).forEach(function(g){
         if (wkRefD && CG.limitWeekOf(g) !== CG.limitWeekOf(wkRefD)) return;   /* v3.93: counts toward another week; the database checks it */
         if (g.limitsExempt && (g.stage || "regular") === "regular") return;   /* v3.93: exempt from the limits (Rule 3.3) */
@@ -1981,9 +1981,7 @@ CG.AFTER._lines = function(qs){
         var lu = (lg._lineups||{})[club+":"+g.id];
         var on = lu ? [lu.center,lu.lw,lu.rw,lu.ld,lu.rd,lu.goalie].filter(Boolean) : [];
         six.forEach(function(pid){ if (on.indexOf(pid) < 0 && !(CG.capExceptionFor && CG.capExceptionFor(g.id, pid))) adds[pid] = (adds[pid]||0) + 1; });
-        on.forEach(function(pid){ if (six.indexOf(pid) < 0) drops[pid] = (drops[pid]||0) + 1; });
       });
-      Object.keys(drops).forEach(function(pid){ used[pid] = Math.max(0, loadOfPid(pid) - drops[pid]); });
       Object.keys(adds).forEach(function(pid){
         var p = CG.playerById(lg, pid); if (!p || !wkRefD) return;
         var cap = CG.gameCapFor(p, wkRefD), have = loadOfPid(pid), add = adds[pid];
@@ -2511,8 +2509,8 @@ CG.hubRoster = function(qs){
       ? 'No weekly cap applies in the pre-season (Rule 5.2) — these limits start with the regular season. '
       : 'Weekly caps are the limit, not a minimum (Rule 5.2). ')+
     (CG.seriesCap({ pos:"C" })===CG.seriesCap({ pos:"G" })
-      ? 'In the playoffs every player may be dressed in at most '+CG.seriesCap({ pos:"C" })+' games of a series'
-      : 'In the playoffs a skater may be dressed in at most '+CG.seriesCap({ pos:"C" })+' games of a series and a goaltender in at most '+CG.seriesCap({ pos:"G" }))+
+      ? 'In the playoffs every player may play in at most '+CG.seriesCap({ pos:"C" })+' games of a series, counted from the box scores'
+      : 'In the playoffs a skater may play in at most '+CG.seriesCap({ pos:"C" })+' games of a series and a goaltender in at most '+CG.seriesCap({ pos:"G" })+', counted from the box scores')+
     (CG.playoffMinGp()?', and only a player with '+CG.playoffMinGp()+' regular-season games (prorated for a player placed after opening night) can be dressed at all — the Road to '+CG.playoffMinGp()+' card above tracks it':'')+' (Rule 8.3).</p></div></div>';
   var loanN = loans.length;
   h += '<div class="card"><div class="card-h"><h3>Roster — '+(roster.length-loanN)+' under contract'+(loanN?' · '+loanN+' on pre-season loan':'')+'</h3>'+

@@ -625,12 +625,12 @@ CG.ROUTES.matchup = function(id){
         && [x.home,x.away].sort().join("~")===seriesKey && x.at<=g.at; }) : [];
     function capFlag(pid, isGoalie){
       if (g.stage!=="playoff") return "";
-      var cap = CG.weeklyCap({ pos: isGoalie ? "G" : "C", stage:"playoff" });   /* Rule 8.3: the weekly cap serves as the series cap, by format */
+      var cap = CG.seriesCap({ pos: isGoalie ? "G" : "C" });   /* Rule 8.3. v4.47: the series cap itself (basic's weekly cap of 6 here hid a fifth game) */
       var n=0; seriesGames.forEach(function(x){
         var r2=(lg.allResults||[]).find(function(q){ return q.id===x.id; });
         if (r2 && ((r2.box[x.home]&&r2.box[x.home][pid])||(r2.box[x.away]&&r2.box[x.away][pid]))) n++;
       });
-      return n>cap ? ' <span class="chip chip-loss" style="font-size:9px" title="Dressed in '+n+' games of this series — over the '+cap+'-game '+(isGoalie?"goaltender":"skater")+' cap (Rule 8.3), an ineligible-player forfeit under Rule 5.2">OVER CAP</span>' : "";
+      return n>cap ? ' <span class="chip chip-loss" style="font-size:9px" title="Played in '+n+' games of this series: over the '+cap+'-game '+(isGoalie?"goaltender":"skater")+' cap (Rule 8.3), an ineligible-player forfeit under Rule 5.2">OVER CAP</span>' : "";
     }
     /* v2.93: a final with no lines is a real state, not an empty grid. A forfeit carries no
        individual statistics by rule; anything else final and empty simply has not imported yet,
@@ -776,7 +776,7 @@ CG.ROUTES.matchup = function(id){
           return '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line-soft);font-size:13px"><span style="color:var(--steel)">'+kv[0]+'</span><b style="text-align:right">'+kv[1]+'</b></div>';
         }).join("")+
         '<p class="caption" style="margin-top:10px">The server resolves from both clubs’ private picks 30 minutes before the night’s first puck drop — home names two choices, away holds a veto. Streaming is not required, in the playoffs or out of them, but a stream is the best evidence if anything illegal needs catching (Rule 6.2, commissioner, 2026-09-28).'+
-        (g.stage==="playoff" ? ' Playoff rosters: no player may be dressed in more than '+(CG.seriesCap ? CG.seriesCap({}) : 4)+' games of this series (Rule 8.3).' : '')+
+        (g.stage==="playoff" ? ' Playoff rosters: no player may play in more than '+(CG.seriesCap ? CG.seriesCap({}) : 4)+' games of this series, counted from the box scores (Rule 8.3).' : '')+
         ' <a href="#/rulebook?rule=4.1" style="border-bottom:2px solid var(--chrome);font-weight:600">Rule 4 →</a></p></div></div>'+
       '<div class="card"><div class="card-h"><h3>Broadcast</h3>'+(g.feature?'<span class="chip chip-live"><span class="live-dot"></span>Twitch flag armed</span>':"")+'</div>'+
       '<div class="card-b"><p class="small" style="color:var(--steel)">'+(g.feature?"Tonight’s marquee stream goes live 15 minutes before puck drop on the league channel. Twitch sync flags this card LIVE automatically the moment a rostered player starts streaming.":"No league stream scheduled — if a rostered player goes live on Twitch, this card flags LIVE automatically (5-minute sync).")+'</p>'+
