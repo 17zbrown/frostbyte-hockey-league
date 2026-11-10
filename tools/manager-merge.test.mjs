@@ -1,7 +1,8 @@
-// Club management repairing its OWN lag-out game. The whole risk of opening this beyond staff is
-// scope: a manager must reach their own fixtures and nothing else, must not be able to graft an
-// unrelated meeting between the same two clubs onto a game, and every rebuild must stay
-// attributable. Run: node tools/manager-merge.test.mjs
+// Who may work a game's box score through ingest-stats.js. Until v4.49 a club's management repaired its OWN lag-out
+// game from Team HQ's Game stats desk (2026-08-04). v4.49 (commissioner, 2026-11-10: "Do not allow teams to bring in
+// their own box scores. They should be automatic or dealt with by staff."): every club seat is refused at every door
+// (sittings, merge, EA search, link and fetch), and statistics staff and commissioners keep the whole desk.
+// Run: node tools/manager-merge.test.mjs
 process.env.SUPABASE_URL ||= "https://sb.invalid";
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= "k";
 process.env.INGEST_KEY ||= "machine-key";
@@ -128,10 +129,12 @@ const twoSittings = () => [
 console.log("— who may open a fixture");
 {
   LOG = twoSittings();
+  const STAFF_ONLY = /^Only statistics staff or a commissioner work a game's box score\. Box scores import automatically from EA, and a missing or wrong one goes to the statistics staff \(Rule 6\.3\)\.$/;
   UID = "bos-gm";
-  A("the home club's GM may load its sittings", (await call({ leagueCandidates: { gameId: "g1" } })).statusCode === 200);
+  const g1 = await call({ leagueCandidates: { gameId: "g1" } });
+  A("v4.49: the home club's GM may NOT load its sittings", g1.statusCode === 401 && STAFF_ONLY.test(JSON.parse(g1.body).error), g1.body);
   UID = "tor-agm";
-  A("the away club's AGM may too", (await call({ leagueCandidates: { gameId: "g1" } })).statusCode === 200);
+  A("v4.49: nor may the away club's AGM", (await call({ leagueCandidates: { gameId: "g1" } })).statusCode === 401);
   UID = "statsguy";
   A("statistics staff still may", (await call({ leagueCandidates: { gameId: "g1" } })).statusCode === 200);
   UID = "rando";
@@ -142,9 +145,9 @@ console.log("— who may open a fixture");
   A("a banned manager may not, even holding the seat", (await call({ leagueCandidates: { gameId: "g1" } })).statusCode === 401);
   UID = null;
   A("no session at all is refused", (await call({ leagueCandidates: { gameId: "g1" } })).statusCode === 401);
-  UID = "bos-gm";
+  UID = "statsguy";
   const res = JSON.parse((await call({ leagueCandidates: { gameId: "g1" } })).body);
-  A("the response says which hat opened it", res.role === "management");
+  A("the response says which hat opened it", res.role === "staff");
 }
 
 console.log("\n— the same gate guards the write, not just the read");
@@ -159,13 +162,15 @@ console.log("\n— the same gate guards the write, not just the read");
 
 /* v3.67 (commissioner, 2026-09-28, Q23): combining a lagged-out game's sittings is "Only the specific staff
    for that and commissioners." A club attaches one sitting; two or more are statistics staff's to combine. */
-console.log("\n— a club cannot combine its lag-out (v3.67); statistics staff do");
+console.log("\n— a club cannot merge at all (v4.49; since v3.67 it could not combine); statistics staff do");
 {
   LOG = twoSittings(); reset();
   UID = "bos-gm";
   const r0 = await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } });
   const refused = JSON.parse(r0.body);
-  A("a club's two-sitting merge is refused, by rule", r0.statusCode === 403 && /Only statistics staff or a commissioner combine a game played in more than one sitting \(Rule 4\.3\)/.test(refused.error || ""), refused.error);
+  A("a club's merge is refused, by rule", r0.statusCode === 401 && /Only statistics staff or a commissioner work a game's box score/.test(refused.error || ""), refused.error);
+  const r1 = await call({ leagueMerge: { gameId: "g1", matchIds: ["m1"] } });
+  A("...a single sitting too (v4.49: a club no longer attaches one)", r1.statusCode === 401, r1.body);
   A("...and nothing is written", writes.statDeletes === 0 && writes.gamePatches.length === 0 && writes.logPatches.length === 0);
   LOG = twoSittings(); reset();
   UID = "statsguy";
@@ -190,7 +195,7 @@ console.log("\n— a club cannot reach past its own fixture");
   ];
   reset(); UID = "bos-gm";
   const mgmt = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "mLater"] } })).body);
-  A("a club can't graft another sitting on at all (v3.67)", /Only statistics staff or a commissioner combine/.test(mgmt.error || ""), mgmt.error);
+  A("a club can't graft another sitting on at all (v4.49)", /Only statistics staff or a commissioner work a game's box score/.test(mgmt.error || ""), mgmt.error);
   A("...and the game was left untouched", writes.statDeletes === 0 && writes.gamePatches.length === 0);
   reset(); UID = "statsguy";
   const staff = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "mLater"], unpublish: true } })).body);
@@ -199,7 +204,7 @@ console.log("\n— a club cannot reach past its own fixture");
   A("staff provenance says stats staff", /StatsGuy \(stats staff\)/.test(JSON.stringify(writes.logPatches)));
 }
 
-console.log("\n— the protections that already existed still hold for managers");
+console.log("\n— the protections that already existed still hold");
 {
   LOG = [
     { ea_match_id: "m1", status: "ingested", game_id: "g1", et_day: "2026-10-21", payload: rawSitting("m1", SAME_NIGHT, 1, 0, false, 300) },
@@ -208,13 +213,12 @@ console.log("\n— the protections that already existed still hold for managers"
   reset(); UID = "statsguy";
   const stolen = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "mX"] } })).body);
   A("another game's sitting still can't be stolen", /already belongs to another game/.test(stolen.error || ""));
-  UID = "bos-gm";
 
   LOG = [{ ea_match_id: "m2", status: "unmatched", game_id: null, et_day: "2026-10-21", payload: rawSitting("m2", SAME_NIGHT_LATER, 2, 1, false, 420) }];
   const orphan = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m2"] } })).body);
   A("dropping the sitting already on the game is still refused", /Include the sitting/.test(orphan.error || ""));
-  /* v4.36 review: the club desk has no Restarted box, so its managers are told who re-files a restarted game */
-  A("...in the club desk's own words (no Restarted box there)", /statistics staff re-file it\./.test(orphan.error || "") && !/tick "Restarted"/.test(orphan.error || ""), orphan.error);
+  /* v4.49: only the Stats manager works a game now, so the hint is always its Restarted box */
+  A("...in the Stats manager's own words", /tick "Restarted"/.test(orphan.error || ""), orphan.error);
   A("nothing was written by either refusal", writes.statDeletes === 0 && writes.gamePatches.length === 0);
 }
 
@@ -223,14 +227,14 @@ console.log("\n— a forfeit ruling is a commissioner's to change (v3.52): nobod
   /* the forfeiting club's own GM used to be able to merge the real sittings onto the game and
      have the merge write forfeit_team_id: null — undoing a staff ruling against itself */
   FORFEIT = "T1";                                  // BOS was ruled to have forfeited
-  LOG = twoSittings(); reset(); UID = "bos-gm";
+  LOG = twoSittings(); reset(); UID = "statsguy";
   const cand = JSON.parse((await call({ leagueCandidates: { gameId: "g1" } })).body);
   A("the desk is told up front that the game carries a ruling", cand.game && cand.game.forfeit === true, JSON.stringify(cand.game));
+  UID = "bos-gm";
   const r = await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } });
-  const mgmt = JSON.parse(r.body);
-  A("the forfeiting club's management is refused, by name", r.statusCode === 422 && mgmt.error === "This game carries a forfeit ruling. Only a commissioner can change a ruled game: report the mistake to the commissioners from the game page.", mgmt.error);
+  A("the forfeiting club's management is refused (v4.49: before the ruling is even read)", r.statusCode === 401, r.body);
   UID = "tor-agm";
-  A("...and so is the other club's", (await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).statusCode === 422);
+  A("...and so is the other club's", (await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).statusCode === 401);
   A("...with nothing written by either", writes.statDeletes === 0 && writes.gamePatches.length === 0 && writes.logPatches.length === 0);
 
   reset(); UID = "statsguy";
@@ -249,7 +253,7 @@ console.log("\n— a forfeit ruling is a commissioner's to change (v3.52): nobod
   /* v3.53: re-filing a restarted game strikes sittings and their statistics: statistics staff only */
   reset(); UID = "bos-gm";
   const rs = await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"], restart: true } });
-  A("a club cannot re-file a game as restarted", rs.statusCode === 403 && writes.statDeletes === 0 && writes.gamePatches.length === 0, rs.body);
+  A("a club cannot re-file a game as restarted", rs.statusCode === 401 && writes.statDeletes === 0 && writes.gamePatches.length === 0, rs.body);
 }
 
 console.log("\n— the archive is written before the game is touched, so a merge that dies mid-flight is never unattributed");
@@ -296,12 +300,18 @@ console.log("\n— the live-EA fallback: search, link, fetch");
   EA_SEARCH = [{ clubId: 900111, name: "Chel Bruins", memberCount: 14 }, { clubId: 900999, name: "Chel Bruins Alumni", memberCount: 6 }];
   UID = "rando";
   A("search is gated like everything else", (await call({ leagueEaSearch: { gameId: "g1", clubName: "Chel" } })).statusCode === 401);
+  /* v4.49: a club's management no longer searches, links or fetches; each door refuses it before anything is asked */
   UID = "bos-gm";
+  const before = LOOKUPS.posts.length;
+  A("v4.49: a club's GM cannot search EA from a fixture", (await call({ leagueEaSearch: { gameId: "g1", clubName: "Chel" } })).statusCode === 401 && LOOKUPS.posts.length === before);
+  A("v4.49: ...nor link its club", (await call({ leagueEaLink: { gameId: "g1", clubId: "900111" } })).statusCode === 401 && writes.teamPatches.length === 0);
+  A("v4.49: ...nor pull its club's games", (await call({ leagueEaFetch: { gameId: "g1" } })).statusCode === 401 && writes.logInserts.length === 0);
+  UID = "statsguy";
   const posted = LOOKUPS.posts.length;
   const { first: sp, out: sr } = await viaBot("leagueEaSearch", { gameId: "g1", clubName: "Chel Bruins" });
   A("the search files ONE request for the bot's server and says to wait", typeof sp.eaPending === "number" && LOOKUPS.posts.length === posted + 1);
-  A("...as the signed-in manager, from the site", LOOKUPS.posts[posted].requested_by === "bos-gm" && LOOKUPS.posts[posted].source === "site" && LOOKUPS.posts[posted].kind === "search" && LOOKUPS.posts[posted].arg === "Chel Bruins");
-  A("the manager can search EA by club name (the bot's answer, read back)", sr.clubs && sr.clubs.length === 2 && sr.clubs[0].name === "Chel Bruins");
+  A("...as the signed-in staffer, from the site", LOOKUPS.posts[posted].requested_by === "statsguy" && LOOKUPS.posts[posted].source === "site" && LOOKUPS.posts[posted].kind === "search" && LOOKUPS.posts[posted].arg === "Chel Bruins");
+  A("staff can search EA by club name (the bot's answer, read back)", sr.clubs && sr.clubs.length === 2 && sr.clubs[0].name === "Chel Bruins");
   const again = JSON.parse((await call({ leagueEaSearch: { gameId: "g1", clubName: "Chel Bruins" } })).body);
   A("a repeat search within a minute reuses the stored answer (no second request)", again.clubs && again.clubs.length === 2 && LOOKUPS.posts.length === posted + 1);
   const { res: failRes, out: failOut } = await viaBot("leagueEaSearch", { gameId: "g1", clubName: "Nobody Club" },
@@ -309,23 +319,23 @@ console.log("\n— the live-EA fallback: search, link, fetch");
   A("a lookup the bot could not answer is a 502 carrying its sentence", failRes.statusCode === 502 && /Akamai 403/.test(failOut.error || ""), failRes.body);
 
   reset(); EA_LINK = { T1: null, T2: null };
-  const lk = JSON.parse((await call({ leagueEaLink: { gameId: "g1", clubId: "900111", clubName: "Chel Bruins" } })).body);
-  A("a manager links their OWN club", lk.ok === true && lk.teamCode === "BOS" && EA_LINK.T1 === "900111");
+  const lk = JSON.parse((await call({ leagueEaLink: { gameId: "g1", teamId: "T1", clubId: "900111", clubName: "Chel Bruins" } })).body);
+  A("staff link the club they name", lk.ok === true && lk.teamCode === "BOS" && EA_LINK.T1 === "900111");
+  A("...and a link that names no club in the game is refused", /isn't in this game/.test(JSON.parse((await call({ leagueEaLink: { gameId: "g1", clubId: "900111" } })).body).error || ""));
   A("...and staff hear about the linkage", writes.webhooks.length === 1 && /Chel Bruins/.test(writes.webhooks[0].content));
-  A("linking is idempotent for the same id", JSON.parse((await call({ leagueEaLink: { gameId: "g1", clubId: "900111" } })).body).ok === true);
-  const relink = JSON.parse((await call({ leagueEaLink: { gameId: "g1", clubId: "900222" } })).body);
+  A("linking is idempotent for the same id", JSON.parse((await call({ leagueEaLink: { gameId: "g1", teamId: "T1", clubId: "900111" } })).body).ok === true);
+  const relink = JSON.parse((await call({ leagueEaLink: { gameId: "g1", teamId: "T1", clubId: "900222" } })).body);
   A("re-pointing an established linkage is refused", /already linked to a different EA club/.test(relink.error || ""));
-  UID = "tor-agm";
-  const steal = JSON.parse((await call({ leagueEaLink: { gameId: "g1", clubId: "900111" } })).body);
+  const steal = JSON.parse((await call({ leagueEaLink: { gameId: "g1", teamId: "T2", clubId: "900111" } })).body);
   A("one EA club can't back two league clubs", /already linked to BOS/.test(steal.error || ""));
 
-  reset(); UID = "bos-gm";
+  reset(); UID = "statsguy";
   EA_MATCHES = [rawSitting("mNew1", SAME_NIGHT, 1, 0, false, 300), rawSitting("mNew2", SAME_NIGHT_LATER, 2, 1, true, 420)];
   const { first: fp, out: fr } = await viaBot("leagueEaFetch", { gameId: "g1" });
   A("the fetch asks the bot for the linked club's matches", typeof fp.eaPending === "number" && LOOKUPS.posts[LOOKUPS.posts.length - 1].kind === "matches" && LOOKUPS.posts[LOOKUPS.posts.length - 1].arg === "900111");
   A("the fetch archives what EA returned", fr.ok === true && fr.fetched === 2 && writes.logInserts.length === 1);
   A("...WITHOUT clobbering rows the pipeline owns", /ignore-duplicates/.test(writes.logInserts[0].prefer));
-  A("...stamped with who pulled them", writes.logInserts[0].rows.every((r2) => /BosGM/.test(r2.reason)));
+  A("...stamped with who pulled them", writes.logInserts[0].rows.every((r2) => /StatsGuy/.test(r2.reason)));
   EA_LINK = { T1: null, T2: null };
   const nofetch = JSON.parse((await call({ leagueEaFetch: { gameId: "g1" } })).body);
   A("fetching with nothing linked points at the search step", /Link your club/.test(nofetch.error || ""));
@@ -335,7 +345,7 @@ console.log("\n— one linked side is enough: the opponent is derived, then prov
 {
   EA_LINK = { T1: "111", T2: null };               // TOR never linked
   LOG = twoSittings();
-  UID = "bos-gm";
+  UID = "statsguy";
   const res = JSON.parse((await call({ leagueCandidates: { gameId: "g1" } })).body);
   A("candidates surface from one linked side", res.candidates.length === 2 && res.linked.home === true && res.linked.away === false);
   A("the opposing EA club is named on each sitting", res.candidates.every((c) => c.oppEaId === "222" && c.oppEaName === "Leafs EA"));

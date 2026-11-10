@@ -25,7 +25,10 @@ A("switching club clears the last club's drafts and reloads its offers", /CG\._l
 A("the office is not frozen out of squad moves", /var fzOffice = fz\.on && CG\.role\(\)==="commish";\s+if \(fz\.on && !fzOffice\)\{/.test(hub));
 A("published sheets can be withdrawn by the office until the game is under way", /CG\.lcClearableGames = function\(club, nightKey\)\{/.test(hub) && /picks = CG\.lcClearableGames\(club, night\);/.test(hub) && /\(dbLu && !shut && \(!rawLocked \|\| CG\.role\(\)==="commish"\)/.test(hub) &&
   /\(CG\.lcClearableGames\(club, n\.key\)\.length \? '<button class="btn btn-ghost btn-sm lc-clear"[^\n]*Clear '\+CG\.lcClearableGames\(club, n\.key\)\.length/.test(hub));
-A("the game stats desk names the club; the office may combine sittings", (live.match(/teamId: tid/g) || []).length >= 3 && /var gsMulti = CG\.role\(\)==="commish"/.test(live) && /if \(ids\.length > 1 && !gsMulti\)/.test(live) && /const named = String\(\(body\.leagueEaFetch && body\.leagueEaFetch\.teamId\) \|\| ""\);/.test(ing));
+/* v4.49 (commissioner, 2026-11-10: "Do not allow teams to bring in their own box scores. They should be automatic or dealt
+   with by staff."): the club game stats desk is gone, so the office works a game from the Stats manager, not from a
+   previewed club (tools/clubs-no-box-scores-v449.test.cjs pins it) */
+A("the club game stats desk is gone; the office combines sittings in the Stats manager", !/var gsMulti = CG\.role\(\)==="commish"/.test(live) && /CG\._smS = function/.test(live));
 A("free agents sign to the club this Team HQ acts for", /var t=\(CG\.myManagedTeam && CG\.myManagedTeam\(\)\) \|\|/.test(live) && /p_salary:null, p_team:faTeamId \}/.test(live) && /p_note:note, p_team:faTeamId \}/.test(live));
 A("the draft room drafts for the previewed club", /var isMgr = role==="mgmt" \|\| \(role==="commish" && !!\(CG\.previewClub && CG\.previewClub\(\)\)\)/.test(live));
 A("the Management page acts with the Owner's powers", /isOwner: !!\(uid && t\.owner===uid\) \|\| isOffice, isOffice: isOffice/.test(live) && /League office, acting for the Owner/.test(live));

@@ -111,13 +111,12 @@ console.log("\n— 2. the status line shows a failed self-test the way the Autom
   A("no answer at all: gray and says so, never green", el.firstChild.style.background === "var(--chrome-deep)" && /unavailable/.test(el.lastChild.textContent));
 }
 
-console.log("\n— 3. a club linked on the game stats desk always repaints as linked");
+console.log("\n— 3. a club linked on the game stats desk always repaints as linked (v4.49: the desk is gone)");
 {
+  /* v4.49 (commissioner, 2026-11-10: "Do not allow teams to bring in their own box scores"): the club game stats desk
+     and its link-then-pull chain were removed; tools/clubs-no-box-scores-v449.test.cjs pins that it stays gone */
   const live = read("../src/live/part_live.js");
-  const at = live.indexOf("btn.textContent = \"Pulling sessions…\";");
-  const chunk = live.slice(at, at + 900);
-  A("a failed pull is told inside the link's chain and the desk reloads either way", /\}, function\(e\)\{ CG\.toast\(e\.message,"err"\); \}\)\.then\(loadCands\);/.test(chunk), chunk.slice(0, 200));
-  A("...so only a failed link restores the This is us button", /\}\)\.catch\(function\(e\)\{ btn\.disabled=false; btn\.textContent="This is us"; CG\.toast\(e\.message,"err"\); \}\);/.test(live.slice(at, at + 1400)));
+  A("the club desk's link-then-pull chain no longer exists", live.indexOf("btn.textContent = \"Pulling sessions…\";") < 0 && !/btn\.textContent="This is us"/.test(live));
 }
 
 console.log("\n— the changelog");

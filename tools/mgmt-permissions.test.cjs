@@ -36,7 +36,9 @@ console.log("— the access model mirrors public.mgmt_access_for");
   const gm = harness("u-gm", { gm:{ roster:"approve", tradehub:"hidden", management:"approve", gamestats:"approve" }, agm:{ lines:"approve" } });
   A("a GM reads their own cells", gm.mgmtAccess("roster") === "approve" && gm.mgmtAccess("tradehub") === "hidden");
   A("...and full is the default for everything unset", gm.mgmtAccess("lines") === "full" && gm.mgmtAccess("draft") === "full");
-  A("...Management and Game stats never take 'approve' (nothing there to approve)", gm.mgmtAccess("management") === "full" && gm.mgmtAccess("gamestats") === "full");
+  A("...Management never takes 'approve' (nothing there to approve)", gm.mgmtAccess("management") === "full");
+  /* v4.49 (commissioner, 2026-11-10: "Do not allow teams to bring in their own box scores"): Game stats left the list */
+  A("...and Game stats is no longer a management page", !gm.MGMT_PAGES.some(x => x[0] === "gamestats"));
   const gm0 = harness("u-gm", {});
   A("the Management page is the Owner's by default — hidden from an unset GM, everything else full", gm0.mgmtAccess("management") === "hidden" && gm0.mgmtAccess("roster") === "full" && gm0.mgmtAccess("draft") === "full");
   A("...and the matrix mirrors that default", gm0.mgmtDefaultMode("management") === "hidden" && gm0.mgmtDefaultMode("tradehub") === "full");
@@ -45,7 +47,7 @@ console.log("— the access model mirrors public.mgmt_access_for");
   const none = harness("u-nobody", {});
   A("a non-manager has no access at all", none.mgmtAccess("roster") === "none");
   A("every queued action maps to exactly one page", Object.values(none.MGMT_ACTION_PAGE).every(p => none.MGMT_PAGES.some(x => x[0] === p)));
-  A("...and the page list matches the database's mgmt_pages()", JSON.stringify(none.MGMT_PAGES.map(x => x[0])) === JSON.stringify(["roster","lines","schedule","gamestats","tradehub","freeagents","draft","management"]));
+  A("...and the page list matches the database's mgmt_pages()", JSON.stringify(none.MGMT_PAGES.map(x => x[0])) === JSON.stringify(["roster","lines","schedule","tradehub","freeagents","draft","management"]));
 }
 
 console.log("\n— the queue wrapper: queued under approve, pass-through otherwise");
@@ -119,7 +121,7 @@ function finish(){
     const own = harness("u-own", { gm:{ roster:"approve" } }, [{ id:"m1", page:"roster", status:"pending", requested_by:"u-gm", summary:"waive Jugg", created_at:"2027-01-01T00:00:00Z", requester:{ gamertag:"Mr. Plow" } }]);
     const m = own.clubMgmt();
     const card = own.mgmtPermissionsCard(m);
-    A("the Owner gets a three-way control per page per seat", (card.match(/data-perm-mode="approve"/g) || []).length === 12 && (card.match(/data-perm-mode="full"/g) || []).length === 16, String((card.match(/data-perm-mode="approve"/g) || []).length));
+    A("the Owner gets a three-way control per page per seat", (card.match(/data-perm-mode="approve"/g) || []).length === 12 && (card.match(/data-perm-mode="full"/g) || []).length === 14, String((card.match(/data-perm-mode="approve"/g) || []).length));
     A("...with 'approve' withheld from Management and Game stats", !/data-perm-page="management" data-perm-mode="approve"/.test(card) && !/data-perm-page="gamestats" data-perm-mode="approve"/.test(card));
     A("...the saved policy pre-selected", /data-perm-seat="gm" data-perm-page="roster" data-perm-mode="approve" aria-pressed="true"/.test(card));
     A("...and Management pre-selected as hidden when unset", /data-perm-seat="gm" data-perm-page="management" data-perm-mode="hidden" aria-pressed="true"/.test(card) && /data-perm-seat="agm" data-perm-page="management" data-perm-mode="hidden" aria-pressed="true"/.test(card));
@@ -150,10 +152,11 @@ function finish(){
     A("the reviewer copy names the Owner as the one who clears a held seat", /the club’s Owner removes the sitting manager \(or a commissioner vacates the seat\) first/.test(live) && /Only the club’s Owner \(or a commissioner\) can vacate a seat/.test(desks));
   }
 
-  console.log("\n— the importer honors a withheld game stats desk");
+  console.log("\n— the importer lets no club seat in (v4.49)");
   {
-    A("authForGame asks the database (mgmt_access_for) before letting a manager in", /rpc\/mgmt_access_for/.test(ingest) && /if \(mode === "hidden"\) return \{ ok: false/.test(ingest));
-    A("...a failed lookup denies, never allows", /\} catch \{ return deny; \}\n    return \{ ok: true, uid, who, via: "management"/.test(ingest));
+    /* until v4.49 authForGame asked mgmt_access_for whether the Owner had withheld the game stats desk from a GM or
+       AGM; now no seat reaches it at all, so there is no seat lookup to fail open */
+    A("authForGame lets only staff in: no seat lookup, no management pass", !/rpc\/mgmt_access_for/.test(ingest) && !/via: "management"/.test(ingest) && /return \{ ok: false, uid: a\.uid, who: a\.who, reason: STAFF_ONLY \};/.test(ingest));
     A("...and the reason reaches the desk", (ingest.match(/error: actor\.reason \|\|/g) || []).length === 5);
   }
 

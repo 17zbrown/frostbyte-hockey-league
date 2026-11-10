@@ -9049,7 +9049,6 @@ CG.MGMT_PAGES = [
   ["roster",     "Roster",         "Waivers, extension offers, trade-block flags, camp moves", true],
   ["lines",      "Lineup builder", "Saved lines, night plans and per-game lineups", true],
   ["schedule",   "Schedule",       "Server vetoes and preferred picks", true],
-  ["gamestats",  "Game stats",     "Box-score repairs — reviewed by the statistics staff, so there is no approval mode", false],
   ["tradehub",   "Trade Hub",      "Propose, accept, decline and withdraw trades", true],
   ["freeagents", "Free agents",    "Contract offers and answers to counters", true],
   ["draft",      "Draft",          "The club's draft board and picks on the clock", true],
@@ -9098,7 +9097,7 @@ CG.mgmtAccess = function(page){
   var pol = (CG.lg && CG.lg._mgmtPolicy) || CG._mgmtPolicyCache || {};
   var mode = (pol[seat] || {})[page] || CG.mgmtDefaultMode(page);
   if (["full","approve","hidden"].indexOf(mode) < 0) mode = CG.mgmtDefaultMode(page);
-  if ((page==="management" || page==="gamestats") && mode==="approve") mode = "full";
+  if (page==="management" && mode==="approve") mode = "full";   /* v4.49: Game stats left the page list */
   return mode;
 };
 CG.mgmtMoves = function(status){
@@ -12868,7 +12867,7 @@ CG.AUTOMATIONS = [
   { key:"ea-poll-vm", staleAfterMin:10, name:"EA score poller (bot server)", every:"Every minute from the bot server; asks EA only while a fixture’s game window is open", desc:"The primary lane. Runs on the always-on bot server, whose address EA serves. It asks EA only while a fixture’s game window is open (10 minutes before puck drop to 3 hours after, plus a short grace so a game that ends at the buzzer is still collected), only for the clubs in those fixtures, and hands everything it finds to the importer — which files only a match between the two scheduled clubs that ended inside that window, merges a lag-out replay into the game it continues (Rule 4.3), and archives the rest. A stale stamp here means the bot server is down; the Netlify lane below takes over automatically.", noRun:true },
   { key:"ea-poll", noRun:true, staleAfterMin:function(){ return CG.inGameWindowET && CG.inGameWindowET() ? 20 : 1440; }, name:"EA stats poller (Netlify fallback)", every:"Every 5 min; same fixture-window rule; stands down while the bot server lane is fresh", desc:"The fallback lane. Netlify’s own address is blocked by EA, so this only imports when a residential proxy is configured — it exists so a dead bot server still pages someone rather than silently losing a night’s scores." },
   /* v4.34: the site's EA club search, self-tested by the bot server every 10 minutes (bot/ea-lookup.mjs) */
-  { key:"ea-lookup", noRun:true, staleAfterMin:30, name:"EA club search (bot server)", every:"A self-test every 10 minutes from the bot server", desc:"Answers the site\u2019s EA club searches and match lists: the Stats Manager\u2019s Find a game on EA, the pickup import page and the club game stats desk. EA refuses every other host, so the site asks through the bot server. Every 10 minutes it runs a test search end to end; two failures in a row turn this red and alert the commissioners. A stale stamp means the bot server\u2019s EA process (chel-ea-poll) is down." },
+  { key:"ea-lookup", noRun:true, staleAfterMin:30, name:"EA club search (bot server)", every:"A self-test every 10 minutes from the bot server", desc:"Answers the site\u2019s EA club searches and match lists: the Stats Manager\u2019s Find a game on EA and the pickup import page. EA refuses every other host, so the site asks through the bot server. Every 10 minutes it runs a test search end to end; two failures in a row turn this red and alert the commissioners. A stale stamp means the bot server\u2019s EA process (chel-ea-poll) is down." },
   { key:"twitch-live-sync", noRun:true, staleAfterMin:15, name:"Twitch live flags",         every:"Every 2 min",  desc:"Flags streaming players LIVE across the site automatically." },
   { key:"discord-sync", staleAfterMin:15,     name:"Discord roles & names",     every:"Every 2 min + on change",  desc:"Keeps Discord roles and display names matched to the league database. Role changes made on the site push to Discord within seconds." },
   { key:"discord-welcome", noRun:true, staleAfterMin:20,  name:"Discord welcome bot",       every:"Every 5 min",  desc:"Greets new members in #welcome." },
@@ -14836,267 +14835,15 @@ CG.AFTER._hubSchedule = function(){
   });
 };
 
-/* ================================================================
-   TEAM HQ: GAME STATS — a club's own results, and the per-fixture
-   lag-out repair.
-
-   Managers get the same multi-sitting merge the pickup importer uses,
-   but hard-scoped to ONE game: the fixture rides in the URL and this
-   desk has no fixture picker at all, so a club can never rebuild the
-   wrong game by mis-clicking a dropdown. The backend re-checks the
-   club's seat against that game's two teams on every call — the URL
-   is a convenience, never the authority.
-   ================================================================ */
-CG.hubGameStats = function(qs){
-  var t = CG.myManagedTeam() || CG.TEAM[CG.myClub()];
-  if (!t || !t.id) return '<div class="note">This account doesn’t run a club — the game stats desk belongs to club management.</div>';
-  var gid = (qs && qs.game) || "";
-  var head = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · game operations</span>'+
-    '<h1 class="h-sec" style="margin-top:8px">Game stats</h1>';
-  if (!gid){
-    return head+'<p class="lede" style="margin-top:8px">Every game you’ve played and whether its box score landed. Finals import themselves from EA within minutes of the final horn — when a game lags out and only part of it arrives, open that game and rebuild it from all of its sittings.</p></div>'+
-      '<div id="gsList" data-team="'+esc(t.id)+'"><p class="caption">Loading your games…</p></div>';
-  }
-  return head+'<p class="lede" style="margin-top:8px">Rebuilding one game from its sittings. Everything on this page applies to this fixture and no other.</p></div>'+
-    '<p style="margin-bottom:14px"><a href="#/hub/gamestats" style="font-weight:700;border-bottom:2px solid var(--chrome)">← All games</a></p>'+
-    '<div id="gsOne" data-game="'+esc(gid)+'" data-team="'+esc(t.id)+'"><p class="caption">Loading this game…</p></div>';
-};
-
-/* the club's games, newest first, with whether a box score actually exists */
-CG._gsList = function(el){
-  var tid = el.getAttribute("data-team");
-  CG.sb.from("games")
-    .select("id,week,stage,scheduled_at,status,home_team_id,away_team_id,home_score,away_score,voided,forfeit_team_id,game_stats(count)")
-    .or("home_team_id.eq."+tid+",away_team_id.eq."+tid)
-    .order("scheduled_at", { ascending:false }).limit(60)
-    .then(function(r){
-      if (r.error){ el.innerHTML = '<div class="note red">'+esc(r.error.message||"Couldn’t load your games")+'</div>'; return; }
-      var games = (r.data)||[];
-      if (!games.length){
-        el.innerHTML = '<div class="card"><div class="empty" style="padding:44px 20px"><div class="e-art">'+CG.ic("chart",22)+'</div>'+
-          '<b>No games yet</b><p>Your fixtures appear here as soon as the league posts the schedule.</p></div></div>';
-        return;
-      }
-      var idToCode = (CG.lg && CG.lg._idToCode) || {};
-      var needsWork = 0;
-      var rows = games.map(function(g){
-        var homeSide = g.home_team_id===tid;
-        var opp = idToCode[homeSide ? g.away_team_id : g.home_team_id] || "—";
-        var lines = (g.game_stats && g.game_stats[0] && g.game_stats[0].count) || 0;
-        var at = Date.parse(g.scheduled_at), isFinal = g.status==="final", past = at < CG.now();
-        var mine = homeSide ? g.home_score : g.away_score, theirs = homeSide ? g.away_score : g.home_score;
-        var isForfeit = !!g.forfeit_team_id, weForfeited = g.forfeit_team_id===tid;
-        var chip, label = null;
-        if (g.voided){ chip = '<span class="chip">Voided</span>'; }
-        else if (isForfeit){ chip = '<span class="chip chip-warn">Forfeit</span>'; if (!weForfeited) label = "Enter the played game"; }
-        else if (isFinal && lines>0){ chip = '<span class="chip chip-win">Box score in</span>'; label = "Fix a lag-out"; }
-        else if (isFinal){ chip = '<span class="chip chip-warn">No box score</span>'; label = "Build the box score"; needsWork++; }
-        else if (past){ chip = '<span class="chip chip-warn">Awaiting EA import</span>'; label = "Enter it manually"; needsWork++; }
-        else { chip = '<span class="chip">Scheduled</span>'; }
-        /* a voided game keeps its stored score in the table but it decided nothing — showing a
-           W/L there would read as a result the standings never counted */
-        var result = (isFinal && !g.voided && mine!=null)
-          ? '<b>'+mine+'–'+theirs+'</b>'+(mine===theirs ? '' :
-              ' <span class="chip'+(mine>theirs?' chip-win':' chip-loss')+'" style="font-size:9px">'+(isForfeit?"FF ":"")+(mine>theirs?"W":"L")+'</span>')
-          : '<span class="caption">—</span>';
-        return '<tr><td class="tleft mono" style="font-size:11px;white-space:nowrap">'+esc(CG.fmtDate(g.scheduled_at))+'</td>'+
-          '<td class="tleft"><span class="teamcell">'+CG.crest(opp,20)+'<span class="nm">'+(homeSide?"vs ":"@ ")+esc(opp)+'</span></span>'+
-            (g.week!=null?' <span class="caption">'+(g.stage==="preseason"?"PRE":"Wk "+g.week)+'</span>':'')+'</td>'+
-          '<td>'+result+'</td><td>'+chip+'</td>'+
-          '<td class="tright mono hide-xs-col" style="font-size:11px">'+(lines||"—")+'</td>'+
-          '<td class="tright" style="white-space:nowrap">'+(label
-            ? '<a class="btn btn-ghost btn-sm" href="#/hub/gamestats?game='+esc(g.id)+'">'+esc(label)+'</a>'
-            : '<span class="caption">—</span>')+'</td></tr>';
-      }).join("");
-      el.innerHTML =
-        (needsWork ? '<div class="note" style="margin-bottom:16px"><b style="font-family:var(--f-disp)">'+needsWork+' game'+(needsWork===1?"":"s")+' need'+(needsWork===1?"s":"")+' a box score.</b> Open one below to rebuild it from the sittings EA recorded.</div>' : '')+
-        '<div class="card"><div class="card-h"><h3>Your games</h3><span class="chip">'+games.length+' game'+(games.length===1?"":"s")+'</span></div>'+
-        '<div class="tblwrap"><table class="tbl keepcols gs-tbl"><thead><tr><th class="tleft">Date</th><th class="tleft">Opponent</th><th>Result</th><th>Box score</th><th class="tright hide-xs-col">Lines</th><th class="tright">Manual entry</th></tr></thead>'+
-        '<tbody>'+rows+'</tbody></table></div>'+
-        '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">“Lines” is how many player stat lines the box score holds — a full game is normally 12. A game that lagged out and resumed often imports only its first sitting, which is what the manual rebuild fixes. By league convention, the <b>winning club’s management</b> enters the stats after a forfeit win or a win that followed a disconnect. A game forfeited before its scheduled time, or over a no-show, is ruled by statistics staff (Rule 3.2: recorded 1–0, no player stats).</span></div></div>';
-    });
-};
-
-/* one fixture: its sittings, multi-selected, merged into a single game */
-CG._gsOne = function(el){
-  var gid = el.getAttribute("data-game"), tid = el.getAttribute("data-team");
-  var eb = function(m){ return '<div class="note red">'+esc(m)+'</div>'; };
-  CG.sb.from("games")
-    .select("id,week,stage,scheduled_at,status,home_team_id,away_team_id,home_score,away_score,voided,forfeit_team_id,game_stats(count)")
-    .eq("id", gid).maybeSingle()
-    .then(function(r){
-      var g = r && r.data;
-      if (!g){ el.innerHTML = eb("That game doesn’t exist."); return; }
-      /* the server enforces this too — this is just a straight answer instead of a 401 */
-      if (g.home_team_id!==tid && g.away_team_id!==tid){
-        el.innerHTML = eb("That fixture isn’t one of yours. This desk only opens your own club’s games."); return;
-      }
-      if (g.voided){ el.innerHTML = eb("That game is voided — there’s nothing to rebuild."); return; }
-      var idToCode = (CG.lg && CG.lg._idToCode) || {};
-      var homeSide = g.home_team_id===tid;
-      var opp = idToCode[homeSide ? g.away_team_id : g.home_team_id] || "—";
-      var lines = (g.game_stats && g.game_stats[0] && g.game_stats[0].count) || 0;
-      el.innerHTML =
-        '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+esc((homeSide?"vs ":"@ ")+opp)+'</h3>'+
-          '<span class="chip">'+esc(CG.fmtDay(Date.parse(g.scheduled_at)))+(g.week!=null?' · '+(g.stage==="preseason"?"preseason":"week "+g.week):'')+'</span></div>'+
-        '<div class="card-b" style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">'+
-          '<div><span class="caption">Current result</span><div id="gsCurScore" style="font-family:var(--f-disp);font-size:20px">'+
-            (g.status==="final" && g.home_score!=null ? esc(g.home_score+"–"+g.away_score)+' <span class="caption" style="font-size:11px">('+esc(idToCode[g.home_team_id]||"home")+' first)</span>' : 'not final yet')+'</div></div>'+
-          '<div><span class="caption">Box score lines</span><div id="gsCurLines" style="font-family:var(--f-disp);font-size:20px">'+lines+'</div></div>'+
-          (g.forfeit_team_id ? '<div><span class="caption">Ruling</span><div style="padding-top:5px"><span class="chip chip-warn">Forfeit charged to '+esc(idToCode[g.forfeit_team_id]||"?")+'</span></div></div>' : '')+
-        '</div></div>'+
-        (g.forfeit_team_id ? '<div class="note" style="margin-bottom:14px">This game carries a forfeit ruling, and a ruled game is not rebuilt from this desk. Only a commissioner can change or reverse a forfeit. If the ruling is wrong, <a href="#/hub/complaints" style="font-weight:700;border-bottom:2px solid var(--chrome)">open a case with the league office</a> and say what happened.</div>' : '')+
-        '<div id="gsCands"><p class="caption">Looking for this game’s sittings in the EA archive…</p></div>';
-      function loadCands(){
-        var out0 = document.getElementById("gsCands");
-        if (out0) out0.innerHTML = '<p class="caption">Looking for this game’s sittings in the EA archive…</p>';
-        CG._smLeagueApi({ leagueCandidates: { gameId: gid } }).then(function(o){
-        var out = document.getElementById("gsCands");
-        if (!out) return;
-        if (o.error){ out.innerHTML = eb(o.error); return; }
-        /* EA search -> link own club -> pull sessions -> reload the candidate list */
-        function wireEa(){
-          var sBtn = document.getElementById("gsClubSearch"), sOut = document.getElementById("gsClubOut");
-          function doClubSearch(){
-            var q = (document.getElementById("gsClubQ").value||"").trim();
-            if (q.length < 2){ CG.toast("Enter your club’s name","err"); return; }
-            sOut.innerHTML = '<p class="caption">Searching EA…</p>';
-            CG._smLeagueApi({ leagueEaSearch: { gameId: gid, clubName: q } }).then(function(r){
-              if (r.error){ sOut.innerHTML = eb(r.error); return; }
-              var clubs = r.clubs||[];
-              if (!clubs.length){ sOut.innerHTML = '<div class="note">No EA clubs found for “'+esc(q)+'”. Check the spelling — it must match the club name in NHL exactly.</div>'; return; }
-              sOut.innerHTML = '<div class="caption" style="margin-bottom:8px">Pick your club:</div>'+clubs.map(function(c){
-                return '<div class="card" style="margin-bottom:8px"><div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
-                  '<div style="flex:1;min-width:0"><b>'+esc(c.name)+'</b>'+(c.memberCount?' <span class="caption">'+esc(String(c.memberCount))+' members</span>':'')+'<div class="caption mono">EA club '+esc(c.clubId)+'</div></div>'+
-                  '<button class="btn btn-chrome btn-sm" data-gslink="'+esc(c.clubId)+'" data-gsname="'+esc(c.name)+'">This is us</button></div></div>';
-              }).join("");
-              sOut.querySelectorAll("[data-gslink]").forEach(function(b){ b.addEventListener("click", function(){
-                var btn=this, cid=btn.getAttribute("data-gslink"), cname=btn.getAttribute("data-gsname");
-                btn.disabled = true; btn.textContent = "Linking…";
-                CG._smLeagueApi({ leagueEaLink: { gameId: gid, clubId: cid, clubName: cname, teamId: tid } }).then(function(lr){
-                  if (lr.error){ btn.disabled=false; btn.textContent="This is us"; CG.toast(lr.error,"err"); return; }
-                  CG.toast(lr.teamCode+" linked to “"+cname+"”","ok");
-                  btn.textContent = "Pulling sessions…";
-                  /* v4.35: the link is written by now, so a pull that fails (or waits past 25 s on the bot server)
-                     is told here and the desk still repaints as linked; only a failed link reaches the catch below */
-                  return CG._smLeagueApi({ leagueEaFetch: { gameId: gid, teamId: tid } }).then(function(fr){
-                    if (fr && fr.error) CG.toast(fr.error,"err");
-                    else if (fr) CG.toast("Pulled "+fr.fetched+" recent session"+(fr.fetched===1?"":"s")+" from EA","ok");
-                  }, function(e){ CG.toast(e.message,"err"); }).then(loadCands);
-                }).catch(function(e){ btn.disabled=false; btn.textContent="This is us"; CG.toast(e.message,"err"); });
-              }); });
-            }).catch(function(e){ sOut.innerHTML = eb(e.message); });
-          }
-          CG.paintEaStatus(out);
-          if (sBtn){ sBtn.addEventListener("click", doClubSearch);
-            var qEl = document.getElementById("gsClubQ");
-            if (qEl) qEl.addEventListener("keydown", function(ev){ if (ev.key==="Enter") doClubSearch(); }); }
-          var fBtn = document.getElementById("gsFetch");
-          if (fBtn) fBtn.addEventListener("click", function(){
-            var btn=this; btn.disabled = true; btn.textContent = "Checking EA…";
-            CG._smLeagueApi({ leagueEaFetch: { gameId: gid, teamId: tid } }).then(function(fr){
-              if (fr.error){ btn.disabled=false; btn.textContent="Check EA again for newer sessions"; CG.toast(fr.error,"err"); return; }
-              CG.toast("Pulled "+fr.fetched+" recent session"+(fr.fetched===1?"":"s")+" from "+fr.club+"’s EA history","ok");
-              loadCands();
-            }).catch(function(e){ btn.disabled=false; btn.textContent="Check EA again for newer sessions"; CG.toast(e.message,"err"); });
-          });
-        }
-        var cs = (o.candidates||[]).filter(function(c){ return !c.usedElsewhere; });
-        var blocked = (o.candidates||[]).length - cs.length;
-        var lk = o.linked || { home:true, away:true };
-        var myLinked = homeSide ? lk.home : lk.away;
-        /* one-time linkage: until the club is tied to its EASHL club, EA can't be searched */
-        var searchCard = !myLinked
-          ? '<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>Find your club on EA</h3><span class="chip">One-time setup</span></div>'+
-            '<div class="card-b"><p class="caption" style="margin:0 0 12px;max-width:78ch">Your club isn’t linked to its EASHL club yet, so EA’s records can’t be searched. Search the exact club name you play under and pick it — this desk then pulls your recent sessions automatically, and from that point on your games import on their own.</p>'+
-            '<label class="fld" style="margin:0"><span>EASHL club name</span><div style="display:flex;gap:8px;flex-wrap:wrap">'+
-            '<input id="gsClubQ" placeholder="e.g. Chel Gaming Blades" autocomplete="off" style="flex:1;min-width:200px">'+
-            '<button class="btn btn-chrome" id="gsClubSearch">Search EA</button></div></label>'+
-            CG.eaStatusLine()+
-            '<div id="gsClubOut" style="margin-top:12px"></div></div></div>'
-          : '';
-        var fetchBtn = myLinked
-          ? '<div style="margin-top:10px"><button class="btn '+(cs.length?'btn-ghost btn-sm':'btn-chrome')+'" id="gsFetch">'+(cs.length?'Check EA again for newer sessions':'Check EA for this game’s sessions')+'</button>'+CG.eaStatusLine()+'</div>'
-          : '';
-        if (!cs.length){
-          out.innerHTML = searchCard +
-            '<div class="note">'+(myLinked
-              ? 'Nothing in the archive for this fixture yet. If the game just ended, EA can take a few minutes — pull your club’s latest sessions below. EA only keeps each club’s last few private matches, so do this soon after playing.'
-              : 'Nothing to show yet — link your club above first.')+'</div>' + fetchBtn;
-          wireEa();
-          return;
-        }
-        out.innerHTML = searchCard + '<div class="card"><div class="card-h"><h3>Sittings EA recorded</h3><span class="chip chip-warn">Rebuilds the box score</span></div>'+
-          '<div class="card-b">'+
-          /* v3.67 (commissioner, 2026-09-28, Q23): combining a lagged-out game's sittings is "Only the
-             specific staff for that and commissioners." A club attaches the one sitting that is its game;
-             a game played in more than one sitting is combined by statistics staff, and ingest-stats
-             refuses a club's multi-sitting merge. */
-          '<p class="caption" style="margin:0 0 12px;max-width:78ch">Pick the one sitting that is this game and attach it: its score and every player line become the box score. If the game lagged out and was played in more than one sitting, statistics staff combine them (Rule 4.3); a game that comes in short of a full sixty minutes is held and flagged to them automatically. Anything already tied to a different game is not shown.</p>'+
-          cs.map(function(c){
-            return '<div class="card" style="margin-bottom:8px"><div class="card-b" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
-              '<button type="button" class="chip'+(c.attached?' chip-chrome':'')+'" data-gssel="'+esc(c.matchId)+'" aria-pressed="'+(c.attached?"true":"false")+'" style="cursor:pointer">'+(c.attached?'✓':'—')+'</button>'+
-              '<div style="flex:1;min-width:0"><b>'+c.homeScore+' – '+c.awayScore+'</b> <span class="caption">('+esc(o.game.home)+' first)</span>'+
-                (c.minutes?' <span class="chip'+(c.minutes<10?' chip-warn':'')+'" style="font-size:9px">~'+c.minutes+' min</span>':'')+
-                (c.oppEaName?' <span class="chip" style="font-size:9px">vs '+esc(c.oppEaName)+' (EA)</span>':'')+
-                (c.attached?' <span class="chip chip-win" style="font-size:9px">already on this game</span>':'')+
-                '<div class="caption">'+(c.ts?CG.fmtFull(c.ts*1000):'')+'</div></div>'+
-            '</div></div>';
-          }).join("")+
-          '<button class="btn btn-chrome" id="gsMerge" style="margin-top:6px">Attach this sitting to the game</button>'+
-          (blocked ? '<p class="caption" style="margin-top:10px">'+blocked+' sitting'+(blocked===1?" is":"s are")+' already attached to a different game and can’t be used here.</p>' : '')+
-          '</div></div>' + fetchBtn;
-        wireEa();
-        /* v3.67 (Q23): one sitting at a time for a club; picking one clears the others. v3.76: the league
-           office and statistics staff may combine sittings (Rule 4.3), so for them each chip toggles alone. */
-        var gsMulti = CG.role()==="commish" || !!(CG.isStatsStaff && CG.isStatsStaff());
-        out.querySelectorAll("[data-gssel]").forEach(function(b){ b.addEventListener("click", function(){
-          var on = this.getAttribute("aria-pressed")!=="true", me = this;
-          out.querySelectorAll("[data-gssel]").forEach(function(x){
-            if (gsMulti && x !== me) return;
-            var sel = on && x === me;
-            x.setAttribute("aria-pressed", sel?"true":"false");
-            x.classList.toggle("chip-chrome", sel);
-            x.textContent = sel ? "✓" : "—";
-          });
-        }); });
-        var mg = document.getElementById("gsMerge");
-        if (mg) mg.addEventListener("click", function(){
-          var ids = [].slice.call(out.querySelectorAll('[data-gssel][aria-pressed="true"]')).map(function(x){ return x.getAttribute("data-gssel"); });
-          if (!ids.length){ CG.toast("Pick the sitting that is this game","err"); return; }
-          if (ids.length > 1 && !gsMulti){ CG.toast("Statistics staff combine a game played in more than one sitting (Rule 4.3)","err"); return; }
-          var btn = this;
-          CG.confirm("Attach this sitting to the game?",
-            "Its score and player lines become this fixture's box score. Standings, player totals and profiles update immediately, and league staff are told your club attached it.",
-            "Attach", function(){
-              btn.disabled = true; btn.textContent = "Rebuilding…";
-              CG._smLeagueApi({ leagueMerge: { gameId: gid, matchIds: ids } }).then(function(res){
-                btn.disabled = false; btn.textContent = "Attach this sitting to the game";
-                if (res.error){ CG.toast(res.error,"err"); return; }
-                /* the header above was rendered from the PRE-merge row — leaving it would sit a
-                   stale "current result" directly above the new one and read as a contradiction */
-                var sc = document.getElementById("gsCurScore"), ln = document.getElementById("gsCurLines");
-                if (sc) sc.innerHTML = res.held ? 'not final yet' : esc(String(res.score).replace("-","–"))+(res.wentOt?' <span class="caption" style="font-size:11px">(OT)</span>':'')+' <span class="caption" style="font-size:11px">('+esc(o.game.home)+' first)</span>';
-                if (ln) ln.textContent = res.players;
-                /* v3.53: a combined game is published only once it is a full game with a decided score */
-                out.innerHTML = res.held
-                  ? '<div class="note"><b style="font-family:var(--f-disp)">Combined and held.</b> '+res.sittings+' sitting'+(res.sittings===1?"":"s")+', '+esc(res.score)+' so far. '+esc(res.heldWhy||"")+' <a href="#/hub/gamestats" style="font-weight:700;border-bottom:2px solid var(--chrome)">Back to your games</a></div>'
-                  : '<div class="note grn"><b style="font-family:var(--f-disp)">Done.</b> '+res.sittings+' sitting'+(res.sittings===1?"":"s")+' combined into one game — final '+esc(res.score)+(res.wentOt?" (OT)":"")+', '+res.players+' player lines ('+res.linked+' matched to profiles). <a href="#/hub/gamestats" style="font-weight:700;border-bottom:2px solid var(--chrome)">Back to your games</a></div>';
-                CG.toast(res.held ? "Combined and held: not yet a full game" : "Game rebuilt from "+res.sittings+" sittings","ok");
-                CG.reloadLeague && CG.reloadLeague();
-              }).catch(function(e){ btn.disabled = false; btn.textContent = "Attach this sitting to the game"; CG.toast(e.message,"err"); });
-            });
-        });
-        }).catch(function(e){ var out2 = document.getElementById("gsCands"); if (out2) out2.innerHTML = eb(e.message); });
-      }
-      loadCands();
-    });
-};
-
-CG.AFTER._hubGameStats = function(){
-  var list = document.getElementById("gsList"), one = document.getElementById("gsOne");
-  if (list) CG._gsList(list);
-  else if (one) CG._gsOne(one);
+/* TEAM HQ: GAME STATS (2026-08-04 to v4.49) let a club's Owner, GM or AGM rebuild its own fixtures from their sittings.
+   v4.49 (commissioner, 2026-11-10: "Do not allow teams to bring in their own box scores. They should be automatic or dealt
+   with by staff."): the page, its list and its per-fixture desk are gone; box scores import from EA and the statistics
+   staff work any game from the Stats manager (#/hub/statsmgr). ingest-stats.js refuses a club the same way
+   (authForGame), so an old copy of this page in an open tab cannot file anything either. An old #/hub/gamestats link
+   lands on CG.gameStatsGone below. */
+CG.gameStatsGone = function(){
+  return '<div class="note"><b>Box scores are not filed by clubs.</b> Every league game imports its box score from EA on its own. '+
+    'If one is missing or wrong, club management files a <b>Statistics correction</b> in the Action Center and the statistics staff fix it (Rule 6.3).</div>';
 };
 
 /* Messages as a hub section (#/hub/messages) — the DM UI renders inside the
@@ -15165,10 +14912,7 @@ CG.ROUTES.hub = function(param, qs){
     return (CG.managesClub && CG.managesClub()) ? CG.hubShell("management", CG.hubManagement())
       : CG.unauthorized("The front office is your club’s Owner/GM/AGM tool.");
   }
-  if (param==="gamestats"){
-    return (CG.can("lineup.build") && CG.hubGameStats) ? CG.hubShell("gamestats", CG.hubGameStats(qs||{}))
-      : CG.unauthorized("The game stats desk is a team-management tool.");
-  }
+  if (param==="gamestats") return CG.hubShell("gamestats", CG.gameStatsGone());   /* v4.49: an old link explains, never a dead end */
   return CG._origHubRoute(param, qs);
 };
 CG._origHubAfter = CG.AFTER.hub;
@@ -15192,7 +14936,7 @@ CG.AFTER.hub = function(param, qs){
   if (param==="archive"){ CG.AFTER._ticketArchive(); return; }
   if (param==="statsmgr"){ CG.AFTER._statsMgr(qs); return; }
   if (param==="management"){ CG.AFTER._management(); return; }
-  if (param==="gamestats"){ if (CG.AFTER._hubGameStats) CG.AFTER._hubGameStats(qs); return; }
+  if (param==="gamestats") return;   /* v4.49: the explanation has nothing to wire */
   var hubEa=document.getElementById("hubEaBtn"); if(hubEa) hubEa.addEventListener("click", CG.promptEaId);
   var clEa=document.getElementById("clEaBtn"); if(clEa) clEa.addEventListener("click", CG.promptEaId);   /* the Get-set-up checklist's EA button */
   var so=document.getElementById("setSignOut"); if(so) so.addEventListener("click", function(){ CG.signOut(); });

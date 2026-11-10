@@ -42,7 +42,8 @@ A("the permissions matrix linearizes with the seat named on each control", /data
 A("...and the registration bar keeps its wrapping seg alone", /@media \(max-width:760px\)\{\.reg-bar \.seg\{flex-wrap:wrap\}/.test(css));
 A("the line creator re-flows per line, three slots across", /\.lc-grid\{grid-template-columns:repeat\(3,1fr\);min-width:0;gap:6px\}/.test(css) && /\.lc-slot\[data-slot\]::before\{content:attr\(data-slot\)/.test(css));
 A("...with touch-aware instructions", /matchMedia\("\(pointer:coarse\)"\)\.matches\)\?'Tap a player, then tap the slot/.test(hub));
-A("the game-stats desk hides its diagnostic column on phones", /class="tbl keepcols gs-tbl"/.test(live) && /hide-xs-col/.test(css));
+/* v4.49: the club game-stats desk and its table are gone (clubs never file box scores); the phone class stays for others */
+A("the removed game-stats desk left no table behind", !/gs-tbl/.test(live) && /hide-xs-col/.test(css));
 
 console.log("— public pages");
 A("no .shell ever gets the padding shorthand (it wiped the phone gutters)", !/class="shell" style="padding:\d/.test(all));

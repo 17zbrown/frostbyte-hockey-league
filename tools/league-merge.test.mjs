@@ -262,7 +262,8 @@ console.log("\n# v4.36: the refusals that protect other games and the pickup tab
   PICKUPS = []; clear(); SEATED = true; PROFILE = { role: "member", departments: [], gamertag: "BosOwner" };
   const posts0 = LOOKUPS.posts.length;
   r = await res({ leagueMerge: { gameId: "g1", matchIds: ["m1"], eaClubId: "222" } });
-  A("management may not take a sitting from EA", r.code === 403 && r.o.error === "Only statistics staff or a commissioner can merge a sitting the league archive does not hold yet.", JSON.stringify(r.o));
+  /* v4.49: a club's management is refused at the door now, before the EA-sitting check is reached */
+  A("management may not take a sitting from EA", r.code === 401 && /^Only statistics staff or a commissioner work a game's box score/.test(r.o.error || ""), JSON.stringify(r.o));
   A("...nothing written and EA never asked", zero() && LOOKUPS.posts.length === posts0);
   SEATED = false; PROFILE = STAFF;
 }

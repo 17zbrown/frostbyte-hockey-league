@@ -135,7 +135,7 @@ CG.hubGroups = function(){
     if (CG.can("roster.manage")) club.push(["management","Management","shield"]);
     if (CG.can("roster.manage")) club.push(["roster","Roster","users"]);
     if (CG.LIVE_MODE && CG.can("lineup.build")) club.push(["schedule","Schedule","cal"]);
-    if (CG.LIVE_MODE && CG.can("lineup.build") && CG.hubGameStats) club.push(["gamestats","Game stats","chart"]);
+    /* v4.49: no "Game stats" entry: clubs never file box scores (commissioner, 2026-11-10); see CG.gameStatsGone */
     /* TWO lineup surfaces, both listed (v2.95). The board (#/hub/lines) is where a club builds
        its lines and dresses whole nights; the per-game page (#/hub/lineup) is where it changes
        ONE game, and it is where a published sheet is changed late (Rule 5.3). It was routed but unlisted,

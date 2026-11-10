@@ -22,12 +22,15 @@ A("...the scouting rating is frozen for everyone", /elsif new\.scout_ovr is dist
 A("the rehearsal is recorded", /with the cap at exactly that payroll it went\s+through/.test(sql) && /Kraken over the salary cap/.test(sql));
 
 console.log("\n— the stats import (Q23)");
-A("a club's management cannot combine two or more sittings", /if \(actor\.via === "management" && matchIds\.length > 1\)\s+return \{ statusCode: 403/.test(ing));
+/* v4.49: stricter than v3.67's "no combining": a club's management reaches no part of the desk (authForGame is staff only) */
+A("a club's management cannot combine two or more sittings (v4.49: nor attach one)", !/via: "management"/.test(ing) && /return \{ ok: false, uid: a\.uid, who: a\.who, reason: STAFF_ONLY \};/.test(ing));
 
 console.log("\n— the site");
 A("no Scout OVR input or header, no scout_ovr write", !/data-scout=/.test(live) && !/update\(\{scout_ovr:/.test(live) && !/<th>Scout OVR<\/th>/.test(live));
 A("lists read the engine overall", /CG\.regOverall = function\(r\)\{/.test(live) && (live.match(/CG\.regOverall\(/g) || []).length >= 6 && /jersey_number,overall\)/.test(live));
-A("the club desk attaches one sitting", /Attach this sitting to the game/.test(live) && /* v3.76: one sitting for a club; the league office and statistics staff may combine */ /if \(ids\.length > 1 && !gsMulti\)\{ CG\.toast\("Statistics staff combine a game played in more than one sitting \(Rule 4\.3\)"/.test(live) && !/Combine the selected sittings/.test(live));
+/* v4.49 (commissioner, 2026-11-10: "Do not allow teams to bring in their own box scores"): the club desk no longer
+   exists, so no club attaches even one sitting (tools/clubs-no-box-scores-v449.test.cjs) */
+A("the club desk is gone: no club attaches a sitting", !/Attach this sitting to the game/.test(live) && !/gsMulti/.test(live));
 
 console.log("\n— the book");
 global.window = {}; global.CG = {}; eval(R("src/live/part3_content.js"));
@@ -37,7 +40,7 @@ const e = rb.changelog.find((c) => c.version === "3.67");
 A("changelog records 3.67", !!e);
 A("2.5.1: the office is bound by the cap", /The league office is bound by the cap as the clubs are/.test(secs["2.5"].paragraphs[0]));
 A("6.1.2: no hand edits, the commissioner included", /Ratings are not hand-edited by anyone, the commissioner included/.test(secs["6.1"].paragraphs[1]) && !/the commissioner may correct a single rating/.test(secs["6.1"].paragraphs[1]));
-A("6.2.1 and 4.3.3: statistics staff or a commissioner combine", /by statistics staff or a commissioner through the league's stats tools \(Rule 4\.3\)\. A club's management may attach the single sitting/.test(secs["6.2"].paragraphs[0]) && /stats import by statistics staff or a commissioner,/.test(secs["4.3"].paragraphs[2]));
+A("6.2.1 and 4.3.3: statistics staff or a commissioner combine", /by statistics staff or a commissioner through the league's stats tools \(Rule 4\.3\)\. No club files, attaches or combines its own box scores/.test(secs["6.2"].paragraphs[0]) && /stats import by statistics staff or a commissioner,/.test(secs["4.3"].paragraphs[2]));
 A("no em dashes or spaced hyphens in the 3.67 entry", !/—| - /.test(JSON.stringify(e)));
 
 console.log("\n" + (fail ? fail + " of " + n + " FAILED" : "all " + n + " passed"));

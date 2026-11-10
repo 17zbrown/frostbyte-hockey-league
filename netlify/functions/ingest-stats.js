@@ -1400,7 +1400,8 @@ async function isStatsStaff(jwt) {
 /* v4.36: the staff half of authForGame, shared with leagueSessions (club-wide: no management seat applies). One
    definition of "statistics staff or a commissioner" for every desk action that names a person. A banned member
    comes back with no uid, so authForGame denies them before any seat is read; anyone else who is not staff comes
-   back with their uid and gamertag for the seat check. */
+   back with their uid and gamertag (v4.49: for the refusal only; there is no club seat check any more). */
+const STAFF_ONLY = "Only statistics staff or a commissioner work a game's box score. Box scores import automatically from EA, and a missing or wrong one goes to the statistics staff (Rule 6.3).";
 async function staffActor(jwt) {
   const deny = { ok: false };
   if (!jwt) return deny;
@@ -1422,34 +1423,19 @@ async function staffActor(jwt) {
   return { ok: false, uid, who };
 }
 
-/* Who may work a SPECIFIC game's lag-out merge.
-     - statistics staff (and commissioners) may work any game, with no window limit — that
-       unrestricted reach is the whole point of the staff override.
-     - a club's Owner/GM/AGM may work only games THEIR OWN club played. The seat is checked
-       against the two teams on THAT game, so a manager can never reach another club's fixture
-       by changing the id in the request.
-   Returns the actor so the merge can be stamped with who did it — once non-staff can rebuild a
-   box score, "who did this" has to be recoverable from the archive. */
+/* Who may work a SPECIFIC game's box score: statistics staff and commissioners, on any game, with no window limit.
+   v4.49 (commissioner, 2026-11-10: "Do not allow teams to bring in their own box scores. They should be automatic or
+   dealt with by staff."): a club's Owner, GM or AGM no longer reaches this desk at all. Until v4.49 they could work
+   their own club's fixtures (the Team HQ "Game stats" desk, 2026-08-04): the seat was checked against THAT game's two
+   teams, management attached one sitting only (v3.67), stayed inside the fixture's night +/- 1 day (a manager could
+   otherwise graft another meeting's sitting onto the game), and staff were told of every club merge. Box scores now
+   come from the EA import, and anything it misses is a staff repair. The game argument stays so every caller keeps
+   loading the game BEFORE the check. Returns the actor, so each merge is stamped with who did it. */
 async function authForGame(jwt, game) {
-  const deny = { ok: false };
+  if (!game) return { ok: false };
   const a = await staffActor(jwt);
   if (a.ok) return a;
-  if (!a.uid) return deny;
-  const { uid, who } = a;
-  let seats = [];
-  try { seats = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,owner_profile_id,gm_profile_id,agm_profile_id`); }
-  catch { return deny; }
-  const mine = (seats || []).find((t) => t.owner_profile_id === uid || t.gm_profile_id === uid || t.agm_profile_id === uid);
-  if (mine) {
-    /* v2.38 (Rule 2.6): the Owner may withhold the game stats desk from a GM or AGM. The database
-       is the authority on that (public.mgmt_access_for); a refused lookup denies, never allows. */
-    try {
-      const mode = await sbSend("POST", "rpc/mgmt_access_for", { p_profile: uid, p_team: mine.id, p_page: "gamestats" });
-      if (mode === "hidden") return { ok: false, uid, who, reason: "The Owner has not given your seat access to Game stats." };
-    } catch { return deny; }
-    return { ok: true, uid, who, via: "management", club: mine.code, teamId: mine.id };
-  }
-  return deny;
+  return { ok: false, uid: a.uid, who: a.who, reason: STAFF_ONLY };
 }
 
 /* A club rebuilding its own box score is a normal, expected repair — but staff should never
@@ -1622,7 +1608,7 @@ export const handler = async (event) => {
     const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,season_id,week,scheduled_at,status,home_team_id,away_team_id,ea_match_id,home_score,away_score,forfeit_team_id`))[0];
     if (!game) return { statusCode: 404, body: JSON.stringify({ error: "No such game." }) };
     const actor = await authForGame(jwt, game);
-    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
+    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || STAFF_ONLY }) };
     const teams = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,ea_club_id`);
     const home = teams.find((t) => t.id === game.home_team_id), away = teams.find((t) => t.id === game.away_team_id);
     if (!home || !away) return { statusCode: 422, body: JSON.stringify({ error: "This game's clubs no longer exist." }) };
@@ -1675,8 +1661,8 @@ export const handler = async (event) => {
   }
 
   /* ---- The live-EA fallback for the fixture desk: when the archive has nothing (the poller
-     wasn't watching, or the club was never linked), management searches EA for their OWN club,
-     links it, and pulls its recent sessions into the archive — after which the normal
+     wasn't watching, or the club was never linked), statistics staff search EA for the club
+     (v4.49; a club's management did this for its own club until then), link it, and pull its recent sessions into the archive — after which the normal
      candidates/merge path takes over. Everything stays scoped to one fixture via authForGame. */
   if (!authed && body && body.leagueEaSearch) {
     const jwt = String(event.headers.authorization || event.headers.Authorization || "").replace(/^Bearer\s+/i, "");
@@ -1685,7 +1671,7 @@ export const handler = async (event) => {
     const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,home_team_id,away_team_id`))[0];
     if (!game) return { statusCode: 404, body: JSON.stringify({ error: "No such game." }) };
     const actor = await authForGame(jwt, game);
-    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
+    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || STAFF_ONLY }) };
     if (name.length < 2) return { statusCode: 400, body: JSON.stringify({ error: "Enter at least 2 characters." }) };
     /* v4.34: through the bot's server; { eaPending } sends the browser to wait and ask again with eaLookup */
     const got = await eaRelay(DB, "search", name, { answerId: body.leagueEaSearch.eaLookup, requestedBy: actor.uid }).catch((e) => ({ __err: e.message }));
@@ -1706,12 +1692,10 @@ export const handler = async (event) => {
     const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,home_team_id,away_team_id`))[0];
     if (!game) return { statusCode: 404, body: JSON.stringify({ error: "No such game." }) };
     const actor = await authForGame(jwt, game);
-    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
+    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || STAFF_ONLY }) };
     if (!clubId || !/^\d+$/.test(clubId)) return { statusCode: 400, body: JSON.stringify({ error: "Pick a club from the search results." }) };
-    /* Management may link only its OWN club, and only when it isn't linked yet — re-pointing an
-       established linkage would redirect every future auto-import and is a staff decision. */
-    const teamId = actor.via === "management" ? actor.teamId
-      : String(body.leagueEaLink.teamId || "");
+    /* staff name the club they link (v4.49: club management no longer links its own) */
+    const teamId = String(body.leagueEaLink.teamId || "");
     if (!teamId || (teamId !== game.home_team_id && teamId !== game.away_team_id))
       return { statusCode: 422, body: JSON.stringify({ error: "That club isn't in this game." }) };
     const team = (await sbGet(`teams?id=eq.${encodeURIComponent(teamId)}&select=id,code,ea_club_id`))[0];
@@ -1723,7 +1707,7 @@ export const handler = async (event) => {
     if (taken[0]) return { statusCode: 422, body: JSON.stringify({ error: `That EA club is already linked to ${taken[0].code}.` }) };
     if (team.ea_club_id == null) {
       await sbSend("PATCH", `teams?id=eq.${encodeURIComponent(teamId)}`, { ea_club_id: clubId }, "return=minimal");
-      await tellStaff(`🔗 **EA club linked** — ${actor.who} (${team.code} ${actor.via === "management" ? "management" : "staff"}) linked ${team.code} to EA club “${clubName || clubId}” (${clubId}) from the fixture desk. Auto-imports now cover ${team.code}. Correct it in the Control Center if it's wrong.`);
+      await tellStaff(`🔗 **EA club linked** — ${actor.who} (staff) linked ${team.code} to EA club “${clubName || clubId}” (${clubId}) from the fixture desk. Auto-imports now cover ${team.code}. Correct it in the Control Center if it's wrong.`);
     }
     return { statusCode: 200, body: JSON.stringify({ ok: true, teamCode: team.code, clubId }) };
   }
@@ -1734,13 +1718,12 @@ export const handler = async (event) => {
     const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,home_team_id,away_team_id,scheduled_at`))[0];
     if (!game) return { statusCode: 404, body: JSON.stringify({ error: "No such game." }) };
     const actor = await authForGame(jwt, game);
-    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
+    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || STAFF_ONLY }) };
     const teams = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,ea_club_id`);
     /* fetch as the actor's own club when it's linked; otherwise any linked side of the fixture */
     /* v3.76: league staff and the league office name the club they are working for (Team HQ preview) */
     const named = String((body.leagueEaFetch && body.leagueEaFetch.teamId) || "");
-    const mine = actor.via === "management" ? teams.find((t) => t.id === actor.teamId)
-      : (named ? teams.find((t) => t.id === named) : null) || null;
+    const mine = (named ? teams.find((t) => t.id === named) : null) || null;
     const src = (mine && mine.ea_club_id != null) ? mine : teams.find((t) => t.ea_club_id != null);
     if (!src) return { statusCode: 422, body: JSON.stringify({ error: "Link your club's EA club first (search above)." }) };
     const got = await eaRelay(DB, "matches", String(src.ea_club_id), { answerId: body.leagueEaFetch.eaLookup, requestedBy: actor.uid }).catch((e) => ({ __err: e.message }));
@@ -2053,7 +2036,7 @@ export const handler = async (event) => {
     const game = (await sbGet(`games?id=eq.${encodeURIComponent(gameId)}&select=id,season_id,week,scheduled_at,status,home_team_id,away_team_id,ea_match_id,voided,forfeit_team_id,home_score,away_score`))[0];
     if (!game) return { statusCode: 404, body: JSON.stringify({ error: "No such game." }) };
     const actor = await authForGame(jwt, game);
-    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || "Statistics staff, or the Owner/GM/AGM of a club in this game." }) };
+    if (!actor.ok) return { statusCode: 401, body: JSON.stringify({ error: actor.reason || STAFF_ONLY }) };
     if (game.voided) return { statusCode: 422, body: JSON.stringify({ error: "That game is voided." }) };
     /* A forfeit is a ruling. A club's management could otherwise merge real sittings over it and,
        as this path once did by writing forfeit_team_id: null, erase the ruling against itself.
@@ -2068,8 +2051,7 @@ export const handler = async (event) => {
     /* v3.67 (commissioner, 2026-09-28, Q23): combining a lagged-out game's sittings is "Only the specific
        staff for that and commissioners." A club's management attaches ONE sitting to its fixture; two or
        more are a statistics-staff merge. A held game is flagged to that staff automatically (v3.53). */
-    if (actor.via === "management" && matchIds.length > 1)
-      return { statusCode: 403, body: JSON.stringify({ error: "Only statistics staff or a commissioner combine a game played in more than one sitting (Rule 4.3). Attach the single sitting that is this game, or leave it to them: a game short of sixty minutes is held and flagged to them automatically." }) };
+    /* v4.49: management no longer reaches this path at all (authForGame), so the single-sitting limit above went with it */
     const teams = await sbGet(`teams?id=in.(${game.home_team_id},${game.away_team_id})&select=id,code,ea_club_id`);
     const home = teams.find((t) => t.id === game.home_team_id), away = teams.find((t) => t.id === game.away_team_id);
     /* v4.37: each side is its own EA club plus any club recorded as playing for it in THIS fixture (Rule 4.6) */
@@ -2084,9 +2066,7 @@ export const handler = async (event) => {
        deletes statistics a club earned on the ice. */
     const restart = body.leagueMerge.restart === true;
     /* v4.36: the club desk has no Restarted box; its managers are told who re-files a restarted game */
-    const restartHint = actor.via === "management"
-      ? "If the game was restarted from the beginning, statistics staff re-file it."
-      : "If the game was restarted from the beginning, tick \"Restarted\" to strike the sittings you leave out.";
+    const restartHint = "If the game was restarted from the beginning, tick \"Restarted\" to strike the sittings you leave out.";
     if (restart && actor.via !== "staff")
       return { statusCode: 403, body: JSON.stringify({ error: "Only statistics staff can re-file a restarted game." }) };
     /* v4.36: a sitting the league archive does not hold yet (the poller never saw it: the clubs played outside every
@@ -2163,11 +2143,7 @@ export const handler = async (event) => {
        reach: a legitimately resumed sitting days later is theirs to judge. The window is
        recomputed from the payload through the SAME formatter the candidate list uses, so the
        two can never disagree about which day a sitting belongs to. */
-    const mgmtDays = actor.via === "management"
-      ? new Set([etDayUnix(Math.floor(Date.parse(game.scheduled_at) / 1000) - 86400),
-                 etDayUnix(Math.floor(Date.parse(game.scheduled_at) / 1000)),
-                 etDayUnix(Math.floor(Date.parse(game.scheduled_at) / 1000) + 86400)])
-      : null;
+    /* v4.49: only staff merge now, so no night window applies (it held management to the fixture's night +/- 1 day) */
     const norms = [];
     const normById = new Map();   // v4.36: the relay rows are archived from their own normalized payload
     let derivedOpp = null;   // {id, name} consistent across every selected sitting
@@ -2189,8 +2165,6 @@ export const handler = async (event) => {
           return { statusCode: 422, body: JSON.stringify({ error: "The selected sittings are against different opponents — they can't be one game." }) };
         derivedOpp = { id: String(oppClub.ea_club_id), name: oppClub.name || null };
       }
-      if (mgmtDays && !mgmtDays.has(nrm.et_day))
-        return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${nrm.ea_match_id} wasn't played around this fixture — statistics staff can merge that one for you.` }) };
       norms.push(nrm);
       normById.set(String(row.ea_match_id), nrm);
     }
@@ -2249,7 +2223,7 @@ export const handler = async (event) => {
        nothing is posted (the old final stays in #game-scores). That used to happen silently on any merge; now it
        needs the desk's explicit unpublish:true, sent only after its confirm says so. Every caller, the club desk too. */
     if (unpublish && body.leagueMerge.unpublish !== true)
-      return { statusCode: 409, body: JSON.stringify({ error: `These sittings add up to ${minutes} of 60 minutes, so the game would go back to held and its published result would come off the standings, with nothing posted. Nothing was changed. ${actor.via === "management" ? "Statistics staff can confirm it from the Stats manager." : "Confirm it from the Stats manager to go ahead."}`, wouldHold: true, heldWhy }) };
+      return { statusCode: 409, body: JSON.stringify({ error: `These sittings add up to ${minutes} of 60 minutes, so the game would go back to held and its published result would come off the standings, with nothing posted. Nothing was changed. Confirm it from the Stats manager to go ahead.`, wouldHold: true, heldWhy }) };
     /* v4.36: below the preview, because the profile lookups are reads a preview does not need */
     const rows = await leagueBoxRows(game, clubByTeam);
     /* WRITE ORDER: the archive first. The archive write here is the provenance (the first sitting
@@ -2260,7 +2234,7 @@ export const handler = async (event) => {
        v4.36: a sitting taken from EA is archived here too, in ONE insert carrying its final provenance (D9), and an
        archived sitting is marked only if no restart struck it and no other game claimed it since the checks above;
        either race answers 409 with the game untouched. */
-    const byWhom = actor.via === "management" ? `${actor.who} (${actor.club} management)` : `${actor.who} (stats staff)`;
+    const byWhom = `${actor.who} (stats staff)`;   /* v4.49: staff and commissioners only (authForGame) */
     const prov = (id) => {
       const first = id === String(merged.ea_match_id);
       return { status: first ? (st.finished ? "ingested" : "incomplete") : "merged", game_id: game.id, reason: first
@@ -2343,13 +2317,8 @@ export const handler = async (event) => {
         `Correct it in the Control Center if that looks wrong.`);
     }
     const linked = rows.filter((r) => r.profile_id).length;
-    /* Staff should never find out a box score changed only by noticing the number moved. */
-    if (actor.via === "management") {
-      await tellStaff(`🧩 **Lag-out merge by a club** — ${byWhom} rebuilt ${away.code} @ ${home.code}` +
-        (game.week ? ` (week ${game.week})` : "") + ` from ${norms.length} sitting${norms.length === 1 ? "" : "s"}: ` +
-        `${st.finished ? "final" : "held (not yet a full, decided game)"} ${homeClub.score}-${awayClub.score}${st.wentOt ? " (OT)" : ""}, ${rows.length} player lines. ` +
-        `Review it in the Stats Manager if anything looks off.`);
-    }
+    /* Staff should never find out a box score changed only by noticing the number moved. A club's merge told them (v4.49:
+       clubs no longer merge; a staff merge is stamped in ea_ingest_log above) */
     return { statusCode: 200, body: JSON.stringify({ ok: true, gameId: game.id,
       score: `${homeClub.score}-${awayClub.score}`, wentOt: !!st.wentOt, inferredOt: !!st.inferredOt,
       held: !st.finished, heldWhy, struck, overlong: !!st.overlong,

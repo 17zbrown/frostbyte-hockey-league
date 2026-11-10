@@ -48,7 +48,9 @@ A("pickup sittings import through the pickup door", /CG\._smApi\(\{ action:"impo
 A("the restart option is kept (staff only on the server)", /id="smLgRestart"/.test(desk));
 A("held merges still say so", /Merged and held\./.test(desk));
 A("the bar caption keeps the overtime rule the 2026-09-26 record names", /overtime from the deciding sitting/.test(live));
-A("the EA status line: still exactly four on the site, one on this desk", (live.match(/CG\.eaStatusLine\(\)/g) || []).length === 4 && (desk.match(/CG\.eaStatusLine\(\)/g) || []).length === 1);
+/* v4.49: two on the site (the Stats manager and the pickup import page) since the club game stats desk and its two
+   went (clubs never file box scores) */
+A("the EA status line: exactly two on the site, one on this desk", (live.match(/CG\.eaStatusLine\(\)/g) || []).length === 2 && (desk.match(/CG\.eaStatusLine\(\)/g) || []).length === 1);
 A("...repainted in place, never blinking back to Checking", /var oldEa = el\.querySelector\("\[data-ea-status\]"\);/.test(desk));
 
 console.log("\n— no page resets: the desk draws from one state object");
@@ -92,8 +94,8 @@ A("the desk CSS is scoped and token based", /\/\* v4\.36: the Stats manager desk
 A("...with a reduced-motion fallback", /@media\(prefers-reduced-motion:reduce\)\{\.sm-crest,\.sm-crest:active\{transform:none;transition:none\}/.test(head));
 A("CG.confirm takes several facts, each its own escaped paragraph", /var ps = Array\.isArray\(msg\) \? msg : \[msg\];/.test(ui) && /esc\(m\)/.test(ui));
 A("the pickup result is one definition, used twice", (live.match(/CG\._puResultHtml\(/g) || []).length === 2 && (live.match(/players matched to CGHL profiles/g) || []).length === 1);
-A("the v4.35 club-desk anchor still finds the club desk first", at('btn.textContent = "Pulling sessions…";') > deskTo);
-A("the Automations panel names the new door", /the Stats Manager\\u2019s Find a game on EA, the pickup import page/.test(live));
+A("v4.49: the club game stats desk is gone (no club pulls sessions any more)", at('btn.textContent = "Pulling sessions…";') < 0 && !/CG\._gsOne = function/.test(live));
+A("the Automations panel names the doors that remain", /the Stats Manager\\u2019s Find a game on EA and the pickup import page\. EA refuses/.test(live));
 
 /* ---- the pure helpers, run in a sandbox against fixture games ---- */
 console.log("\n— the pure helpers");

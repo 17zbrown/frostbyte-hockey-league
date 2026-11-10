@@ -296,8 +296,9 @@ console.log("\n— the site: one helper waits for the bot, every EA box shows it
   const direct = live.match(/fetch\("\/api\/ingest-stats",\{[^]*?body: JSON\.stringify\(\{ [a-zA-Z]+:/g) || [];
   A("no other site code posts an EA action: the one direct ingest-stats call is the archive replay", !/fetch\("\/api\/pickup-import"/.test(live)
     && direct.length === 1 && /\{ reingest:$/.test(direct[0]) && (live.match(/fetch\("\/api\/ingest-stats"/g) || []).length === 1, direct.map((d) => d.slice(-30)).join(" | "));
-  A("a status line on all three boxes, painted in place", (live.match(/CG\.eaStatusLine\(\)/g) || []).length === 4
-    && /CG\.paintEaStatus\(res\.parentNode\);/.test(live) && /CG\.paintEaStatus\(body\);/.test(live) && /CG\.paintEaStatus\(out\);/.test(live));
+  /* v4.49: the club game stats desk (the third box, CG.paintEaStatus(out)) is gone: clubs never file box scores */
+  A("a status line on both remaining boxes, painted in place", (live.match(/CG\.eaStatusLine\(\)/g) || []).length === 2
+    && /CG\.paintEaStatus\(res\.parentNode\);/.test(live) && /CG\.paintEaStatus\(body\);/.test(live) && !/CG\.paintEaStatus\(out\);/.test(live));
   A("the Automations panel lists the lane", /key:"ea-lookup", noRun:true, staleAfterMin:30, name:"EA club search \(bot server\)"/.test(live));
 
   /* run the helper itself, with a fake session, endpoint and ea_lookup_state */

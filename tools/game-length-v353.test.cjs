@@ -43,7 +43,8 @@ A("the level-merge double loss is gone", !/Resumed game ended level/.test(ing));
 
 console.log("\n— the site and the bot");
 A("Stats manager: the Restarted option", /id="smLgRestart"/.test(live) && /leagueMerge: \{ gameId: gid, matchIds: ids, restart: restart \}/.test(live));
-A("both desks say when a merge is held", /Merged and held\./.test(live) && /Combined and held\./.test(live));
+/* v4.49: the club game stats desk ("Combined and held.") is gone (clubs never file box scores); the Stats manager says it */
+A("the Stats manager says when a merge is held", /Merged and held\./.test(live) && !/Combined and held\./.test(live));
 /* v3.73 (commissioner, 2026-09-29): the game-incident log, its Stats manager form and the bot's incident
    rulings were retired; the early-restart and overtime rulings live in Rule 4.3 alone. */
 A("the retired incident form is gone from the Stats manager", !/smInPeriod/.test(live) && !/log_game_incident/.test(live));
