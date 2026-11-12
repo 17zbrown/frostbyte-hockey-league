@@ -93,6 +93,7 @@ const PROFILES = {
 let UID = "stats";
 let LOOKUPS = createLookupsFake();
 let ARCHIVE_URLS = [];
+let SUBS = [];   /* v4.50: Rule 4.6 substitutions on record, for the borrowed-club short final below */
 let writes = [];
 const ids = (u, re) => { const m = decodeURIComponent(u).match(re); return m ? m[1].split(",") : null; };
 globalThis.fetch = async (url, opts = {}) => {
@@ -116,6 +117,7 @@ globalThis.fetch = async (url, opts = {}) => {
     const tl = ids(u, /home_team_id\.in\.\(([^)]*)\)/), lo = Date.parse(d.match(/scheduled_at=gte\.([^&]+)/)[1]), hi = Date.parse(d.match(/scheduled_at=lte\.([^&]+)/)[1]);
     return J(GAMES.filter((g) => (tl.includes(g.home_team_id) || tl.includes(g.away_team_id)) && Date.parse(g.scheduled_at) >= lo && Date.parse(g.scheduled_at) <= hi));
   }
+  if (u.includes("/rest/v1/game_club_substitutions?ea_club_id=in.")) { const want = ids(u, /ea_club_id=in\.\(([^)]*)\)/); return J(SUBS.filter((x) => want.includes(String(x.ea_club_id)))); }
   if (u.includes("/rest/v1/pickup_games?or=")) {
     const want = ids(u, /ea_match_id\.in\.\(([^)]*)\)/);
     return J(PICKUPS.filter((p) => want.includes(p.ea_match_id) || p.ea_match_ids.some((x) => want.includes(x))));
@@ -251,6 +253,46 @@ console.log("\n# paging: an older window is the archive's alone");
   A("the archive read is capped and marked as a shortcut",
     /\/\/ shortcut: ea_club_ids has no GIN index and the window is capped at 60 rows, a sequential scan; add the index and paging when ea_ingest_log passes ~20k rows/.test((await import("node:fs")).readFileSync(new URL("../netlify/functions/ingest-stats.js", import.meta.url), "utf8"))
     && /order=et_day\.desc&limit=60/.test(ARCHIVE_URLS[0]));
+}
+
+console.log("\n# v4.50: a final filed by hand short of sixty minutes still waits for a reload, like a held game");
+{
+  /* Rule 4.3.3: staff may publish a decided game at any clock, and the importer's probe sends a later same-pair sitting on
+     a night with an open sibling to the desk; the listing must not quietly put that reload on the sibling */
+  const t0 = base - 7 * D;
+  const hf1 = raw("mHf1", t0 + 25 * MIN, BOS(2), TOR(1), 1500), hf2 = raw("mHf2", t0 + 45 * MIN, BOS(1), TOR(0), 900);
+  const rel = raw("mHfR", t0 + 70 * MIN, BOS(0), TOR(1), 1200);
+  const added = [G("gHf", "T1", "T2", t0, { status: "final", ea_match_id: "mHf1" }), G("gHs", "T1", "T2", t0 + 35 * MIN)];
+  GAMES.push(...added);
+  const rows = [logRow(hf1, "ingested", "gHf"), logRow(hf2, "merged", "gHf"), logRow(rel, "unmatched")];
+  LOG.push(...rows);
+  seedEa(); UID = "stats";
+  const R5 = (await call({ clubId: "111", ea: false })).out;
+  const r5 = by(R5, "mHfR");
+  A("the reload after a 40-minute final filed by hand is ambiguous: the open sibling first, the final offered",
+    r5 && r5.kind === "league" && r5.ambiguous === true && r5.fixture.gameId === "gHs" && r5.alternatives.some((x) => x.gameId === "gHf"), JSON.stringify(r5 && { amb: r5.ambiguous, fx: r5.fixture && r5.fixture.gameId }));
+  A("...the final's own sittings stay on it", by(R5, "mHf1").onGame === true && by(R5, "mHf2").onGame === true);
+  /* the control: the same final with a full clock is complete, so the reload is plainly the sibling's */
+  /* 50 + 10 minutes (a stop early in the third would replay the whole period, Rule 4.3.6, and read short) */
+  LOG.splice(LOG.length - 3, 3, logRow(raw("mHf1", t0 + 25 * MIN, BOS(2), TOR(1), 3000), "ingested", "gHf"),
+    logRow(raw("mHf2", t0 + 45 * MIN, BOS(1), TOR(0), 600), "merged", "gHf"), logRow(rel, "unmatched"));
+  const R6 = (await call({ clubId: "111", ea: false })).out;
+  const r6 = by(R6, "mHfR");
+  A("...but after a full final, the reload is the sibling's alone", r6 && r6.ambiguous === false && r6.fixture.gameId === "gHs", JSON.stringify(r6 && { amb: r6.ambiguous, fx: r6.fixture && r6.fixture.gameId }));
+  GAMES.splice(GAMES.length - 2, 2); LOG.splice(LOG.length - 3, 3);
+
+  /* round-two review: the same short final played partly under a borrowed club (Rule 4.6) reads by side, as the importer
+     reads it; raw, its sittings are not between the same two clubs and the final looked complete */
+  const b1 = raw("mBf1", t0 + 25 * MIN, BOS(2), TOR(1), 1500), b2 = raw("mBf2", t0 + 45 * MIN, OUT(1), TOR(0), 900);
+  const b3 = raw("mBfR", t0 + 70 * MIN, BOS(0), TOR(1), 1200);
+  GAMES.push(G("gBf", "T1", "T2", t0, { status: "final", ea_match_id: "mBf1" }), G("gBs", "T1", "T2", t0 + 35 * MIN));
+  LOG.push(logRow(b1, "ingested", "gBf"), logRow(b2, "merged", "gBf"), logRow(b3, "unmatched"));
+  SUBS = [{ game_id: "gBf", ea_club_id: "999", team_id: "T1" }];
+  const R7 = (await call({ clubId: "222", ea: false })).out;
+  const r7 = by(R7, "mBfR");
+  A("a reload after a short final with a borrowed club is ambiguous too, the final offered",
+    r7 && r7.ambiguous === true && r7.fixture.gameId === "gBs" && r7.alternatives.some((x) => x.gameId === "gBf"), JSON.stringify(r7 && { amb: r7.ambiguous, fx: r7.fixture && r7.fixture.gameId }));
+  GAMES.splice(GAMES.length - 2, 2); LOG.splice(LOG.length - 3, 3); SUBS = [];
 }
 
 console.log(`\n${ok ? "PASS" : "FAIL"}`);

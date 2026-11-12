@@ -37,7 +37,8 @@ A("ten minutes is the early-restart line", /const EARLY_RESTART_S = 600;/.test(i
    (fixtureSides and bySide: a Rule 4.6 club recorded for one of them is that side's club) */
 A("used by the fresh filing, the continuation, the manual merge and the sweep",
   /const st1 = sittingsState\(\[norm\]\);/.test(ing) && /const stp = sittingsState\(bySide\(ps, sidesG\)\);/.test(ing) && /const st = sittingsState\(sideNorms\);/.test(ing) && /const stA = sittingsState\(bySide\(ps, sidesG\)\);/.test(ing));
-A("the sweep reads held games", /status=in\.\(final,scheduled\)&ea_match_id=not\.is\.null&voided=not\.is\.true&forfeit_team_id=is\.null&select=id,status,home_team_id/.test(ing));
+/* v4.50: held games ONLY now; a final short of sixty minutes was filed by hand (Rule 4.3.3) and is never ruled abandoned */
+A("the sweep reads held games", /status=eq\.scheduled&ea_match_id=not\.is\.null&voided=not\.is\.true&forfeit_team_id=is\.null&select=id,status,home_team_id/.test(ing));
 A("a struck sitting stays struck", /if \(row && row\.status === "struck"\)/.test(ing));
 A("the level-merge double loss is gone", !/Resumed game ended level/.test(ing));
 
@@ -58,7 +59,8 @@ A("changelog records 3.53", !!e);
 A("4.2.3: regular season reviewed; playoffs by the series cap; suspensions everywhere", /^Every completed regular-season game is checked/.test(secs["4.2"].paragraphs[2]) && /Every game, playoffs included, is checked for a suspended player/.test(secs["4.2"].paragraphs[2]));
 A("4.2.3: the position check only where the lock is in force", /Where the position lock is in force \(Rule 2\.1\)/.test(secs["4.2"].paragraphs[2]));
 A("4.3.2: the early restart", /within the first ten \(10\) minutes of the first period, the game is not resumed/.test(secs["4.3"].paragraphs[1]));
-A("4.3.3: published only at a full, decided game", /published as a result only once its sittings together make a full game of sixty \(60\) minutes of game clock with a decided score/.test(secs["4.3"].paragraphs[2]));
+/* v4.50: the sixty-minute test is the import's; staff filing by hand publish a decided score at any clock */
+A("4.3.3: published only at a full, decided game", /The league's import publishes a game as a result only once its sittings together make a full game of sixty \(60\) minutes of game clock with a decided score/.test(secs["4.3"].paragraphs[2]));
 A("4.3.6: the overtime drop", /A disconnection in overtime is dealt with the same way/.test(secs["4.3"].paragraphs[5]));
 A("4.3.9: a commissioner reverses", /a commissioner reverses the ruling/.test(secs["4.3"].paragraphs[8]) && !/the officials reverse the ruling/.test(secs["4.3"].paragraphs[8]));
 A("4.5: restart from the beginning, stats removed", /restarted from the beginning, the statistics of the stopped sitting are removed/.test(secs["4.5"].paragraphs[0]) && /re-file the game from the restarted sitting alone/.test(secs["4.5"].paragraphs[4]));

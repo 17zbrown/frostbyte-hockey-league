@@ -3172,11 +3172,12 @@ CG._smKinds = function(g){
     ? { ok:false, why:"Not possible yet: no sitting of this game is on file. If it was played, merge its sittings first." } : { ok:true, why:null };
   return { noshow:noshow, dc3:dc3, pre:noshow.ok && !dc3.ok ? "noshow" : (!noshow.ok && dc3.ok ? "dc3" : null), lines:lines };
 };
-/* what #game-scores will show, so the confirm can say it (a kept result on a final posts nothing: backend gap G1) */
+/* what #game-scores will show, so the confirm can say it. v4.50: a kept result on a final posts its own Forfeit line
+   (forfeit_game), closing backend gap G1: a decided hand filing is now a plain final before its Rule 4.3.7 ruling */
 CG._smFfPosts = function(g, kind){
   if (kind === "noshow") return g.status === "final" ? "The score changes, so a Corrected line posts in #game-scores." : "Final (forfeit) posts in #game-scores.";
   if (g.status !== "final" && g.eaMatchId) return "Final (forfeit) posts in #game-scores, with the score its box score adds up to.";
-  return "Nothing is posted in #game-scores and neither club is notified, because the score does not change.";
+  return "A Forfeit line posts in #game-scores with the score unchanged. Neither club is notified in its room.";
 };
 CG._smFfWill = function(g, kind, code){
   if (!kind || !code) return "";
@@ -3338,10 +3339,10 @@ CG._smBar = function(st, groups, sel){
   }
   var G = gr.game ? CG._smFx(gr.game) : "this game";
   if (sel.reFile && !f.restart) return { mode:"league", title:"File "+G+" from its "+n+" sitting"+(n === 1 ? "" : "s"),
-    caption:"Its sittings are on file, but no result is published. Filing them again publishes the game if they make a full game with a decided score; otherwise it stays held (Rule 4.3).",
+    caption:"Its sittings are on file, but no result is published. Filing them publishes the game on a decided score, even short of sixty minutes (Rule 4.3.3); a level score stays held (Rule 4.1).",
     btn:"File the game", busy:"Checking…" };
   if (f.restart) return { mode:"league", restart:true, title:"Re-file "+G+" from "+n+" sitting"+(n === 1 ? "" : "s"), caption:"Every other sitting on this game is struck, with its stats, for good."+max, btn:"Re-file the game", busy:"Checking…" };
-  if (n === 1 && !sel.locked.length) return { mode:"league", title:"File 1 sitting into "+G, caption:"It publishes only as a full game with a decided score (Rule 4.3)."+max, btn:"File the sitting", busy:"Checking…" };
+  if (n === 1 && !sel.locked.length) return { mode:"league", title:"File 1 sitting into "+G, caption:"A decided score publishes, even short of sixty minutes (Rule 4.3.3); a level score stays held (Rule 4.1)."+max, btn:"File the sitting", busy:"Checking…" };
   var k = sel.locked.length, m = n - k;
   return { mode:"league", title:"Merge "+n+" sittings into "+G,
     caption:(k ? k+" already on the game, "+m+" you ticked. " : "")+"Stats are added up into one game (Rule 4.3)."+max,
@@ -3421,7 +3422,7 @@ CG._smFindResHtml = function(st){
       ? '<div class="note sm-res" id="smFindRes" role="status" tabindex="-1"><b style="font-family:var(--f-disp)">Merged and held.</b> '+esc(n+", "+score+" so far. "+(r.heldWhy || ""))+
         (r.struck ? ' '+r.struck+' sitting'+(r.struck === 1 ? '' : 's')+' struck.' : '')+'</div>'
       : '<div class="note grn sm-res" id="smFindRes" role="status" tabindex="-1"><b style="font-family:var(--f-disp)">Merged.</b> '+
-        esc(G+" is final: "+score+(r.wentOt ? (r.inferredOt ? ", in overtime, read from the clock" : ", in overtime") : "")+". "+n+", "+r.players+" player lines, "+r.linked+" matched to profiles.")+
+        esc(G+" is final: "+score+(r.wentOt ? (r.inferredOt ? ", in overtime, read from the clock" : ", in overtime") : "")+". "+n+(r.short ? " ("+r.minutes+" of 60 minutes, filed as entered here)" : "")+", "+r.players+" player lines, "+r.linked+" matched to profiles.")+
         (r.struck ? ' '+r.struck+' sitting'+(r.struck === 1 ? '' : 's')+' struck.' : '')+
         (r.overlong ? ' The sittings run past sixty minutes by more than a goal, so statistics staff were flagged (Rule 4.3).' : '')+
         '<div class="sm-go" style="margin-top:8px"><a class="btn btn-ghost btn-sm" href="#/matchup/'+esc(res.gid)+'">Open the game</a></div></div>';
@@ -4000,9 +4001,11 @@ CG._smGo = function(){
     var sc = CG._smHA(r.score), score = g && sc ? CG._smScoreText(g.away, g.home, sc.a, sc.h) : String(r.score || "");
     var cur = r.current && r.current.score ? CG._smHA(r.current.score) : null, curT = g && cur ? CG._smScoreText(g.away, g.home, cur.a, cur.h) : "";
     var ps = [];
-    if (r.unpublish) ps.push(G+" is final now ("+curT+"). "+(r.heldWhy || "These sittings add up to only "+r.minutes+" of 60 minutes.")+" Going ahead takes that result off the standings and holds the game. Nothing is posted, so #game-scores keeps the old final until the game is published again.");
+    if (r.unpublish) ps.push(G+" is final now ("+curT+"). "+(r.heldWhy || "These sittings leave the game level, and a game can’t end level (Rule 4.1).")+" Going ahead takes that result off the standings and holds the game. Nothing is posted, so #game-scores keeps the old final until the game is published again.");
     else if (r.held) ps.push(G+" is held, and no result is published. "+(r.heldWhy || ""));
     else ps.push(G+" files as final: "+score+(r.wentOt ? (r.inferredOt ? " in overtime, read from the clock." : " in overtime.") : " in regulation.")+" The box score is rebuilt from these sittings, each player’s stats added up.");
+    /* v4.50 (commissioner, 2026-11-12): a filing here publishes a decided score at any clock (Rule 4.3.3); say so plainly */
+    if (r.short) ps.push("These sittings add up to "+r.minutes+" of 60 minutes. Filed here, the game stands as final anyway (Rule 4.3.3), and the import won’t add a later sitting to it on its own: merge one here if it turns up.");
     if (!r.unpublish) ps.push(r.posts === "final" ? "The final score posts in #game-scores." : r.posts === "corrected" ? "The score changes from "+curT+", so a Corrected line posts in #game-scores." : "Nothing is posted in #game-scores.");
     var label = function(id){ var s = sel.byId[id] && sel.byId[id].s, t = s && Date.parse(s.endedAt); return s ? "Sitting "+s._k+" ("+(s.minutes != null ? s.minutes+" min" : "length unknown")+(t ? ", ended "+CG.fmtTime(t) : "")+")" : "sitting "+id; };
     if ((r.strike || []).length) ps.push("Struck for good, with their stats: "+r.strike.map(label).join(", ")+".");

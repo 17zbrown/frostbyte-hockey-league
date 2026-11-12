@@ -97,9 +97,14 @@ A("nobody flagged: also the office's, and says so", lib.stopCause(none).kind ===
 A("the officials hear about it the same night, from every hold path", /if \(fsh && fsh\.office\) await noteFinalStretch\(game, "stopped", fsh, homeScore, awayScore, summary\);/.test(src)
   && /if \(fshR && fshR\.office\) await noteFinalStretch\(cand, "stopped", fshR, hC\.score, aC\.score, summary\);/.test(src)
   && /else if \(fshM && fshM\.office\) await noteFinalStretch\(cand, "stopped", fshM, homeClub\.score, awayClub\.score, summary\);/.test(src));
-A("a club's single-sitting attach gives the same reason", /const fshL = st\.finished \? null : finalStretchHold\(game, st\);/.test(src) && /\? `Held: \$\{fshL\.why\}\.`/.test(src));
+/* v4.50: the desk's merge no longer gives this reason. Clubs stopped attaching sittings in v4.49, and a filing by
+   staff on the Stats manager IS the office's ruling (Rule 4.3.3): it publishes a decided score whatever the clock, so
+   only a level score holds there, and its reason names the score. */
+A("v4.50: a filing by hand on the Stats manager is the ruling: only a level score holds, said as such",
+  !/const fshL = /.test(src) && /const filed = st\.margin > 0;/.test(src)
+  && /`Level \$\{homeClub\.score\}-\$\{awayClub\.score\} after \$\{minutes\} of \$\{Math\.round\(REGULATION_S \/ 60\)\} minutes: a game can't end level \(Rule 4\.1\)/.test(src));
 A("a reload after such a stop is combined as played but NOT published: the office rules first",
-  /const officeHold = !!priorHold;/.test(src) && /if \(\(!st\.finished \|\| officeHold\) && cand\.status !== "final"\) \{/.test(src)
+  /const officeHold = !!priorHold;/.test(src) && /if \(!st\.finished \|\| officeHold\) \{/.test(src)   /* v4.50: the candidate is always held */
   && /if \(officeHold\) await noteFinalStretch\(cand, "reload", priorHold, homeClub\.score, awayClub\.score, summary\);/.test(src));
 A("an office hold sticks: any earlier point at which the game stopped for the office keeps it held",
   /for \(let i = 1; i <= priorSorted\.length && !priorHold; i\+\+\) \{\s+const h = finalStretchHold\(cand, sittingsState\(priorSorted\.slice\(0, i\)\)\);\s+if \(h && h\.office\) priorHold = h;/.test(src));

@@ -212,7 +212,11 @@ function segElapsed(seg) {
      wentOt      EA's own overtime flag, or: past sixty minutes and decided by exactly one goal
                  (inferredOt), because the reload that played the overtime is an ordinary game to EA.
      overlong    past sixty minutes and decided by more than one goal: filed, and put in front of
-                 statistics staff. */
+                 statistics staff.
+   v4.50: the manual merge (the Stats manager, leagueMerge) no longer follows `finished`. A filing by hand is a ruling
+   (Rule 4.3.3): a decided score files final at any clock, and only a level score is held (Rule 4.1). The desk still
+   reads this function for the score, the clock, overtime and overlong; the automatic import, the continuation merge
+   and the abandoned-game sweep still share `finished`. */
 const EARLY_RESTART_S = 600;   // Q19: stopped inside the first ten minutes of the first period = restart from the beginning
 /* v3.88: THE FINAL FIVE MINUTES (Rule 4.3.6). Commissioner, 2026-10-07: "any disconnects after 5 minutes remaining in
    the 3rd period is to finish out the game with no reloading. Make sure to have the api track any points from the players
@@ -733,8 +737,17 @@ async function batchContext(norms) {
    touches the status. The context remembers a successful upload so the same batch never sends
    the body twice. Returns whether the archive row landed — the callers whose next-poll dedupe
    READS that row (the merge) must fail loud when it did not. */
+/* v4.50: a row STAGED on a game. stagePayload names the game a sitting is being filed on, and until that filing lands the
+   row reads unmatched (or error, when the filing threw part way) with that game's id. One definition for the archive
+   helper, the importer's resume (ingestContinuation) and the Stats manager's merge (leagueMerge). Before v4.50 no unmatched
+   or error row carried a game id (checked on production 2026-11-12: none did). */
+const stagedGame = (row) => (row && row.game_id && (row.status === "unmatched" || row.status === "error") ? row.game_id : null);
+
 async function archive(ctx, norm, raw, status, reason, gameId) {
   const id = String(norm.ea_match_id);
+  /* v4.50 review: a staged sitting keeps naming its game while it stays unfiled (a refusal, a probe, an error), so the
+     importer still resumes its own cut-off merge and the Stats manager still refuses it on any other game */
+  if (!gameId && (status === "unmatched" || status === "error")) gameId = stagedGame(ctx.log.get(id));
   const landed = ctx.log.has(id)
     ? await touchAttempt(id, status, reason, gameId)
     : await logAttempt(norm, raw, status, reason, gameId);
@@ -755,15 +768,27 @@ async function archive(ctx, norm, raw, status, reason, gameId) {
    fails the match, because filing without the archive is the one outcome this exists to prevent. */
 async function stagePayload(ctx, norm, raw, gameId) {
   const id = String(norm.ea_match_id);
-  if (ctx.log.has(id)) return;
+  const reason = `archived ahead of filing on game ${gameId}: if this row still reads this way, the filing was interrupted; the next poll retries it, or file it by hand`;
+  const have = ctx.log.get(id);
+  if (have) {
+    /* v4.50 review: a sitting archived before (a refusal, a probe sent it to the desk, an error) is staged on this game
+       too, with a status-only touch: the payload is there already. A failed stage still fails the match. */
+    if (have.status === "unmatched" && have.game_id === gameId) return;
+    if (!(await touchAttempt(id, "unmatched", reason, gameId))) throw new Error(`sitting ${id} could not be staged on game ${gameId}`);
+    ctx.log.set(id, { status: "unmatched", game_id: gameId });
+    return;
+  }
   await sbSend("POST", "ea_ingest_log?on_conflict=ea_match_id", [{
     ea_match_id: id, payload: raw, et_day: norm.et_day,
     ea_club_ids: norm.clubs.map((c) => c.ea_club_id),
-    status: "unmatched", game_id: null,
-    reason: `archived ahead of filing on game ${gameId} — if this row still reads this way, the filing was interrupted; the next poll retries it, or file it by hand`,
+    /* v4.50: the staged row names the game it is being filed on (still status unmatched, so nothing reads it as on the
+       game). An interrupted completing merge leaves its game FINAL with this sitting's stats in the box score, and the
+       importer resumes a final only when the sitting was staged on it (ingestContinuation); the Stats manager refuses
+       to merge it into any other game (leagueMerge), so it can never be counted twice. */
+    status: "unmatched", game_id: gameId, reason,
     last_attempt_at: new Date().toISOString()
   }], "resolution=merge-duplicates,return=minimal");
-  ctx.log.set(id, { status: "unmatched", game_id: null });
+  ctx.log.set(id, { status: "unmatched", game_id: gameId });
 }
 
 /* The box-score POST, with the one collision that is not an error: game_stats is unique per
@@ -920,9 +945,9 @@ async function ingestOne(norm, raw, summary, batch, opts = {}) {
       .sort((a, b) => Math.abs(Date.parse(a.scheduled_at) - matchEndMs) - Math.abs(Date.parse(b.scheduled_at) - matchEndMs))[0] || null;
   }
   // Rule 4.3: a disconnected game is REPLAYED in a fresh lobby, and the abandoned sitting and the
-  // replay are one record. So before this match claims an open fixture, ask whether a FINAL game
+  // replay are one record. So before this match claims an open fixture, ask whether a HELD game
   // between the same clubs inside this window is still unfinished (its clock never reached the
-  // end of regulation). A complete game is never resumed. When an open sibling slot could ALSO
+  // end of regulation; v4.50: a final is never resumed). A complete game is never resumed. When an open sibling slot could ALSO
   // take this match (a 2-2-3 playoff night after a short first game), nobody can tell a lag-out
   // replay from the next game — that case goes to statistics staff, never guessed.
   const cont = await ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBefore, winAfter, game);
@@ -1086,28 +1111,40 @@ async function postGameRecaps(game, rows, homeScore, awayScore, summary) {
 // tests, every one of which must pass — anything that fails falls through to "unmatched" and a
 // commissioner decides (or, when `probe` is set because an open sibling fixture also fits, falls
 // back to filing the match on that fixture):
-//   1. a FINAL game between the same two clubs exists whose game window holds this end time AND
+//   1. a HELD game between the same two clubs exists whose game window holds this end time AND
 //      whose last recorded sitting is UNFINISHED — its clock never reached the end of regulation
-//      (a complete game, decided or gone to overtime and decided, is never resumed);
+//      (a complete game, decided or gone to overtime and decided, is never resumed; v4.50: nor is
+//      any FINAL, since a final short of sixty minutes was published by hand and stands as filed);
 //   2. the sittings are close in time (RESUME_WINDOW_S);
 //   3. NEITHER club played anyone else in between — a club that moved on to a different opponent
 //      finished its game (a quit still counts in full; it is not a disconnect);
 //   4. the incoming sitting is at most one game plus a long overtime — under Rule 4.3 the replay
 //      IS full length (or one period), so its length is no longer evidence against a merge.
 // Returns { done, sawFixture }: done = the match was handled here (merged, or refused for the
-// record when not probing); sawFixture = a same-pair final existed in the window at all.
+// record when not probing); sawFixture = a same-pair held game existed in the window at all.
 async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBefore, winAfter, sibling = null) {
-  const probe = !!sibling;   // an open same-pair fixture could take this match instead
+  let probe = !!sibling;   // an open same-pair fixture could take this match instead (v4.50: not for this sitting's own staged game)
   const orC = `or=(and(home_team_id.eq.${tA},away_team_id.eq.${tB}),and(home_team_id.eq.${tB},away_team_id.eq.${tA}))`;
   // a forfeit-ruled or voided game is never a resume target (Rule 3.2 / 4.3 P7: the ruling stands)
   /* v3.18: scheduled games too, not only finals. A first sitting that fell short is now HELD —
      it carries its ea_match_id and its box score but no result — and that held game is exactly
      what this continuation belongs to. ea_match_id=not.is.null still keeps the list to fixtures
      that have actually taken a sitting, so an untouched game is never a merge target. */
-  const finals = await sbGet(`games?${orC}&status=in.(final,scheduled)&ea_match_id=not.is.null&voided=not.is.true&forfeit_team_id=is.null&select=id,scheduled_at,home_team_id,away_team_id,season_id,ea_match_id,status`);
+  /* v4.50: a FINAL is never resumed. Since v3.18 the importer publishes a game only at a full, decided clock, so every
+     final short of sixty minutes was published by hand on the Stats manager (Rule 4.3.3), and a later sitting must never
+     merge into it on its own and change a result staff filed: it goes to the statistics desk (unmatched) instead. So the
+     candidates are HELD games, with one exception that keeps a person in the loop: when an open sibling slot could also
+     take this match (`probe`, a night that plays the same clubs again), a final filed short is read too, so the probe
+     below sends the sitting to the desk exactly as it does for a held game. (v4.50 review: without it, the reload of a
+     game filed short would be held on the next slot, and the next game merged into it and published.) And a final this
+     sitting was STAGED on (stagePayload) is the importer's own completing merge, cut off after the game went final and
+     before the sitting was archived as merged: it is resumed, which re-runs that merge to the same result, as every
+     poll did before v4.50 (v4.50 review: otherwise the sitting went to the desk while its stats were already in). */
+  const stagedOn = stagedGame(ctx.log.get(String(norm.ea_match_id)));
+  const pairGames = await sbGet(`games?${orC}&status=${probe || stagedOn ? "in.(final,scheduled)" : "eq.scheduled"}&ea_match_id=not.is.null&voided=not.is.true&forfeit_team_id=is.null&select=id,scheduled_at,home_team_id,away_team_id,season_id,ea_match_id,status`);
   const matchEndMs = (norm.ts || 0) * 1000;
-  const inWindow = finals
-    .filter((g) => matchInWindow(matchEndMs, g.scheduled_at, winBefore, winAfter))
+  const inWindow = pairGames
+    .filter((g) => (g.status !== "final" || probe || g.id === stagedOn) && matchInWindow(matchEndMs, g.scheduled_at, winBefore, winAfter))
     .sort((a, b) => Math.abs(Date.parse(a.scheduled_at) - matchEndMs) - Math.abs(Date.parse(b.scheduled_at) - matchEndMs));
   const R = (done) => ({ done, sawFixture: inWindow.length > 0 });
   if (!inWindow.length) return R(false);
@@ -1158,9 +1195,15 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
      night after a short first game). A lag-out replay and the next game look identical here — a
      quit, or an abandoned game the clubs never replayed, leaves the same short sitting — so this
      is a human's call. Leave the slot open, put the match on the statistics desk, name both. */
+  /* v4.50 review: the game this sitting was STAGED on is the importer's own merge, cut off after it went final (or before
+     it was stamped): re-run it as an ordinary resume; it is never an open question for the desk */
+  if (cand.id === stagedOn) probe = false;
   if (probe) {
     const slotEt = new Date(sibling.scheduled_at).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
-    const why = `could be the Rule 4.3 replay of the unfinished ${cand.id} game or the ${slotEt} ET game between the same clubs — assign it by hand (merge it, or file it on the ${slotEt} slot) from the Stats manager`;
+    /* v4.50: the candidate may be a final filed by hand short of sixty minutes (a final is read here only to probe, and
+       the one this sitting was staged on never probes) */
+    const which = cand.status === "final" ? `the ${cand.id} game, filed by hand short of sixty minutes,` : `the unfinished ${cand.id} game`;
+    const why = `could be the Rule 4.3 replay of ${which} or the ${slotEt} ET game between the same clubs: assign it by hand (merge it, or file it on the ${slotEt} slot) from the Stats manager`;
     summary.unmatched.push({ ea_match_id: norm.ea_match_id, reason: why });
     await archive(ctx, norm, raw, "unmatched", why);
     return R(true);
@@ -1305,7 +1348,7 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
     return R(true);
   }
   const mins = Math.round(totalLen / 60);
-  if ((!st.finished || officeHold) && cand.status !== "final") {
+  if (!st.finished || officeHold) {   /* v4.50: a final reaches here only as this sitting's interrupted merge, which was finished */
     /* HELD after the merge: the combined box score is written (the next sitting's merge reads the
        archive, not these rows), the game keeps no result, and this sitting is archived as merged so
        the next continuation counts it. */
@@ -1328,12 +1371,8 @@ async function ingestContinuation(ctx, norm, raw, summary, batch, tA, tB, winBef
     else if (fshM && fshM.office) await noteFinalStretch(cand, "stopped", fshM, homeClub.score, awayClub.score, summary);
     return R(true);
   }
-  if (!st.finished) {
-    /* a game published before v3.53 on a merge that was still short or level: keep the record the
-       table already reads, and put it in front of the officials */
-    (summary.warnings = summary.warnings || []).push({ game_id: cand.id, warning: `an already-published game was merged again and is still not a full, decided game (${homeClub.score}-${awayClub.score}, ${mins} minutes); the officials were told` });
-    await tellStaff(`\u26a0\ufe0f **Published game still unfinished** \u00b7 EA match ${cand.ea_match_id} was merged again and now reads ${homeClub.score}-${awayClub.score} after ${mins} minutes: not a full, decided game (Rule 4.3). It was published before v3.53 and stays on the table until someone rules. Check it in Control Center, Stats manager.`);
-  }
+  /* v4.50: the branch that kept a game published before v3.53 on the table when a merge left it short or level is gone
+     with the final candidates above: the candidate is always held here, so an unfinished merge took the hold branch. */
   /* v3.18 — status:'final' is REQUIRED here, not redundant. A first sitting short of regulation is
      HELD and leaves the game 'scheduled', and this merge is what completes it: without the status the
      game would carry a correct merged score and never actually be a result. Setting it on a game that
@@ -1651,7 +1690,7 @@ export const handler = async (event) => {
         oppEaId: pair ? null : String(oppClub.ea_club_id),
         /* v4.36: a struck sitting keeps its game_id, but it is off the game for good (Rules 4.3 and 4.5), so it is
            never shown as attached; `struck` lets the club desk say why it can't be ticked */
-        attached: (row.game_id === game.id && row.status !== "struck") || game.ea_match_id === nrm.ea_match_id,
+        attached: (row.game_id === game.id && row.status !== "struck" && !stagedGame(row)) || game.ea_match_id === nrm.ea_match_id,   /* v4.50: a staged row names its game but is not on it */
         struck: row.status === "struck",
         usedElsewhere: !!(row.game_id && row.game_id !== game.id)
       });
@@ -1837,6 +1876,20 @@ export const handler = async (event) => {
         const openG = await sbGet(`games?status=eq.scheduled&voided=not.is.true&forfeit_team_id=is.null&scheduled_at=gte.${encodeURIComponent(lo)}&scheduled_at=lte.${encodeURIComponent(hi)}&select=${GSEL}`);
         for (const g of openG || []) if (!gameById.has(g.id)) gameById.set(g.id, g);
       }
+      /* v4.50: a final filed by hand short of sixty minutes (Rule 4.3.3) is the one final a later sitting may still belong
+         to: the importer's probe sends such a sitting to the desk (ingestContinuation), so the listing counts that final as
+         waiting too, read from the sittings this search already holds (by side when a borrowed club played, Rule 4.6, as
+         the importer reads it). shortcut: a game whose sittings are not all in this search reads short (only a "could also
+         be" warning, never a filing); revisit if staff see false warnings. */
+      const shortFinal = new Set();
+      for (const g of gameById.values()) {
+        if (g.status !== "final" || g.ea_match_id == null || g.forfeit_team_id != null) continue;
+        const ns = items.filter((it) => it.n && it.row && it.row.game_id === g.id && /^(ingested|incomplete|merged)$/.test(it.row.status)).map((it) => it.n);
+        if (!ns.some((x) => String(x.ea_match_id) === String(g.ea_match_id))) continue;
+        let stF = sittingsState(ns);
+        if (stF.error) stF = sittingsState(bySide(ns, fixtureSides(teamById.get(g.home_team_id), teamById.get(g.away_team_id), subRows.filter((x) => x.game_id === g.id))));
+        if (!stF.error && !stF.finished) shortFinal.add(g.id);
+      }
       const pickupOf = new Map();
       for (const p of pus || []) for (const id of [p.ea_match_id, ...(p.ea_match_ids || [])]) if (id != null && !pickupOf.has(String(id))) pickupOf.set(String(id), p.id);
       const at = (g) => Date.parse(g.scheduled_at);
@@ -1936,7 +1989,8 @@ export const handler = async (event) => {
                the pair's night), then a held game in window waiting for the rest of its sittings, else the nearest */
             const open = pairAll.filter((g) => g.status === "scheduled" && g.ea_match_id == null && g.forfeit_team_id == null);
             const primary = fixtureForMatch(open, tA, tB, endMs, undefined, undefined, pairAll);
-            const held = pairAll.filter((g) => g.status === "scheduled" && g.ea_match_id != null && g.forfeit_team_id == null && matchInWindow(endMs, g.scheduled_at));
+            /* v4.50: and a final filed by hand short of sixty minutes (shortFinal above) */
+            const held = pairAll.filter((g) => ((g.status === "scheduled" && g.ea_match_id != null) || shortFinal.has(g.id)) && g.forfeit_team_id == null && matchInWindow(endMs, g.scheduled_at));
             const tier1 = uniq([primary, ...held].filter(Boolean));
             const fx = tier1[0] || pairAll.slice().sort((x, y) => Math.abs(at(x) - endMs) - Math.abs(at(y) - endMs))[0];
             kind = "league";
@@ -2045,7 +2099,9 @@ export const handler = async (event) => {
        longer merge onto a ruled game either, because a merge rewrites the ruled game's score and box
        score. A commissioner may, and even a commissioner's merge leaves the ruling exactly as it was
        (forfeit_team_id is not in the PATCH below); undo_forfeit is the only way to lift it. Rule 4.3.7
-       is unaffected: there the sittings are merged FIRST and the forfeit is ruled on the merged game. */
+       is unaffected: there the sittings are merged FIRST and the forfeit is ruled on the merged game.
+       v4.50: a decided merge now publishes as a plain Final at any clock (Rule 4.3.3), so the ruling that follows lands
+       on a final; forfeit_game's kept-result branch posts its own Forfeit line in #game-scores for that case. */
     if (game.forfeit_team_id != null && !actor.commish)
       return { statusCode: 422, body: JSON.stringify({ error: "This game carries a forfeit ruling. Only a commissioner can change a ruled game: report the mistake to the commissioners from the game page." }) };
     /* v3.67 (commissioner, 2026-09-28, Q23): combining a lagged-out game's sittings is "Only the specific
@@ -2108,6 +2164,12 @@ export const handler = async (event) => {
     if (struckRow)
       return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${struckRow.ea_match_id} was struck when its game restarted from the beginning (Rules 4.3 and 4.5). A struck sitting stays struck, so it can't be merged.`, code: "struck" }) };
     const stolen = logRows.find((r) => r.game_id && r.game_id !== game.id);
+    /* v4.50: a sitting the importer staged on another game and was cut off filing (stagePayload) may already be in that
+       game's box score, so it is refused here too, with words that say so. shortcut: one whose filing died before it
+       wrote anything is refused on every other game as well; a commissioner's re-ingest re-stages it on the game it then
+       files on. Revisit if staff meet this refusal for a sitting that is plainly not in that game. */
+    if (stolen && stagedGame(stolen))
+      return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${stolen.ea_match_id} was being filed on another game when an import stopped part way, so its stats may already be there. Merge it into that game, or ask a commissioner.` }) };
     if (stolen) return { statusCode: 422, body: JSON.stringify({ error: `Sitting ${stolen.ea_match_id} already belongs to another game — it can't be merged here.` }) };
     /* v4.36: the archive's game_id can lag behind the games table (an interrupted filing), and games.ea_match_id is
        unique only for a game's FIRST sitting, so the filed sitting of another game is refused from the games table too */
@@ -2124,8 +2186,10 @@ export const handler = async (event) => {
     /* v4.36: EVERY LINE COUNTS (standing rule). The merge REPLACES the game's box score, so a sitting already on the
        game that is left out of the selection would lose its players' stats with no trace. Only a restart (staff, Rules
        4.3 and 4.5) may leave one out, and then it is struck below, on purpose. Read once and reused for the strike. */
-    const onGameAll = (await sbGet(`ea_ingest_log?game_id=eq.${encodeURIComponent(game.id)}&select=ea_match_id,status`)) || [];
-    const need = onGameAll.filter((r) => /^(ingested|incomplete|merged)$/.test(r.status)).map((r) => String(r.ea_match_id));
+    const onGameAll = (await sbGet(`ea_ingest_log?game_id=eq.${encodeURIComponent(game.id)}&select=ea_match_id,status,game_id`)) || [];
+    /* v4.50: and a sitting the importer staged on this game and was cut off filing (stagedGame): its lines may already be
+       in this box score */
+    const need = onGameAll.filter((r) => /^(ingested|incomplete|merged)$/.test(r.status) || stagedGame(r) === game.id).map((r) => String(r.ea_match_id));
     if (!restart && need.some((id) => matchIds.indexOf(id) < 0)) {
       const named = need.length === 1 ? `sitting ${need[0]}` : `sittings ${need.slice(0, -1).join(", ")} and ${need[need.length - 1]}`;
       return { statusCode: 422, body: JSON.stringify({ error: `This game already has ${named} on it. Include every one of them: the merge REPLACES the box score. ${restartHint}` }) };
@@ -2186,27 +2250,36 @@ export const handler = async (event) => {
     const merged = sideNorms.length > 1 ? mergeSegments(sideNorms) : sideNorms[0];
     if (merged.error) return { statusCode: 422, body: JSON.stringify({ error: merged.error }) };
     /* v3.53: the same finished test as the automatic import (sittingsState). A manual merge short of a
-       full, decided game is written and HELD, never published. */
+       full, decided game is written and HELD, never published. (v4.50: no longer; see `filed` below.) */
     const st = sittingsState(sideNorms);
+    if (st.error) return { statusCode: 422, body: JSON.stringify({ error: `These sittings can't be read as one game: ${st.error}.` }) };
+    /* v4.50: A FILING BY HAND IS A RULING. Commissioner, 2026-11-12: "If I manually file a game from multiple sittings
+       on the stats manager desk, it should file even if the time does not add up to 60 minutes excactly." The clock
+       decides when the importer may publish a game on its own; when statistics staff or a commissioner file sittings
+       here, a decided score is published whatever the sittings add up to (Rule 4.3.3). A level score still is not
+       (Rule 4.1: no ties): it stays held for the rest of the game or its overtime. The importer never resumes a final
+       or rules one abandoned (ingestContinuation, closeOutAbandoned), so a game filed here short of sixty minutes
+       stands until someone changes it here. */
+    const filed = st.margin > 0;
+    const clockShort = filed && !st.reachedFull;
     const clubByClubId = Object.fromEntries(merged.clubs.map((c) => [String(c.ea_club_id), c]));
     const clubByTeam = { [game.home_team_id]: clubByClubId.H, [game.away_team_id]: clubByClubId.A };
     const homeClub = clubByTeam[game.home_team_id], awayClub = clubByTeam[game.away_team_id];
+    /* v4.50 review: a game short of sixty minutes never reads "60 of 60": round down whenever the clock fell short */
+    const minutes = st.reachedFull ? Math.round(st.total / 60) : Math.floor(st.total / 60);
     /* v4.36: everything the desk's confirm states is computed here, before a single write, so the preview below and
-       the merge can never disagree. heldWhy moved up from after the writes; its text is unchanged. */
-    const fshL = st.finished ? null : finalStretchHold(game, st);   // v3.88 (Rule 4.3.6)
-    const heldWhy = st.finished ? null
-      : (st.level && st.reachedFull
-        ? `Level ${homeClub.score}-${awayClub.score} after ${Math.round(st.total / 60)} minutes: held for the overtime reload (Rule 4.3).`
-        : fshL
-          ? `Held: ${fshL.why}.`
-          : `The sittings add up to ${Math.round(st.total / 60)} of ${Math.round(REGULATION_S / 60)} minutes: held until the rest of the game is merged (Rule 4.3).`);
-    const minutes = Math.round(st.total / 60);
+       the merge can never disagree. v4.50: only a level score holds now, so heldWhy names the score first. The
+       final-five hold text (finalStretchHold, Rule 4.3.6) left this path with it: a filing here is the office's ruling. */
+    const heldWhy = filed ? null
+      : st.reachedFull
+        ? `Level ${homeClub.score}-${awayClub.score} after ${minutes} minutes: held for the overtime reload (Rule 4.3).`
+        : `Level ${homeClub.score}-${awayClub.score} after ${minutes} of ${Math.round(REGULATION_S / 60)} minutes: a game can't end level (Rule 4.1), so it is held until the rest of the game is merged (Rule 4.3).`;
     /* what #game-scores will show (notify_discord_game_final): a final on entering final, a Corrected line on a later
        score change, nothing for a held game or an unchanged score */
-    const posts = st.finished
+    const posts = filed
       ? (game.status !== "final" ? "final" : (game.home_score !== homeClub.score || game.away_score !== awayClub.score) ? "corrected" : "none")
       : "none";
-    const unpublish = game.status === "final" && !st.finished;
+    const unpublish = game.status === "final" && !filed;
     const strike = restart ? onGameAll.filter((r) => r.status !== "struck" && matchIds.indexOf(String(r.ea_match_id)) < 0).map((r) => String(r.ea_match_id)) : [];
     const outsideWindow = norms.filter((n) => !matchInWindow((n.ts || 0) * 1000, game.scheduled_at)).map((n) => String(n.ea_match_id));
     /* v4.36: the desk previews a merge before its confirm. Writes nothing; the relay request above is the only row a
@@ -2214,16 +2287,17 @@ export const handler = async (event) => {
     if (body.leagueMerge.preview === true)
       return { statusCode: 200, body: JSON.stringify({ ok: true, preview: true,
         score: `${homeClub.score}-${awayClub.score}`, wentOt: !!st.wentOt, inferredOt: !!st.inferredOt,
-        held: !st.finished, heldWhy, overlong: !!st.overlong, minutes, sittings: norms.length,
+        held: !filed, heldWhy, short: clockShort, overlong: !!st.overlong, minutes, sittings: norms.length,
         strike, fromEa, outsideWindow, unpublish, posts,
         /* v4.36: a merge with one linked side links the opponent's EA club from these sittings; the confirm says so */
         links: derivedOpp ? { team: (ourLinked.side === "home" ? away : home).code, eaId: derivedOpp.id, name: derivedOpp.name } : null,
         current: { status: game.status, score: game.status === "final" ? `${game.home_score}-${game.away_score}` : null } }) };
     /* v4.36: a short merge onto a FINAL game takes its published result off the standings and holds the game, and
        nothing is posted (the old final stays in #game-scores). That used to happen silently on any merge; now it
-       needs the desk's explicit unpublish:true, sent only after its confirm says so. Every caller, the club desk too. */
+       needs the desk's explicit unpublish:true, sent only after its confirm says so. Every caller, the club desk too.
+       v4.50: only a LEVEL merge holds now, so only a level one can take a final off the standings. */
     if (unpublish && body.leagueMerge.unpublish !== true)
-      return { statusCode: 409, body: JSON.stringify({ error: `These sittings add up to ${minutes} of 60 minutes, so the game would go back to held and its published result would come off the standings, with nothing posted. Nothing was changed. Confirm it from the Stats manager to go ahead.`, wouldHold: true, heldWhy }) };
+      return { statusCode: 409, body: JSON.stringify({ error: `${heldWhy} Filing it would take the game's published result off the standings and hold the game, with nothing posted. Nothing was changed. Confirm it from the Stats manager to go ahead.`, wouldHold: true, heldWhy }) };
     /* v4.36: below the preview, because the profile lookups are reads a preview does not need */
     const rows = await leagueBoxRows(game, clubByTeam);
     /* WRITE ORDER: the archive first. The archive write here is the provenance (the first sitting
@@ -2237,8 +2311,8 @@ export const handler = async (event) => {
     const byWhom = `${actor.who} (stats staff)`;   /* v4.49: staff and commissioners only (authForGame) */
     const prov = (id) => {
       const first = id === String(merged.ea_match_id);
-      return { status: first ? (st.finished ? "ingested" : "incomplete") : "merged", game_id: game.id, reason: first
-        ? `manual lag-out merge (${norms.length} sitting${norms.length === 1 ? "" : "s"}) by ${byWhom}${st.finished ? "" : ", held: not yet a full, decided game"}${restart ? ", restarted from the beginning" : ""}`
+      return { status: first ? (filed ? "ingested" : "incomplete") : "merged", game_id: game.id, reason: first
+        ? `manual lag-out merge (${norms.length} sitting${norms.length === 1 ? "" : "s"}) by ${byWhom}${filed ? (clockShort ? `, published by hand at ${minutes} of 60 minutes of game clock (Rule 4.3.3)` : "") : ", held: not yet a full, decided game"}${restart ? ", restarted from the beginning" : ""}`
         : `manually merged into ${merged.ea_match_id} by ${byWhom}` };
     };
     const archivedNow = [];
@@ -2297,7 +2371,7 @@ export const handler = async (event) => {
       return { statusCode: 409, body: JSON.stringify({ error: "Another import wrote this game's box score at the same moment — reload the fixture and try again." }) };
     /* forfeit_team_id is deliberately NOT in this PATCH. A merge files what was played; whether
        a ruling stands over it is a commissioner's call, made with undo_forfeit (v3.52). */
-    await sbSend("PATCH", `games?id=eq.${game.id}`, st.finished
+    await sbSend("PATCH", `games?id=eq.${game.id}`, filed
       ? { status: "final", home_score: homeClub.score, away_score: awayClub.score,
           ea_match_id: merged.ea_match_id, went_ot: !!st.wentOt,
           home_ppg: homeClub.ppg || 0, home_ppo: homeClub.ppo || 0, away_ppg: awayClub.ppg || 0, away_ppo: awayClub.ppo || 0, home_shots: homeClub.shots, away_shots: awayClub.shots }
@@ -2305,8 +2379,8 @@ export const handler = async (event) => {
           ea_match_id: merged.ea_match_id,
           home_ppg: homeClub.ppg || 0, home_ppo: homeClub.ppo || 0, away_ppg: awayClub.ppg || 0, away_ppo: awayClub.ppo || 0, home_shots: homeClub.shots, away_shots: awayClub.shots },
       "return=minimal");
-    if (st.finished) await noteGameLength(game, st, { warnings: [] });
-    if (st.finished) await noteUnattributed(game, homeClub, awayClub, { warnings: [] });
+    if (filed) await noteGameLength(game, st, { warnings: [] });
+    if (filed) await noteUnattributed(game, homeClub, awayClub, { warnings: [] });
     /* Evidence linkage: attaching these sittings to this fixture proves the opponent's EA club.
        Link it so auto-imports cover them from now on; staff are told either way. */
     if (derivedOpp) {
@@ -2321,7 +2395,7 @@ export const handler = async (event) => {
        clubs no longer merge; a staff merge is stamped in ea_ingest_log above) */
     return { statusCode: 200, body: JSON.stringify({ ok: true, gameId: game.id,
       score: `${homeClub.score}-${awayClub.score}`, wentOt: !!st.wentOt, inferredOt: !!st.inferredOt,
-      held: !st.finished, heldWhy, struck, overlong: !!st.overlong,
+      held: !filed, heldWhy, short: clockShort, struck, overlong: !!st.overlong,
       sittings: norms.length, players: rows.length, linked, by: byWhom,
       minutes, posts, archived: archivedNow }) };
   } catch (e) {
@@ -2413,17 +2487,20 @@ async function closeOutAbandoned(ctx, summary, batch) {
     seenAt.get(c).push({ ts: m.ts || 0, pair: pairOf(m), ids: clubsOf(m) });
   }
   /* The abandoned game's OWN pair is the one NOT in this delivery, so the search starts from each
-     club in the delivery and looks at its recent finals against anyone. */
+     club in the delivery and looks at its held games against anyone (v4.50: held only, never a final). */
   const done = new Set();
   for (const t of inBatch) {
-    let finals;
+    let held;
     try {
       /* v3.53: HELD games too. Since v3.18 an unfinished game is held (scheduled, carrying its
          sittings) rather than published, and this read only finals, so the ruling ordered on
-         2026-09-23 could never fire. */
-      finals = await sbGet(`games?or=(home_team_id.eq.${t.id},away_team_id.eq.${t.id})&status=in.(final,scheduled)&ea_match_id=not.is.null&voided=not.is.true&forfeit_team_id=is.null&select=id,status,home_team_id,away_team_id,home_score,away_score,scheduled_at,ea_match_id,week,stage`);
+         2026-09-23 could never fire. v4.50: held games ONLY. A final short of sixty minutes was published
+         by hand on the Stats manager (Rule 4.3.3), so it is a result, not an abandoned game: ruling it here
+         would charge a forfeit and post one over a filing staff made. It also spares the sweep an archive
+         read for every final of every club in a delivery. */
+      held = await sbGet(`games?or=(home_team_id.eq.${t.id},away_team_id.eq.${t.id})&status=eq.scheduled&ea_match_id=not.is.null&voided=not.is.true&forfeit_team_id=is.null&select=id,status,home_team_id,away_team_id,home_score,away_score,scheduled_at,ea_match_id,week,stage`);
     } catch { continue; }
-    for (const g of finals || []) {
+    for (const g of held || []) {
       if (done.has(g.id)) continue;
       const cHome = clubOfTeam.get(g.home_team_id), cAway = clubOfTeam.get(g.away_team_id);
       if (!cHome || !cAway) continue;                 /* both sides must be clubs this batch names */
@@ -2453,8 +2530,7 @@ async function closeOutAbandoned(ctx, summary, batch) {
       const stA = sittingsState(bySide(ps, sidesG));
       if (stA.error || stA.finished) continue;       /* finished, or unreadable */
       const last = stA.last, total = stA.total;
-      /* the score the sittings add up to, from the home and away sides: a held game has no score on its row, and a
-         published one is read the same way for consistency */
+      /* the score the sittings add up to, from the home and away sides: a held game has no score on its row */
       const hClub = stA.merged.clubs.find((c) => c.ea_club_id === "H");
       const aClub = stA.merged.clubs.find((c) => c.ea_club_id === "A");
       if (!hClub || !aClub) continue;

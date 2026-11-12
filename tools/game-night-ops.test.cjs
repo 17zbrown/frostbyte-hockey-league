@@ -164,7 +164,10 @@ console.log("\n— a Rule 4.3 merge that ends level");
 /* v3.53 (Q18, Q20): a level merge is no longer filed as a double loss. It is HELD for its overtime
    reload; only a game published before v3.53 that is still level is put in front of the officials. */
 A("a level merge is held for its overtime reload", /level \$\{homeClub\.score\}-\$\{awayClub\.score\} after \$\{mins\} minutes, waiting for the overtime reload \(Rule 4\.3\)/.test(ingest));
-A("a published game still level: the officials are told, with the rule and where to rule on it", /Published game still unfinished/.test(ingest) && /Rule 4\.3/.test(ingest) && /Stats manager/.test(ingest));
+/* v4.50: a final is never resumed (a final short of sixty minutes was filed by hand, Rule 4.3.3), so the branch that kept a
+   game published before v3.53 on the table, level, with a note to the officials, is gone: the candidate is always held */
+A("v4.50: a merge only ever resumes a HELD game, so no published game is merged level", !/Published game still unfinished/.test(ingest)
+  && /games\?\$\{orC\}&status=\$\{probe \|\| stagedOn \? "in\.\(final,scheduled\)" : "eq\.scheduled"\}&ea_match_id=not\.is\.null/.test(ingest));
 A("it rides as a warning, not an error (the import worked)", /summary\.warnings = summary\.warnings \|\| \[\]/.test(ingest) && /warnings: \[\] \};/.test(ingest));
 A("...and the poller keeps the run green while still recording it",
   /const ingestWarns = Array\.isArray\(out\.warnings\) \? out\.warnings : \[\];/.test(poll)

@@ -46,7 +46,9 @@ console.log("\n— EA's own flag is carried, as a second witness");
 
 console.log("\n— the merge must still be able to find it, which is the part that could have broken");
 {
-  A("the candidate search takes scheduled games too", /status=in\.\(final,scheduled\)/.test(ing));
+  /* v4.50: held (scheduled) games, and finals only to probe: a final short of sixty minutes was filed by hand (Rule 4.3.3)
+     and is never resumed */
+  A("the candidate search takes scheduled games too", /games\?\$\{orC\}&status=\$\{probe \|\| stagedOn \? "in\.\(final,scheduled\)" : "eq\.scheduled"\}&ea_match_id=not\.is\.null/.test(ing));
   A("...but only ones that have taken a sitting", /ea_match_id=not\.is\.null/.test(ing));
   A("...with the reason recorded", /an untouched game is never a merge target/.test(iflat));
   /* the bug the test caught: without this the held game merges and never becomes a result */

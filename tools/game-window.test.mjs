@@ -71,11 +71,13 @@ globalThis.fetch = async (url, opts = {}) => {
     return J(seenLog ? ids.map((id) => ({ ea_match_id: id, status: "unmatched", game_id: null })) : []);
   }
   const pairRows = (rows, u) => { const p = pairOf(u); return rows.filter((g) => p && ((g.home_team_id === p[0] && g.away_team_id === p[1]) || (g.home_team_id === p[1] && g.away_team_id === p[0]))); };
-  if (u.includes("/rest/v1/games?") && u.includes("status=in.(final,scheduled)")) {
+  if (u.includes("/rest/v1/games?") && (u.includes("status=in.(final,scheduled)") || u.includes("status=eq.scheduled&ea_match_id=not.is.null"))) {
     /* v3.18 — the resume-candidate query takes HELD games as well as finals. A first sitting that
        fell short leaves the game 'scheduled' but carrying its ea_match_id, and that is exactly
-       what a continuation belongs to. Never a ruled or voided game. */
-    const fin = pairRows(world.finals, u).filter((g) => !g.voided && g.forfeit_team_id == null)
+       what a continuation belongs to. Never a ruled or voided game. v4.50: HELD games only
+       (status=eq.scheduled): a final short of sixty minutes was filed by hand (Rule 4.3.3) and is
+       never resumed. The mock answers whatever the URL asks. */
+    const fin = u.includes("status=eq.scheduled") ? [] : pairRows(world.finals, u).filter((g) => !g.voided && g.forfeit_team_id == null)
       .map((g) => ({ ...g, status: "final" }));
     const held = pairRows(world.held || [], u).map((g) => ({ ...g, status: "scheduled" }));
     return J(fin.concat(held));
@@ -234,7 +236,7 @@ console.log("— Rule 4.3: a disconnected game's full-length replay is merged in
 {
   reset();
   const first = ea("p1", at(20), 111, 222, 1500, [1, 0]);                   // game one abandoned at 1500 of 3600 on the clock
-  world.finals = [{ ...G900, ea_match_id: "p1" }];
+  world.held = [{ ...G900, ea_match_id: "p1" }];                            // held since v3.18; only a held game resumes (v4.50)
   world.logs = [{ ea_match_id: "p1", payload: first }];
   const replay = ea("p1b", at(55), 111, 222, 3600, [2, 1]);                 // the whole game replayed, per Rule 4.3 P1
   const s = await run(replay);
@@ -254,7 +256,7 @@ console.log("— ...and a single-period replay (drop early in the third, 4.3 P5)
 {
   reset();
   const first = ea("p3", at(25), 111, 222, 2500, [2, 2]);
-  world.finals = [{ ...G900, ea_match_id: "p3" }];
+  world.held = [{ ...G900, ea_match_id: "p3" }];
   world.logs = [{ ea_match_id: "p3", payload: first }];
   const s = await run(ea("p3b", at(45), 111, 222, 1200, [1, 0]));
   A("merged into the 9:00 game, combined 3-2", s.ingested.length === 1 && s.ingested[0].resumed === true && writes.gamePatches.some((p) => p.url.includes("id=eq.g900") && p.body.home_score === 3 && p.body.away_score === 2), JSON.stringify(s));
@@ -308,7 +310,7 @@ console.log("— a forfeit-ruled game between the same clubs is never a resume t
 console.log("— an UNFINISHED first game and an open sibling slot both fit: nobody can tell a replay from game two, so staff decide");
 {
   reset();
-  world.finals = [{ ...G900, ea_match_id: "u1" }];
+  world.held = [{ ...G900, ea_match_id: "u1" }];
   world.logs = [{ ea_match_id: "u1", payload: ea("u1", at(12), 111, 222, 2000, [5, 0]) }];   // a quit at 2000? a lag-out? EA cannot say
   world.open = [G935];
   const s = await run(ea("u2", at(45), 111, 222, 3600, [2, 3]));
@@ -316,6 +318,17 @@ console.log("— an UNFINISHED first game and an open sibling slot both fit: nob
     s.ingested.length === 0 && s.unmatched.length === 1 && /could be the Rule 4\.3 replay/.test(s.unmatched[0].reason) && /9:35 PM/.test(s.unmatched[0].reason), s.unmatched[0] && s.unmatched[0].reason);
   A("nothing written to either game", writes.gamePatches.length === 0);
   A("...archived as unmatched (the staff desk counts those)", writes.logPosts.some((r) => (Array.isArray(r) ? r[0] : r).status === "unmatched"));
+  /* v4.50: the same short first game FINAL, filed by hand (Rule 4.3.3), and the clubs then reload the time left. The
+     final is never resumed, but nobody can tell its reload from game two either, so the desk decides, as for a held
+     game. (v4.50 review: filed on the open slot instead, the reload was held there and game two merged into it.) */
+  reset();
+  world.finals = [{ ...G900, ea_match_id: "u1", home_score: 5, away_score: 0 }];
+  world.logs = [{ ea_match_id: "u1", payload: ea("u1", at(12), 111, 222, 2000, [5, 0]) }];
+  world.open = [G935];
+  const s9 = await run(ea("u1r", at(30), 111, 222, 1600, [0, 1]));         // the rest of game one, or game two's start?
+  A("v4.50: after a final filed by hand short of sixty minutes, a same-pair sitting with an open slot goes to the desk, naming both",
+    s9.ingested.length === 0 && !(s9.held || []).length && s9.unmatched.length === 1 && /filed by hand short of sixty minutes/.test(s9.unmatched[0].reason) && /9:35 PM/.test(s9.unmatched[0].reason), JSON.stringify(s9));
+  A("...nothing written to either game", writes.gamePatches.length === 0, JSON.stringify(writes.gamePatches));
 }
 
 console.log("— a series that runs ahead of the clock: game two ending before slot two's own window opens still files on slot two");

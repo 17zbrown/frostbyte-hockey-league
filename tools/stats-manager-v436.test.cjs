@@ -84,7 +84,8 @@ A("a merge that links a club's EA club says so in the confirm", /if \(r\.links\)
 A("the search's live region stays put; only its words change", /'<div id="smClubsOut" aria-live="polite">'\+CG\._smClubsHtml\(st\)\+'<\/div>/.test(desk) && /o\.innerHTML = CG\._smClubsHtml\(CG\._smS\(\)\);/.test(desk));
 A("the focus note says EA only when EA was asked", /" \(EA is still being checked\)"/.test(desk) && /" for these dates \(EA was not checked\)"/.test(desk));
 A("an unconfirmed correction is not called unsaved", /The correction was sent, but the desk could not read /.test(desk));
-A("the unpublish confirm states the server's own reason", /\(r\.heldWhy \|\| "These sittings add up to only "/.test(desk));
+/* v4.50: only a level merge holds now, so the fallback behind the server's reason says level, not short */
+A("the unpublish confirm states the server's own reason", /\(r\.heldWhy \|\| "These sittings leave the game level, and a game can’t end level \(Rule 4\.1\)\."\)/.test(desk));
 
 console.log("\n— house rules");
 A("no em or en dashes, no &mdash; in the desk", !/[–—]|&mdash;|\\u2014|\\u2013/.test(desk));
@@ -140,7 +141,8 @@ k = CG._smKinds(g("h1"));
 A("a held game: kept result only", !k.noshow.ok && k.dc3.ok && k.pre === "dc3");
 k = CG._smKinds(g("m0"));
 A("a hand-filed final with no box score: both kinds open, nothing preselected", k.noshow.ok && k.dc3.ok && k.pre === null);
-A("what posts: a kept result on a final posts nothing, and says so", /Nothing is posted/.test(CG._smFfPosts(g("f1"), "dc3")) && /Final \(forfeit\) posts/.test(CG._smFfPosts(g("s1"), "noshow")) && /Corrected line/.test(CG._smFfPosts(g("m0"), "noshow")));
+/* v4.50: forfeit_game now posts a Forfeit line for a kept result on a final (backend gap G1 closed), and the desk says so */
+A("what posts: a kept result on a final posts a Forfeit line, and says so", /^A Forfeit line posts in #game-scores with the score unchanged\./.test(CG._smFfPosts(g("f1"), "dc3")) && /Final \(forfeit\) posts/.test(CG._smFfPosts(g("s1"), "noshow")) && /Corrected line/.test(CG._smFfPosts(g("m0"), "noshow")));
 A("the will-record line reads away first", CG._smFfWill(g("f1"), "dc3", "DAL") === "Will record: DAL 2, PIT 3 stands with every stat line, and DAL takes the forfeit loss (FFL)." &&
   CG._smFfWill(g("s1"), "noshow", "NYI") === "Will record: DET wins 1-0 by forfeit, with no player stats.");
 

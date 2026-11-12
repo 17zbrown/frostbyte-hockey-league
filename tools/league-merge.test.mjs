@@ -142,18 +142,36 @@ console.log("\n— the merge");
     writes.logPatches.some((p) => p.url.includes("m2") && p.body.status === "merged" && p.body.game_id === "g1"));
 }
 
-console.log("\n— v3.53: a manual merge short of a full, decided game is HELD, never published");
+console.log("\n— v4.50: a filing by hand is a ruling: a decided score files final at any clock; only a level one is held");
 {
+  /* v3.53 held a manual merge short of sixty minutes like the importer does. Commissioner, 2026-11-12: "If I manually
+     file a game from multiple sittings on the stats manager desk, it should file even if the time does not add up to
+     60 minutes excactly." (Rule 4.3.3) */
   for (const k of Object.keys(writes)) { if (Array.isArray(writes[k])) writes[k].length = 0; else writes[k] = 0; }
   LOG = [
     { ea_match_id: "m1", status: "ingested", game_id: "g1", et_day: "2026-10-21", payload: rawSitting("m1", 1761090000, 1, 0, false, 300) },
     { ea_match_id: "m2", status: "unmatched", game_id: null, et_day: "2026-10-21", payload: rawSitting("m2", 1761093900, 2, 1, true, 420) },
   ];
-  /* v4.36: GAME is final, so a short merge takes its result down: the desk confirms that and sends unpublish */
-  const res = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"], unpublish: true } })).body);
-  A("the merge is accepted and says it is held", res.ok === true && res.held === true && /held until the rest of the game/.test(res.heldWhy || ""), JSON.stringify(res));
+  const res = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } })).body);
+  A("12 of 60 minutes, 3-1: filed with no unpublish confirm, said to be short", res.ok === true && res.held === false && res.short === true && res.heldWhy === null && res.minutes === 12 && res.score === "3-1", JSON.stringify(res));
   const gp = writes.gamePatches[0];
-  A("...the game carries no result", gp && gp.status === "scheduled" && gp.home_score === null && gp.away_score === null, JSON.stringify(gp));
+  A("...the game is final on the merged score, in regulation", gp && gp.status === "final" && gp.home_score === 3 && gp.away_score === 1 && gp.went_ot === false, JSON.stringify(gp));
+  A("...the box score is written", writes.statRows.length > 0);
+  A("...and the first sitting is archived ingested, its reason naming the clock and the rule",
+    writes.logPatches.some((p) => p.url.includes("m1") && p.body.status === "ingested" && /published by hand at 12 of 60 minutes of game clock \(Rule 4\.3\.3\)/.test(p.body.reason)),
+    JSON.stringify(writes.logPatches.map((p) => p.body)));
+
+  /* the same short sittings LEVEL: no ties (Rule 4.1), so the game is held, whoever files it */
+  for (const k of Object.keys(writes)) { if (Array.isArray(writes[k])) writes[k].length = 0; else writes[k] = 0; }
+  LOG = [
+    { ea_match_id: "m1", status: "ingested", game_id: "g1", et_day: "2026-10-21", payload: rawSitting("m1", 1761090000, 1, 0, false, 300) },
+    { ea_match_id: "m2", status: "unmatched", game_id: null, et_day: "2026-10-21", payload: rawSitting("m2", 1761093900, 0, 1, true, 420) },
+  ];
+  /* v4.36: GAME is final, so a held merge takes its result down: the desk confirms that and sends unpublish */
+  const lv = JSON.parse((await call({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"], unpublish: true } })).body);
+  A("level 1-1 at 12 minutes: held, saying a game can't end level", lv.ok === true && lv.held === true && lv.short === false && /^Level 1-1 after 12 of 60 minutes: a game can't end level \(Rule 4\.1\)/.test(lv.heldWhy || ""), JSON.stringify(lv));
+  const gl = writes.gamePatches[0];
+  A("...the game carries no result", gl && gl.status === "scheduled" && gl.home_score === null && gl.away_score === null, JSON.stringify(gl));
   A("...the box score is still written", writes.statRows.length > 0);
   A("...and the first sitting is archived incomplete", writes.logPatches.some((p) => p.url.includes("m1") && p.body.status === "incomplete"));
 
@@ -246,6 +264,17 @@ console.log("\n# v4.36: every line counts: a sitting already on the game rides a
   clear();
   const rs = await res({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m3"], restart: true } });
   A("with Restarted it is struck instead", rs.o.ok === true && rs.o.struck === 1 && writes.logPatches.some((p) => /ea_match_id=eq\.m2$/.test(p.url) && p.body.status === "struck"), JSON.stringify(rs.o));
+  /* v4.50: a sitting the importer staged on this game and was cut off filing (unmatched, naming the game) may already be
+     in its box score, so it rides along too */
+  LOG = [row("m1", "ingested", "g1", T0 + 2400, 1, 0, false, 2400), row("mS", "unmatched", "g1", T0 + 3000, 0, 0, false, 600)];
+  clear();
+  const sg = await res({ leagueMerge: { gameId: "g1", matchIds: ["m1"] } });
+  A("v4.50: a sitting staged on the game is required too", sg.code === 422 && /This game already has sittings m1 and mS on it\./.test(sg.o.error || "") && zero(), sg.o.error);
+  /* and one staged on ANOTHER game is refused here, saying why */
+  LOG = [row("m1", "ingested", "g1", T0 + 2400, 1, 0, false, 2400), row("mX", "unmatched", "g2", T0 + 3000, 1, 0, false, 1200)];
+  clear();
+  const sx = await res({ leagueMerge: { gameId: "g1", matchIds: ["m1", "mX"] } });
+  A("v4.50: a sitting staged on another game is refused, saying an import stopped part way", sx.code === 422 && /was being filed on another game when an import stopped part way, so its stats may already be there/.test(sx.o.error || "") && zero(), sx.o.error);
 }
 
 console.log("\n# v4.36: the refusals that protect other games and the pickup tables");
@@ -331,7 +360,10 @@ console.log("\n# v4.36: the preview writes nothing and states what the merge wil
   GAMEX = null;
   LOG = [row("m1", "ingested", "g1", T0 + 300, 1, 0, false, 300), row("m2", "unmatched", null, T0 + 900, 2, 1, true, 420)];
   o = await pv({ matchIds: ["m1", "m2"] });
-  A("a short merge onto a final: unpublish, held, nothing posts", o.unpublish === true && o.held === true && o.posts === "none" && /held until the rest of the game is merged/.test(o.heldWhy || "") && zero(), JSON.stringify(o));
+  A("v4.50: a short, decided merge onto a final files: a Corrected line, said to be short", o.unpublish === false && o.held === false && o.short === true && o.minutes === 12 && o.posts === "corrected" && zero(), JSON.stringify(o));
+  LOG = [row("m1", "ingested", "g1", T0 + 300, 1, 0, false, 300), row("m2", "unmatched", null, T0 + 900, 0, 1, true, 420)];
+  o = await pv({ matchIds: ["m1", "m2"] });
+  A("a short LEVEL merge onto a final: unpublish, held, nothing posts", o.unpublish === true && o.held === true && o.posts === "none" && /can't end level \(Rule 4\.1\), so it is held until the rest of the game is merged/.test(o.heldWhy || "") && zero(), JSON.stringify(o));
   LOG = [row("m1", "ingested", "g1", T0 + 900, 1, 0, false, 900), row("m2", "unmatched", null, T0 + 3700, 3, 1, false, 3600)];
   o = await pv({ matchIds: ["m2"], restart: true });
   A("a restart names the sittings it will strike", JSON.stringify(o.strike) === '["m1"]' && zero(), JSON.stringify(o));
@@ -343,10 +375,11 @@ console.log("\n# v4.36: the preview writes nothing and states what the merge wil
 
 console.log("\n# v4.36: taking a published final down needs the desk's confirm");
 {
-  LOG = [row("m1", "ingested", "g1", T0 + 300, 1, 0, false, 300), row("m2", "unmatched", null, T0 + 900, 2, 1, true, 420)];
+  /* v4.50: only a level merge holds, so only a level one can take a final down */
+  LOG = [row("m1", "ingested", "g1", T0 + 300, 1, 0, false, 300), row("m2", "unmatched", null, T0 + 900, 0, 1, true, 420)];
   clear();
   const r = await res({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"] } });
-  A("without unpublish: 409 wouldHold, saying how short it is", r.code === 409 && r.o.wouldHold === true && /^These sittings add up to 12 of 60 minutes, so the game would go back to held/.test(r.o.error || "") && /held until the rest/.test(r.o.heldWhy || ""), JSON.stringify(r.o));
+  A("without unpublish: 409 wouldHold, saying why it would hold", r.code === 409 && r.o.wouldHold === true && /^Level 1-1 after 12 of 60 minutes: a game can't end level \(Rule 4\.1\)[^]*Filing it would take the game's published result off the standings/.test(r.o.error || "") && /held until the rest/.test(r.o.heldWhy || ""), JSON.stringify(r.o));
   A("...with nothing written", zero());
   clear();
   const u = await res({ leagueMerge: { gameId: "g1", matchIds: ["m1", "m2"], unpublish: true } });
