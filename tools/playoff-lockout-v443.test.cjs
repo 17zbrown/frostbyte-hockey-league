@@ -68,7 +68,8 @@ A("Dress tonight names them and keeps the line instead of sending a sheet the da
   /var poWhy = playoffRefusal\(gq, row, slot\); if \(poWhy\)\{ done\(poWhy\); return; \}/.test(hub));
 
 console.log("\n5. The Seasons editor names a ruled floor");
-A("the field says when the commissioner set the floor", /'set by the commissioner for this season' : '30% of the season'/.test(live));
+/* v4.52: the other label is the six-game rule now (it read "30% of the season") */
+A("the field says when the commissioner set the floor", /'set by the commissioner for this season' : 'six games, Rule 8\.3'/.test(live));
 
 console.log("\n6. Rule 8.3, in the book as rendered");
 global.window = global; global.CG = {}; eval(R("src/live/part3_content.js"));
@@ -76,8 +77,10 @@ const rb = CG.CONTENT.rulebook;
 eval(R("src/live/part5b_public2.js").match(/CG\.rulebookForFormat = function\(rb, fmt\)\{[\s\S]*?\n\};/)[0]);
 const book = JSON.stringify(CG.rulebookForFormat(rb, "basic").chapters);
 A("8.3 states Season 1's fourteen and its prorated share", book.indexOf("For Season 1 the commissioner set the floor at fourteen (14) games in place of that figure, and a player placed after opening night that season needs the same share of fourteen (14): with forty-five (45) of fifty-four (54) games left, twelve (12), since the share is 11.67.") > -1);
-A("...the general rule is unchanged (thirty percent, sixteen of fifty-four)", book.indexOf("is thirty percent (30%) of a club's regular-season schedule") > -1 && book.indexOf("sixteen (16) in a season of fifty-four (54) games") > -1);
-A("...and Season 2 keeps its sixteen", book.indexOf("sixteen (16) games while Season 2 is fifty-four (54) games long") > -1);
+/* v4.52 (commissioner, 2026-11-17): the general floor is six games, so these two now pin six where they pinned v4.01's
+   thirty percent and Season 2's sixteen; Season 1's fourteen above is unchanged */
+A("...the general rule is six games", book.indexOf("(the playoff eligibility floor) is six (6)") > -1 && book.indexOf("is thirty percent (30%) of a club's regular-season schedule") < 0 && book.indexOf("sixteen (16) in a season of fifty-four (54) games") < 0);
+A("...and Season 2 takes the six", book.indexOf("the playoff eligibility floor of Rule 8.3, six (6) regular-season games, prorated") > -1 && book.indexOf("sixteen (16) games while Season 2 is fifty-four (54) games long") < 0);
 A("the worked share is right: 14 x 45 / 54 = 11.67, above .4, so 12", Math.abs(14 * 45 / 54 - 11.67) < 0.01 && (14 * 45 / 54) % 1 > 0.4);
 
 console.log("\n7. The changelog");

@@ -36,8 +36,11 @@ A("the page's helper is the database's rule", /CG\.roundFloorShare = function\(x
 console.log("— the rulebook and changelog");
 global.CG = {}; vm.runInThisContext(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook, r83 = rb.chapters.flatMap((c) => c.sections || []).find((x) => x.id === "8.3").paragraphs[3];
+/* v4.52: the floor is six games (commissioner, 2026-11-17), so the book works the same rounding on six: 6 x 40 / 54 = 4.44
+   rounds up to 5 and 6 x 30 / 54 = 3.33 rounds down to 3 (the examples on sixteen, 13.33 and 14.81, went with it) */
 A("Rule 8.3 states the rounding with both examples", /The result is rounded to the nearest game, with a fraction of four tenths or less rounded down and anything above it rounded up\./.test(r83) &&
-  /needs thirteen \(13\), since the share is 13\.33/.test(r83) && /needs fifteen \(15\), since 14\.81 rounds up/.test(r83) && !/rounded up:/.test(r83));
+  /left also needs five \(5\), since 4\.44 rounds up/.test(r83) && /needs three \(3\), since the share is 3\.33/.test(r83) && !/rounded up:/.test(r83) &&
+  Math.round(6 * 40 / 54 * 100) / 100 === 4.44 && Math.round(6 * 30 / 54 * 100) / 100 === 3.33);
 const cl = rb.changelog.find((c) => c.version === "4.00");
 A("changelog 4.00 is in the book", !!cl);
 A("no em dash in what v4.00 wrote", !/—/.test(JSON.stringify(cl)) && !/—/.test(sql));

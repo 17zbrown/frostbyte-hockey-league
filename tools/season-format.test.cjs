@@ -26,7 +26,14 @@ for (const f of ["basic", "full"]) {
   const all = [...sql.matchAll(new RegExp('\\{"format":"' + f + '"[\\s\\S]*?\\}\'::jsonb', 'g'))];
   const m = all.length ? all[all.length - 1] : null;
   A("the SQL records the " + f + " rules", !!m);
-  if (m) dbRules[f] = JSON.parse(m[0].slice(0, -"'::jsonb".length).replace(/\s+/g, ""));
+  /* v4.52: a later record may patch the live format_rules by exact anchor ($a$ old $b$ new, the anchored-patch tables of
+     CLAUDE.md step 3); every such patch whose anchor is in this literal is applied in record order, so the comparison is
+     with the function as it stands, not as it was first written */
+  let lit = m ? m[0] : "";
+  fs.readdirSync(path.join(__dirname, "..", "sql")).filter((x) => x.endsWith(".sql") && x > "2026-09-15-season-format.sql").sort().forEach((x) => {
+    for (const p of R("sql/" + x).matchAll(/\(\d+, 'public\.format_rules\(text\)',\s*\$a\$([\s\S]*?)\$a\$,\s*\$b\$([\s\S]*?)\$b\$\)/g)) if (lit.indexOf(p[1]) >= 0) lit = lit.replace(p[1], p[2]);
+  });
+  if (m) dbRules[f] = JSON.parse(lit.slice(0, -"'::jsonb".length).replace(/\s+/g, ""));
 }
 for (const f of ["basic", "full"]) {
   const a = CG.FORMAT_RULES[f], b = dbRules[f] || {};
@@ -34,9 +41,11 @@ for (const f of ["basic", "full"]) {
   A(f + ": the client and database key sets match", JSON.stringify(keys) === JSON.stringify(Object.keys(b).sort()), JSON.stringify(Object.keys(b).sort()));
   A(f + ": every value matches", keys.every((k) => JSON.stringify(a[k]) === JSON.stringify(b[k])), keys.filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k])).join(","));
 }
-A("basic is the standard: 15 = 7 F / 5 D / 3 G (v3.64), camp of 10 (v3.58), everyone 6 a week (camp 3), 4 a series, 16-GP floor (v2.67 default), $50M, 6 weeks, deadline week 4, 15 snake rounds, 1-season deals, no extensions/rights/picks/pre-season/FA, top 3, best of 7",
+/* v4.52 (commissioner, 2026-11-17): the floor is six games ("that is how many games it takes to generate a more accurate
+   player rating"); it was sixteen (v2.67, then v4.01's 30% of fifty-four) */
+A("basic is the standard: 15 = 7 F / 5 D / 3 G (v3.64), camp of 10 (v3.58), everyone 6 a week (camp 3), 4 a series, 6-GP floor (v4.52), $50M, 6 weeks, deadline week 4, 15 snake rounds, 1-season deals, no extensions/rights/picks/pre-season/FA, top 3, best of 7",
   CG.FORMAT_RULES.basic.roster_max === 15 && CG.FORMAT_RULES.basic.lines === null && CG.FORMAT_RULES.basic.flex === null && CG.FORMAT_RULES.basic.quota.F === 7 && CG.FORMAT_RULES.basic.quota.D === 5 && CG.FORMAT_RULES.basic.quota.G === 3 &&
-  CG.FORMAT_RULES.basic.camp_max === 10 && CG.FORMAT_RULES.basic.cap_skater === 6 && CG.FORMAT_RULES.basic.cap_camp === 3 && CG.FORMAT_RULES.basic.series_cap === 4 && CG.FORMAT_RULES.basic.playoff_min_gp === 16 &&
+  CG.FORMAT_RULES.basic.camp_max === 10 && CG.FORMAT_RULES.basic.cap_skater === 6 && CG.FORMAT_RULES.basic.cap_camp === 3 && CG.FORMAT_RULES.basic.series_cap === 4 && CG.FORMAT_RULES.basic.playoff_min_gp === 6 &&
   CG.FORMAT_RULES.basic.salary_cap === 50000000 && CG.FORMAT_RULES.basic.weeks === 6 &&
   CG.FORMAT_RULES.basic.trade_deadline_week === 4 && CG.FORMAT_RULES.basic.draft_rounds === 15 && CG.FORMAT_RULES.basic.draft_snake === true && CG.FORMAT_RULES.basic.max_contract_years === 1 &&
   !CG.FORMAT_RULES.basic.extensions && !CG.FORMAT_RULES.basic.rights && !CG.FORMAT_RULES.basic.pick_trades && !CG.FORMAT_RULES.basic.preseason && !CG.FORMAT_RULES.basic.fa_window &&
@@ -48,10 +57,10 @@ A("full is the shelf: 17 = 9/6/2, $40M, 8 weeks, deadline week 6, 14 linear roun
 A("full: the roster shape adds up to roster_max", (function(){ const r = CG.FORMAT_RULES.full; return r.quota.F + r.quota.D + r.quota.G === r.roster_max; })());
 A("basic: the group caps (7 F, 5 D, 3 G) add up to the fifteen (v3.64, Q29)", (function(){ const r = CG.FORMAT_RULES.basic; return r.quota.F + r.quota.D + r.quota.G === r.roster_max; })());
 A("basic goaltending covers a nine-game week with room (3 G x 6 games)", CG.FORMAT_RULES.basic.quota.G * CG.FORMAT_RULES.basic.cap_goalie >= 9);
-A("the series cap and the floor read through the helpers", CG.seriesCap({ pos:"G", season:{ format:"basic" } }) === 4 && CG.seriesCap({ squad:"tc", season:{ format:"basic" } }) === 4 && CG.seriesCap({ pos:"G", season:{ format:"full" } }) === 6 && CG.seriesCap({ pos:"C", season:{ format:"full" } }) === 3 && CG.playoffMinGp({ format:"basic" }) === 16 && CG.playoffMinGp({ format:"full" }) === 0);
+A("the series cap and the floor read through the helpers", CG.seriesCap({ pos:"G", season:{ format:"basic" } }) === 4 && CG.seriesCap({ squad:"tc", season:{ format:"basic" } }) === 4 && CG.seriesCap({ pos:"G", season:{ format:"full" } }) === 6 && CG.seriesCap({ pos:"C", season:{ format:"full" } }) === 3 && CG.playoffMinGp({ format:"basic" }) === 6 && CG.playoffMinGp({ format:"full" }) === 0);   /* v4.52: six */
 /* v2.67: the floor is the season's to publish. A season row overrides the format, 0 is honored as "no floor", and
    an unset row falls through to the format's figure, mirroring public.season_rules(). */
-A("the season's published floor overrides the format, 0 included, null falls through", CG.playoffMinGp({ format:"basic", playoff_min_gp:16 }) === 16 && CG.playoffMinGp({ format:"basic", playoff_min_gp:20 }) === 20 && CG.playoffMinGp({ format:"basic", playoff_min_gp:0 }) === 0 && CG.playoffMinGp({ format:"basic", playoff_min_gp:null }) === 16 && CG.fmt("draft_rounds", { format:"basic", draft_rounds:12 }) === 12);
+A("the season's published floor overrides the format, 0 included, null falls through", CG.playoffMinGp({ format:"basic", playoff_min_gp:16 }) === 16 && CG.playoffMinGp({ format:"basic", playoff_min_gp:20 }) === 20 && CG.playoffMinGp({ format:"basic", playoff_min_gp:0 }) === 0 && CG.playoffMinGp({ format:"basic", playoff_min_gp:null }) === 6 && CG.fmt("draft_rounds", { format:"basic", draft_rounds:12 }) === 12);
 /* v4.01 (commissioner): the floor is 30% of the season's length, worked out by the database; the editor shows it, never writes it */
 A("the Control Center season editor shows the floor read-only and does not send it", /<input id="ssPoMin" type="number" value="'\+CG\.fmt\("playoff_min_gp", s\)\+'" readonly/.test(live) && !/poRaw/.test(live) && !/playoff_min_gp:\(/.test(live));
 A("the database overlays it the same way", /jsonb_strip_nulls\(jsonb_build_object\('draft_rounds', s\.draft_rounds, 'playoff_min_gp', s\.playoff_min_gp\)\)/.test(R("sql/2026-09-19-playoff-floor-setting.sql")));
@@ -89,7 +98,14 @@ A("Rule 2.9 in basic is the sign-up cutoff", /if \(CG\.isBasic\(\)\)\{\s*var s0 
 console.log("\n— the Seasons editor");
 A("a Format select, first in the form", /<select id="ssFormat">/.test(live) && /CG\.FORMAT_NAME\[f\]/.test(live));
 A("new seasons default to the standard", /format:"basic",\s*salary_cap:CG\.FORMAT_RULES\.basic\.salary_cap, roster_max:CG\.FORMAT_RULES\.basic\.roster_max,/.test(live));
-A("roster_max is the format's, never typed", /roster_max:fr\.roster_max,/.test(live) && /id="ssRoster" type="number" min="6" max="30" value="'\+\(s\.roster_max\|\|CG\.fmt\("roster_max", s\)\)\+'" readonly/.test(live));
+/* v4.52 (commissioner, 2026-11-17: "Keep the roster size at 12 for the full season"): the roster limit is the season's own,
+   typed from 9 to the format's most; it was the format's alone and the save wrote it back over any other. Pinned: the field's
+   range, the save refusing anything outside it, a season keeping its own figure in its own format, and the reader */
+A("roster_max is the season's, 9 to the format's most", /roster_max:rosterMax,/.test(live) && !/roster_max:fr\.roster_max,/.test(live) &&
+  /id="ssRoster" type="number" min="9" max="'\+CG\.FORMAT_RULES\[s\.format==="full"\?"full":"basic"\]\.roster_max\+'" value="'\+\(s\.roster_max\|\|CG\.fmt\("roster_max", s\)\)\+'"/.test(live) &&
+  /if \(!\(rosterMax >= 9 && rosterMax <= fr\.roster_max\)\)\{ CG\.toast\(/.test(live) &&
+  /rEl\.value = \(!isNew && f === \(s\.format === "full" \? "full" : "basic"\) && s\.roster_max\) \? s\.roster_max : r\.roster_max;/.test(live) &&
+  CG.fmt("roster_max", { format:"basic", roster_max:12 }) === 12 && CG.fmt("roster_max", { format:"basic" }) === 15);
 /* v4.24: the basic cutoff is the day before the draft (commissioner, 2026-10-20), no longer the Thursday strictly before */
 A("Auto-space has a basic path spaced from draft night", /if \(fmtSel\.value === "basic"\)\{/.test(live) && /var cutoffDay = CG\.dayAdd\(draftDay, -1\);/.test(live) && /the Wednesday strictly after/.test(live));
 A("a basic season refuses pre-season / free-agency dates on save", /A basic-format season has no pre-season or free-agency window/.test(live));
@@ -129,7 +145,7 @@ A("5.2: active players six a week, camp three, the playoff cap takes over in the
 A("5.1: no availability quota", /The league sets no weekly availability quota beyond the appearance cap of Rule 5\.2/.test(sec("5.1")) && !/at least six \(6\) of the week/.test(sec("5.1")));
 A("8.1: top three, six-club field, the first seed byes", /top three \(3\) clubs in each division/.test(sec("8.1")) && /six-club field/.test(sec("8.1")) && /first seed receives a bye through the opening round/.test(sec("8.1")));
 /* v4.01 (commissioner): the floor is 30% of the season, not a season setting (Rules 0.1, 8.3, 10.1) */
-A("8.3: best-of-seven 2-2-3, three a series for everyone, byes", /best-of-seven series played within a single game-week in a 2-2-3 format/.test(sec("8.3")) && /No player, whether a skater, a goaltender or a training-camp player, may play in more than four \(4\) games of a single series/.test(sec("8.3")) && /the playoff eligibility floor\) is thirty percent \(30%\) of a club's regular-season schedule/.test(sec("8.3")) && !/eighteen|\b18\b/.test(sec("8.3")) && /Rules 2\.1 and 2\.8/.test(sec("10.1")) && /The playoff eligibility floor is not a season setting/.test(sec("10.1")) && /\(Rule 2\.8\) are season settings rather than fixed provisions/.test(sec("0.1")) && /first seed plays no series in the opening week/.test(sec("8.3")));
+A("8.3: best-of-seven 2-2-3, three a series for everyone, byes", /best-of-seven series played within a single game-week in a 2-2-3 format/.test(sec("8.3")) && /No player, whether a skater, a goaltender or a training-camp player, may play in more than four \(4\) games of a single series/.test(sec("8.3")) && /the playoff eligibility floor\) is six \(6\)/.test(sec("8.3")) && !/thirty percent \(30%\) of a club/.test(sec("8.3")) && !/eighteen|\b18\b/.test(sec("8.3")) && /Rules 2\.1 and 2\.8/.test(sec("10.1")) && /The playoff eligibility floor is not a season setting/.test(sec("10.1")) && /\(Rule 2\.8\) are season settings rather than fixed provisions/.test(sec("0.1")) && /first seed plays no series in the opening week/.test(sec("8.3")));
 A("0.4/0.6 carry their shelved titles", find("0.4").fullTitle === "Step three: the pre-season" && find("0.6").fullTitle === "Step five: rookie placement and free agency" && find("0.4").title === "Step three: draft week");
 A("10.1 defines Season format and Depth", /“Season format” means/.test(sec("10.1")) && /“Depth” or “depth placement” means/.test(sec("10.1")));
 A("the 2.48 changelog entry exists and the head is at least 2.48", (() => { const e = rb.changelog.find((c) => c.version === "2.48"); return !!e && /Saturday September 19/.test(e.summary) && /puck drop Wednesday September 23/.test(e.summary) && /playoffs from November 4/.test(e.summary) && parseFloat(rb.changelog[0].version) >= 2.48; })());

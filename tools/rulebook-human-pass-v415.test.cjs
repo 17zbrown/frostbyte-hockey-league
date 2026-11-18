@@ -46,7 +46,8 @@ A("binding figures survive: the regular-season shape", /six \(6\) game-weeks, th
 /* v4.24 (commissioner, 2026-10-20): "Yes say 'the day before the draft.'" The cutoff's day changed on purpose. */
 A("...the draft-eligibility cutoff", /11:59 PM Eastern on the day before the draft/.test(all));
 A("...the training-camp limit", /up to ten \(10\) training-camp players/.test(all));
-A("...the playoff floor", /thirty percent \(30%\) of the season's regular-season schedule/.test(all));
+/* v4.52 (commissioner, 2026-11-17): the floor became six games on purpose (it was thirty percent of the schedule) */
+A("...the playoff floor", /the playoff eligibility floor\) is six \(6\)/.test(all) && !/thirty percent \(30%\) of the season's regular-season schedule/.test(all));
 A("...the forfeit window", /ten \(10\) minutes/.test(all));
 A("Rule 4.5's Red-tier exceptions keep both abilities", /banned at the Red tier only: Stick .Em Up and Big Tipper, both of which may be equipped below that tier\./.test(all));
 
