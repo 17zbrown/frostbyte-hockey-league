@@ -11369,8 +11369,10 @@ CG.hubManagement = function(){
                : "the Owner removes them first, then nominates the successor; ")+
     "an approval into a seat that is still held is refused and nothing moves. "+
     "A manager stays on the active roster for as long as he holds the seat, and a removed manager keeps his roster spot, his position and his number: only the seat ends (Rule 2.6). "+
-    /* v3.69 (commissioner, 2026-09-28, Q45): "Just the GM and AGM seats do. The Owner stays for now." */
-    "The GM and AGM seats end when the club’s season ends (out of the playoffs, eliminated, or the final played); the Owner’s seat continues. "+
+    /* v3.69 (commissioner, 2026-09-28, Q45): "Just the GM and AGM seats do. The Owner stays for now."
+       v4.53 (commissioner, 2026-11-20) supersedes it: "As soon as that specific team's season is over ... that management and
+       roster should have their team roles removed since they no longer play any games. Give it 24 hours" */
+    "Every seat, the Owner’s included, ends 24 hours after the club’s season ends (out of the playoffs, eliminated, or the final played), and the club role comes off the roster then too (Rule 2.6). "+
     "Every club must hold its Owner and General Manager seats before the entry draft begins; the Assistant GM seat may stay open (Rule 2.8).</div>";
   return h;
 };

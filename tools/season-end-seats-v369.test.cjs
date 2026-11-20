@@ -13,13 +13,16 @@ A("out of the playoffs: the frozen seeds, for the current season only", /create 
 A("...with a reminder to reseat if round 1 is reseeded", /If round 1 is cleared and reseeded, clubs that qualify after all need their management reseated/.test(sql));
 A("the final: every remaining seat ends with the season", /after update of status on public\.seasons/.test(sql) && /if new\.status <> 'complete' or old\.status = 'complete' then return new; end if;/.test(sql));
 A("the rehearsal is recorded", /Result: REHEARSAL OK\. Applied as migration v369_season_end_seats\./.test(sql));
-A("Team HQ says so", /The GM and AGM seats end when the club’s season ends/.test(live));
+/* v4.53 (commissioner, 2026-11-20) superseded Q45: every seat, the Owner's included, ends 24 hours after the club's season
+   ends, and the club role comes off the roster (tools/club-season-close-v453.test.cjs pins the new rule). The v3.69 record
+   above stays as history; the caption and the rule text now say the new rule, with the Q45 quote kept in the comment. */
+A("Team HQ says so (v4.53 wording)", /Just the GM and AGM seats do\. The Owner stays for now\./.test(live) && /Every seat, the Owner’s included, ends 24 hours after the club’s season ends/.test(live));
 global.window = {}; global.CG = {}; eval(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook, secs = {};
 rb.chapters.forEach((ch) => ch.sections.forEach((s) => { secs[s.id] = s; }));
 const e = rb.changelog.find((c) => c.version === "3.69");
 A("changelog records 3.69", !!e);
-A("2.6.3 (both formats): the seats end with the club's season; the Owner's continues", ["paragraphs", "full"].every((k) => /seats, with their management contracts, end when the club's season ends/.test(secs["2.6"][k][2]) && /The Owner's seat continues\./.test(secs["2.6"][k][2])));
+A("2.6.3 (both formats): the seats end with the club's season (v4.53: every seat, 24 hours after)", ["paragraphs", "full"].every((k) => /Every front-office seat, the Owner's included, ends with its management contract twenty-four \(24\) hours after the club's season ends/.test(secs["2.6"][k][2]) && !/The Owner's seat continues\./.test(secs["2.6"][k][2])));
 A("no em dashes or spaced hyphens in the 3.69 entry", !/—| - /.test(JSON.stringify(e)));
 console.log("\n" + (fail ? fail + " of " + n + " FAILED" : "all " + n + " passed"));
 process.exit(fail ? 1 : 0);
