@@ -78,7 +78,7 @@ export function notSignedUpStrays(guildRoles, roleId) {
 }
 
 /* The desired managed roles for one member.
-   `m` is a discord_links row (profile_id, role, team_id); `ctx` is everything true about the
+   `m` is a discord_links row (profile_id, role, team_id, season_over); `ctx` is everything true about the
    league right now:
      roleId            guild role name (lowercased) -> id
      teamRoleId        team_id -> that club's Discord role id
@@ -119,8 +119,13 @@ export function desiredRolesFor(m, ctx) {
      pre-draft — matching the site's own taxonomy (CG.poolState returns "Management", never a
      free-agent class, for a seat holder). Their Owner/GM/AGM role below is their standing. */
   const holdsSeat = !!mgmtRoleByProfile[m.profile_id];
+  /* v4.55 (commissioner, 2026-11-20: a club whose season is over loses its team roles 24 hours later, Rule 2.6): a member
+     whose roster spot in a season still being played is on a closed club (discord_links.season_over) has no club role, and
+     is no free agent either: they are under contract for that season */
+  const seasonOver = !!m.season_over;
   if ((isRegistered || onRoster) && roleId["player"]) desired.add(roleId["player"]);
   if (onRoster) desired.add(teamRoleId[m.team_id]);
+  else if (seasonOver) { /* neither a club role nor a free-agent class */ }
   else if (isRegistered && !holdsSeat && rfa.has(m.profile_id) && roleId["restricted free agent"]) desired.add(roleId["restricted free agent"]);
   else if (isRegistered && !holdsSeat && roleId["free agent"]) desired.add(roleId["free agent"]);
   /* Training Camp rides with the club role: a camp player is the club's player (Rule 2.1) and

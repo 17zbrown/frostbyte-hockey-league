@@ -2309,7 +2309,8 @@ export async function runSweep(opts = {}) {
      every member, and the next sweep put them all back. Any load failure below flips this off and
      the managed roles are left exactly as they are for this run. */
   let inputsOk = true; const inputsErr = [];
-  const links = await sbGet("discord_links?select=profile_id,gamertag,role,discord_id,team_id,discord_username");
+  /* v4.55: season_over, a member whose roster spot in a season still being played is on a closed club (shared/roles.mjs) */
+  const links = await sbGet("discord_links?select=profile_id,gamertag,role,discord_id,team_id,discord_username,season_over");
   // staff department picks (site) -> department Discord roles for the officials who chose them
   const deptByProfile = {};
   try { for (const p of await sbGet("profiles?select=id,departments&role=in.(staff,commissioner)")) deptByProfile[p.id] = p.departments || []; }

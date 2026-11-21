@@ -133,7 +133,8 @@ export function createRoleSyncer(env, opts = {}) {
 
       /* the link view is the same source the sweep iterates — team_id comes from its roster-spot
          subquery, so club membership is decided by one query text, not two */
-      const links = await sbGet(`discord_links?profile_id=eq.${encodeURIComponent(profileId)}&select=profile_id,role,discord_id,team_id`);
+      /* v4.55: and season_over (shared/roles.mjs): a closed club's player is under contract, not a free agent */
+      const links = await sbGet(`discord_links?profile_id=eq.${encodeURIComponent(profileId)}&select=profile_id,role,discord_id,team_id,season_over`);
       const m = links && links[0];
       if (!m || !m.discord_id) { sum.skipped++; return "unlinked"; }
 
