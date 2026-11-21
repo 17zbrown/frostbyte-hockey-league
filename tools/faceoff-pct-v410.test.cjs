@@ -54,8 +54,10 @@ console.log("— the mapper: fow is faceoffs won, fot faceoffs taken");
 
 console.log("\n— the live build uses that one mapper");
 {
-  A("buildLiveLeague maps every skater row through CG.eaSkaterLine", /var eaSkaterLine = CG\.eaSkaterLine;/.test(live) &&
-    /CG\.boxPut\(box\[code\], key, r\.is_goalie \? eaGoalieLine\(r, gWon, forfeit \? false : g\.ot\) : eaSkaterLine\(r\), "ea:"\+r\.id\);/.test(live));   /* v4.11: filed through boxPut */
+  /* v4.54: the box moved out of buildLiveLeague into CG.gameBox (one box for the season on screen and a player's career);
+     buildLiveLeague builds every box through it, and it maps every skater row through CG.eaSkaterLine as before */
+  A("buildLiveLeague maps every skater row through CG.eaSkaterLine", /var box = CG\.gameBox\(g, statsByGame\[g\.id\], id2code\);/.test(live) &&
+    /CG\.boxPut\(box\[code\], key, r\.is_goalie \? CG\.eaGoalieLine\(r, gWon, forfeit \? false : g\.ot\) : CG\.eaSkaterLine\(r\), "ea:"\+r\.id\);/.test(live));   /* v4.11: filed through boxPut */
   A("...and no mapper anywhere on the site fills fot from faceoffs lost alone",
     !/fot\s*:\s*\+?\s*r\.faceoffs_lost/.test(live + pub + eng + R("src/live/part5b_public2.js") + R("src/live/part6_hub.js") + R("src/live/part7_admin.js")));
   A("the prototype engine already meant faceoffs taken (fow is a share of fot)", /b\.fot = 8\+Math\.floor\(rng\(\)\*14\); b\.fow = Math\.round\(b\.fot\*/.test(eng));

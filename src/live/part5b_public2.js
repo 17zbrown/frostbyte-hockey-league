@@ -118,7 +118,8 @@ CG.ROUTES.awards = function(param, qs){
       'Every rostered player and every member of league staff casts one vote per award, for a player on another club, and can change it until the award is decided. '+
       'The statistical titles are not voted on: they go to the best per-game average in the official record. '+
       'Only a playoff-eligible player can win either kind'+(floor ? ' ('+floor+' regular-season games, prorated for a player placed after opening night)' : '')+' (Rules 9.2 and 9.3).</div>'+
-      CG.awardBallotCard(lg)+
+      /* v4.54 (review): a completed season on screen is final and read-only, so it carries no ballot */
+      (CG.viewingPast() ? "" : CG.awardBallotCard(lg))+
       '<div class="grid g3">'+
       [["Most Valuable Player", mvps, false],
        ["Best Goaltender", CG.goalieLeaders(lg, 3, { current:true }).filter(function(p){ return p.pos==="G"; }).slice(0,3), true],

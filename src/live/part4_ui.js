@@ -732,16 +732,18 @@ CG.renderChrome = function(){
 };
 CG.markActiveNav = function(){
   var h = location.hash || "#/home";
-  var base = h.split("/")[1];
+  /* v4.54 (review): the route alone, so a page whose address carries ?season=1 (or any parameter) still lights its item */
+  var routeOf = function(x){ return String(x || "").replace(/^#\/?/, "").split(/[\/?]/)[0]; };
+  var base = routeOf(h);
   $$("#masthead [data-navlink]").forEach(function(a){
-    a.classList.toggle("on", a.getAttribute("href").split("/")[1]===base);
+    a.classList.toggle("on", routeOf(a.getAttribute("href"))===base);
   });
   /* every dropdown trigger lights up when one of its destinations is active */
   $$("#masthead .mh-dd").forEach(function(dd){
     var trig = dd.querySelector("[data-dd]");
     if (!trig) return;
     var active = Array.prototype.some.call(dd.querySelectorAll(".pop a"), function(a){
-      return a.getAttribute("href").split("/")[1]===base;
+      return routeOf(a.getAttribute("href"))===base;
     });
     trig.classList.toggle("on", active);
   });
@@ -1409,6 +1411,36 @@ CG.router = function(){
     if (CG.wireBootRetry) CG.wireBootRetry();
     return;
   }
+  /* v4.54: THE SEASON ON SCREEN (CG.seasonViewFor, part_live.js). A page asks for the season it should show: its address,
+     else the season its history entry was shown in (Back and Forward return there), else the rules in seasonViewFor. A
+     repaint (same address) never changes it, so a live update cannot switch the season under the reader. Until the league
+     in memory is that season, the boot screen holds a league page (box scores included) and any page while a switch is
+     under way, never the other season's numbers under this one's heading. */
+  if (CG.LIVE_MODE && CG.lg && CG.seasonViewFor){
+    var _entrySeason = (history.state && history.state.cgSeason != null) ? history.state.cgSeason : null;
+    var wantSeason = CG._lastRoutedHash === h ? (CG._viewSeasonId || null) : CG.seasonViewFor(name, qs, param, _entrySeason);
+    if (wantSeason !== (CG._viewSeasonId || null)) CG.viewSeason(wantSeason);
+    if (CG.SEASON_VIEW_ROUTES[name] ? !CG.viewReady() : !CG.viewSeasonBuilt()){
+      CG._lastRoutedHash = null;
+      app.innerHTML = CG.viewStalled() ? CG.seasonLoadFailedCard() : CG.bootScreen();
+      CG.armViewHold();
+      return;
+    }
+  }
+  CG._routeName = name; CG._routeParam = param || null;
+  /* v4.54: the league page on screen, so a tab or filter on the same club or player keeps its season (CG.seasonViewFor) */
+  CG._viewRoute = CG._viewSeasonId ? name : null;
+  CG._viewParam = CG._viewSeasonId ? (param || null) : null;
+  /* v4.54 (review): the history entry remembers the season it shows, and a completed season is always in the address, so
+     reload, Back, Forward and a copied link show it. replaceState fires no hashchange. */
+  if (CG.LIVE_MODE && CG.SEASON_VIEW_ROUTES && CG.SEASON_VIEW_ROUTES[name] && CG.LIVE_SEASON){
+    var _onNum = CG._viewSeasonId ? (CG.SEASON && CG.SEASON.number) : CG.LIVE_SEASON.number;
+    var _addr = (CG._viewSeasonId && !qs.season) ? CG.carrySeason(h) : h;
+    if (_onNum != null && (_addr !== h || !history.state || history.state.cgSeason !== _onNum)){
+      try { history.replaceState(Object.assign({}, history.state || {}, { cgSeason: _onNum }), "", location.pathname + location.search + _addr); h = _addr; }
+      catch(e){ /* a sandbox refusing replaceState keeps the page as it is */ }
+    }
+  }
   /* Scroll to top ONLY on a real navigation. Many surfaces call router() as "repaint after a state
      change" — assigning a lineup slot, saving a toggle, a realtime update — and yanking the page
      back to the top on each of those made every edit feel like a reload. Same hash as the previous
@@ -1457,6 +1489,7 @@ CG.router = function(){
     setTimeout(function(){ app.classList.remove("morph-in"); }, 600);
   }
   if (CG.AFTER[name]) CG.AFTER[name](param, qs);
+  if (CG._viewSeasonId && CG.carryLinks) CG.carryLinks(app);   /* v4.54: a past season's links name it */
   CG.armReveals(app);                              /* after AFTER: hooks may have injected markup */
   /* must land before focus moves: screen readers read the title when #app takes focus */
   document.title = CG.pageTitleFor(CG.ROUTES[name] ? name : "_404", app);
@@ -1558,8 +1591,18 @@ document.addEventListener("click", function(e){
     return;
   }
   var go = e.target.closest("[data-go]");
-  if (go){ location.hash = go.getAttribute("data-go"); return; }
+  if (go){ location.hash = CG.carrySeason(go.getAttribute("data-go")); return; }
 });
+/* v4.54: a link pressed on a page of a completed season opens the next league page in that season (CG.carrySeason). Capture
+   phase, so the address is rewritten before the browser follows it. The router also rewrites the page's links as it draws
+   them (CG.carryLinks), so a copied link, a new tab and a middle click carry it too; this catches links added after. */
+document.addEventListener("click", function(e){
+  if (!CG._viewSeasonId) return;
+  var a = e.target.closest && e.target.closest('#app a[href^="#/"]');   /* the page's links; the site's own menus are not the season's */
+  if (!a) return;
+  var h = a.getAttribute("href"), c = CG.carrySeason(h);
+  if (c !== h) a.setAttribute("href", c);
+}, true);
 document.addEventListener("keydown", function(e){
   if (e.key==="/" && !e.target.closest("input,textarea,select")){ e.preventDefault(); CG.openPalette(); }
   if (e.key==="Escape"){ CG.closeOverlay(); var pal=$("#palette"); if (pal) pal.remove(); CG.closeMobileNav(); }
@@ -1569,7 +1612,7 @@ document.addEventListener("keydown", function(e){
   }
   /* keyboard activation for data-go rows/cards */
   if ((e.key==="Enter"||e.key===" ") && e.target.getAttribute && e.target.getAttribute("data-go") && !e.target.closest("a,button,input,select,textarea")){
-    e.preventDefault(); location.hash = e.target.getAttribute("data-go");
+    e.preventDefault(); location.hash = CG.carrySeason(e.target.getAttribute("data-go"));
   }
   /* focus trap inside open modal/drawer */
   if (e.key==="Tab"){

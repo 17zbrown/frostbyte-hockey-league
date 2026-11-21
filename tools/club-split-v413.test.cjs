@@ -173,7 +173,7 @@ console.log("\n— the profile: full season on the main page, the split on Honor
   const sc = CG.scoutLine(players[1]);
   A("a goalie traded after every start does not read as starting his new club's games", /has started 3 games in goal \(3 for the Mammoth\)/.test(sc) && !/of 30 club games/.test(sc), sc);
   A("the main page wiring: the honors tab renders the split, the overview keeps the season line",
-    /\(CG\.clubHistoryHtml\(p, s\) \|\|/.test(pub) && /'<div id="posKpi">'\+CG\.profileSeasonHtml\(s, isG\)/.test(pub));
+    /* v4.54: a former player's full profile passes { former } so the last club is not marked current */ /\(CG\.clubHistoryHtml\(p, s, \{ former: !!p\.former \}\) \|\|/.test(pub) && /'<div id="posKpi">'\+CG\.profileSeasonHtml\(s, isG\)/.test(pub));
   A("the former player's page shows the split when he played for two or more clubs", /\(CG\.clubsPlayed\(s\)\.length > 1 \? CG\.clubHistoryHtml\(fp, s, \{ former: true \}\) : ''\)/.test(pub));
 }
 

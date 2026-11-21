@@ -142,7 +142,9 @@ const lib = new Function("etFmt", "const etDayUnix = (s) => etFmt.format(new Dat
 
   console.log("\n— the site readers");
   const live = R("src/live/part_live.js"), pub = R("src/live/part5a_public.js"), pub2 = R("src/live/part5b_public2.js"), hub = R("src/live/part6_hub.js");
-  A("the live builder files every line through boxPut, an unlinked line under its own row key", /CG\.boxPut\(box\[code\], key, r\.is_goalie \? eaGoalieLine\(r, gWon, forfeit \? false : g\.ot\) : eaSkaterLine\(r\), "ea:"\+r\.id\);/.test(live) &&
+  A("the live builder files every line through boxPut, an unlinked line under its own row key", /* v4.54: the box moved into CG.gameBox (shared with the profile's career); buildLiveLeague builds every box through it */
+    /var box = CG\.gameBox\(g, statsByGame\[g\.id\], id2code\);/.test(live) &&
+    /CG\.boxPut\(box\[code\], key, r\.is_goalie \? CG\.eaGoalieLine\(r, gWon, forfeit \? false : g\.ot\) : CG\.eaSkaterLine\(r\), "ea:"\+r\.id\);/.test(live) &&
     !/box\[code\]\[key\] = r\.is_goalie/.test(live));
   A("...and its three stars weigh both lines", /CG\.boxLines\(box\[code\]\[pid\]\)\.forEach\(function\(b\)\{\s*val \+=/.test(live));
   A("pre-season games and the fallback career count are games, not lines", /if \(!careerRows && first\) careerGp/.test(live) && /if \(first\) pgo\.gp\+\+;/.test(live));

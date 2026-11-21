@@ -640,12 +640,153 @@ CG._seasonHint = function(){
      CG.SEASON = {id:"S1"} that is still in place while this boot runs, and scoping on it matched
      no rows — so every cold boot loaded zero box scores and then rebuilt the whole league a second
      time to correct itself. Anything that isn't a uuid means "no hint": load unscoped. */
+  /* v4.54: a past season on screen scopes the box-score load to that season */
+  if (CG._viewSeasonId && CG._UUID_RE.test(CG._viewSeasonId)) return CG._viewSeasonId;
+  /* v4.54 (review): with no past season on screen, the season in play. CG.SEASON is still the past season the last build
+     made, so returning from Season 1 read Season 1's box scores under Season 2, and the one-time correction below had
+     usually been spent */
+  var inPlay = CG.LIVE_SEASON && CG.LIVE_SEASON.id;
+  if (inPlay && CG._UUID_RE.test(inPlay)) return inPlay;
   var live = CG.SEASON && CG.SEASON.id;
   if (live && CG._UUID_RE.test(live)) return live;
   try {
     var v = localStorage.getItem("cg_season_id");
     return (v && CG._UUID_RE.test(v)) ? v : null;
   } catch(e){ return null; }
+};
+/* v4.54 (commissioner, 2026-11-20): THE SEASON ON SCREEN. When Season 1 was marked complete, current_season_id() and so
+   CG.SEASON became Season 2, which had no rosters, games or box scores yet: standings, stats, awards, the champion and
+   every player's league stats went blank at 12:30 AM ET. Ruling ("Profiles + Season 1 archive"): Season 2 stays the
+   default, and Standings, Stats, Schedule and the club pages open Season 1, final and read-only, with the Bruins as
+   champions; every profile lists every season the player played, on a team or not.
+   A completed season is shown by building the league FOR that season, through the same buildLiveLeague the season in
+   play uses (every table but the box scores is already loaded for every season), so there is no second way to count a
+   past season. _viewSeasonId is that season's id, or null for the season in play. It is sticky across the league pages
+   (CG.SEASON_VIEW_ROUTES), so links inside Season 1 stay in Season 1; any other page, or the switch, returns to the
+   season in play. A URL's ?season=<number> opens that season, so a link to it can be shared. */
+CG._viewSeasonId = null;
+CG.SEASON_VIEW_ROUTES = { standings:1, stats:1, schedule:1, teams:1, team:1, players:1, player:1, awards:1, matchup:1 };
+/* the completed seasons other than the one in play, newest first */
+CG.pastSeasons = function(){
+  var live = CG.LIVE_SEASON && CG.LIVE_SEASON.id;
+  return (CG.SEASONS||[]).filter(function(s){ return s.status === "complete" && s.id !== live; })
+    .sort(function(a, b){ return (b.number||0) - (a.number||0); });
+};
+CG.viewingPast = function(){ return !!CG._viewSeasonId; };
+/* the season a route shows (commissioner, 2026-11-20: "Just because a player is not currently on a team does not mean their
+   profile page should not show all their career stats."). In order:
+     1. the address: ?season=<n> names a completed season; the number of the season in play (or one the league does not
+        have) means the season in play;
+     2. the history entry (entrySeason, the router's history.state.cgSeason): Back and Forward return to the season that
+        entry was shown in;
+     3. a bare #/matchup/<id> opens its game's own season;
+     4. a tab or filter on the page on screen (same route, same club or player) keeps its season;
+     5. a player's profile opens the last completed season they played when they are on no roster and have no game in the
+        season in play (CG.playerLastSeason);
+     6. anything else is the season in play: a notification, the search palette and the site's menus open the present.
+   A link drawn or pressed on a past season's page names it (CG.carrySeason, CG.carryLinks), so it lands in step 1. */
+CG.seasonViewFor = function(name, qs, param, entrySeason){
+  if (!CG.SEASON_VIEW_ROUTES[name]) return null;
+  var byNumber = function(n){ var hit = CG.pastSeasons().filter(function(s){ return s.number === n; })[0]; return hit ? hit.id : null; };
+  if (qs && qs.season != null && qs.season !== "") return byNumber(parseInt(qs.season, 10));
+  if (entrySeason != null) return byNumber(+entrySeason);
+  if (name === "matchup" && param){
+    var g = ((CG._bootCache && CG._bootCache[6] && CG._bootCache[6].data) || []).filter(function(x){ return x.id === param; })[0];
+    var gs = g && CG.pastSeasons().filter(function(s){ return s.id === g.season_id; })[0];
+    return gs ? gs.id : null;
+  }
+  if (CG._viewSeasonId && CG._viewRoute === name && (CG._viewParam || null) === (param || null)) return CG._viewSeasonId;
+  if (name === "player" && param) return CG.playerLastSeason(param);
+  return null;
+};
+/* a player's season when they are on no roster and have no game in the season in play: the last completed season they held
+   a roster spot in, else null (the season in play). Roster spots of every season are in the boot (slot 4). A player with
+   lines in a completed season but no roster spot in it (removed mid-season) is found by the Career card (CG.paintCareer). */
+CG.playerLastSeason = function(pid){
+  var live = CG.LIVE_SEASON && CG.LIVE_SEASON.id;
+  var rs = (CG._bootCache && CG._bootCache[4] && CG._bootCache[4].data) || [];
+  if (rs.some(function(r){ return r.profile_id === pid && r.season_id === live; })) return null;
+  if (CG.lg && !CG._viewSeasonId && (CG.lg.formerPlayers || []).some(function(p){ return p.id === pid; })) return null;
+  var past = CG.pastSeasons();
+  for (var i = 0; i < past.length; i++){
+    if (rs.some(function(r){ return r.profile_id === pid && r.season_id === past[i].id; })) return past[i].id;
+  }
+  return null;
+};
+/* a league page's address carrying the completed season on screen, when it names none */
+CG.carrySeason = function(href){
+  if (!CG._viewSeasonId || !href || href.charAt(0) !== "#") return href;
+  var route = href.replace(/^#\/?/, "").split(/[\/?]/)[0];
+  if (!CG.SEASON_VIEW_ROUTES[route] || /[?&]season=/.test(href)) return href;
+  var on = (CG.SEASONS || []).filter(function(s){ return s.id === CG._viewSeasonId; })[0];
+  return on ? href + (href.indexOf("?") >= 0 ? "&" : "?") + "season=" + on.number : href;
+};
+/* switch the season on screen: the box scores of that season are read and the league is built for it, through the pulse's
+   single-flight rebuild (CG.liveReload), so a switch can never interleave with a live update */
+CG.viewSeason = function(id){
+  id = id || null;
+  if (id === (CG._viewSeasonId || null)) return;
+  CG._viewSeasonId = id;
+  CG._viewAskedAt = Date.now();
+  /* v4.54 (review): a rebuild already on the clock is pulled forward (its flags are kept and run with the switch) */
+  if (CG._liveT){ clearTimeout(CG._liveT); CG._liveT = null; }
+  CG.liveReload({ slots: [], statsAll: true });
+  CG._liveUrgent = true;   /* v4.54 (review): a pulse flush right after must not push this rebuild out by its jitter */
+};
+/* the league in memory is the season the reader asked for */
+CG.viewReady = function(){
+  var want = CG._viewSeasonId || (CG.LIVE_SEASON && CG.LIVE_SEASON.id) || null;
+  var have = (CG.lg && CG.lg.season && CG.lg.season.id) || null;
+  /* v4.54 (review): and its box scores are that season's (null: an unscoped load, which holds every season's) */
+  var stats = CG.lg ? CG.lg._statsSeason : null;
+  return have === want && (!stats || stats === want);
+};
+/* any page may draw once the league is the season asked for (a league page also needs its box scores, CG.viewReady) */
+CG.viewSeasonBuilt = function(){
+  var want = CG._viewSeasonId || (CG.LIVE_SEASON && CG.LIVE_SEASON.id) || null;
+  return ((CG.lg && CG.lg.season && CG.lg.season.id) || null) === want;
+};
+/* a switch the reader asked for that has not landed in 30 seconds of the tab being on screen (a hidden tab does not build,
+   and the clock restarts when it is shown). A hold with no switch asked (a stored hint from before a rollover) never fails:
+   its own corrective rebuild lands it. */
+CG.viewStalled = function(){ return !!CG._viewAskedAt && Date.now() - CG._viewAskedAt > 30000; };
+CG.seasonLoadFailedCard = function(){
+  return '<section class="sec"><div class="shell"><div class="empty" style="padding:64px 20px"><div class="e-art">!</div>'+
+    '<b>That season could not be loaded</b><p>The rest of the site still works.</p>'+
+    '<button class="btn btn-ghost" style="margin-top:14px" onclick="location.reload()">Try again</button></div></div></section>';
+};
+/* the hold's watchdog: every few seconds, draw the page once it is ready; if no rebuild is queued or running (one that ran
+   for the other season, or every retry failed), ask for one again; after 30 visible seconds the card says so */
+CG.armViewHold = function(){
+  clearTimeout(CG._viewHoldT);
+  CG._viewHoldT = setTimeout(function tick(){
+    if (CG.viewReady()){ CG._viewAskedAt = 0; if (CG.router) CG.router(); return; }
+    if (document.visibilityState === "hidden"){ CG._viewHoldT = setTimeout(tick, 4000); return; }
+    if (!CG._liveBusy && !CG._liveT){ CG.liveReload({ slots: [], statsAll: true }); CG._liveUrgent = true; }
+    if (CG.viewStalled()){ if (CG.router) CG.router(); return; }
+    CG._viewHoldT = setTimeout(tick, 4000);
+  }, 4000);
+};
+/* guarded: this file is also loaded where there is no full DOM (tools/keyset-paging-v412.test.cjs runs it in a VM) */
+if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("visibilitychange", function(){
+  if (document.visibilityState === "visible" && CG._viewAskedAt && CG.viewReady && !CG.viewReady()) CG._viewAskedAt = Date.now();
+});
+/* the links of a past season's page name it, as they are drawn, so a copied link, a new tab and a middle click carry it */
+CG.carryLinks = function(root){
+  if (!CG._viewSeasonId || !root || !root.querySelectorAll) return;
+  Array.prototype.forEach.call(root.querySelectorAll('a[href^="#/"]'), function(a){
+    var h = a.getAttribute("href"), c = CG.carrySeason(h); if (c !== h) a.setAttribute("href", c);
+  });
+  Array.prototype.forEach.call(root.querySelectorAll("[data-go]"), function(el){
+    var h = el.getAttribute("data-go"), c = CG.carrySeason(h); if (c !== h) el.setAttribute("data-go", c);
+  });
+};
+/* the current address with ?season=<n> set, every other parameter kept */
+CG.hashWithSeason = function(n){
+  var h = location.hash || "#/home", base = h.split("?")[0];
+  var q = (h.split("?")[1] || "").split("&").filter(function(kv){ return kv && kv.split("=")[0] !== "season"; });
+  q.push("season=" + n);
+  return base + "?" + q.join("&");
 };
 /* ---- the boot cache and the delta rebuild ----
    The last full boot's raw query results. When one game changes (a final lands, a server
@@ -773,7 +914,8 @@ CG._deltaSlots = async function(cached, opts, hint){
   slots.forEach(function(i, k){ var r = res[k]; if (r && !r.error) q[i] = r; else failed.slots.push(i); });
   if (statsAll){
     var all = await Promise.resolve().then(loaders[12]).then(function(r){ return r; }, function(e){ return { data:null, error:e }; });
-    if (all && !all.error) q[12] = all; else failed.statsAll = true;
+    /* v4.54: the slot remembers whose box scores it holds; a failed read keeps the old slot and its old season */
+    if (all && !all.error){ q[12] = all; CG._bootStatsSeason = hint || null; } else failed.statsAll = true;
   } else if (opts.statsIds && opts.statsIds.length && q[12] && !q[12].error){
     var ids = opts.statsIds.filter(function(x){ return typeof x === "string" && CG._UUID_RE.test(x); });
     if (ids.length){
@@ -941,15 +1083,120 @@ CG.eaSkaterLine = function(r){
     ratOff:+r.offense_rating||0, ratDef:+r.defense_rating||0, ratTeam:+r.team_play_rating||0,
     name:r.skater_name||null, pos:r.position||null, eaId:r.ea_player_id||null, pid:r.profile_id||null };
 };
+/* v4.54: a game_stats goalie row as a box line (moved out of buildLiveLeague so a player's career counts every season the
+   way the season on screen does). won and ot come from the game's result; a forfeit decides them (CG.gameBox). */
+CG.eaGoalieLine = function(r, won, ot){
+  var sa=+r.shots_against||0, sv=+r.saves||0;
+  return { goalie:true, sa:sa, sv:sv, ga:+r.goals_against||0,
+    w:won?1:0, l:(!won&&!ot)?1:0, otl:(!won&&ot)?1:0,
+    so:r.shutout?1:0, qs:((sa>0?(sv/sa):1)>=.885)?1:0,
+    brkShots:+r.breakaway_shots||0, brkSv:+r.breakaway_saves||0, pokes:+r.poke_checks||0, dives:+r.diving_saves||0,
+    toi:+r.time_on_ice_seconds||0,
+    name:r.skater_name||null, pos:"G", eaId:r.ea_player_id||null, pid:r.profile_id||null };
+};
+/* v4.54: one games row as the site's game object (the schedule of the season on screen, and a career's games). cc is the
+   game's row from the masked codes view, when there is one. */
+CG.liveGame = function(g, id2code, cc){
+  cc = cc || {};
+  return { id:g.id, week:g.week||1, stage:g.stage||"regular",
+    limitWeek: g.limit_week != null ? g.limit_week : null,   /* v3.93: the week it counts toward for player limits, when the office ruled it differs */
+    limitsExempt: !!g.limits_exempt,                          /* v3.93: the office ruled it counts toward no week's limits (Rule 3.3) */
+    rescheduledFrom: g.rescheduled_from ? Date.parse(g.rescheduled_from) : null,   /* v4.07: a make-up: where it was first scheduled */
+    home:id2code[g.home_team_id], away:id2code[g.away_team_id],
+    at:Date.parse(g.scheduled_at), feature:false,
+    code:cc.game_code||null, server:cc.server||null, status:g.status,
+    homeScore:g.home_score, awayScore:g.away_score, ot:!!g.went_ot,
+    forfeit:g.forfeit_team_id?id2code[g.forfeit_team_id]:null, voided:!!g.voided,
+    eaMatchId:g.ea_match_id||null,
+    homeShots:g.home_shots, awayShots:g.away_shots };   /* v4.45: EA's club shot counts, read by CG.aggregate through r.shots */
+};
+/* v4.54: a game whose lines count: a final, not voided, with both scores. */
+CG.countedFinal = function(g){ return g.status==="final" && !g.voided && g.homeScore!=null && g.awayScore!=null; };
+/* v4.54: a game's box score keyed by club code (box[g.home], never box.home), one entry per player per game (moved out
+   of buildLiveLeague so a player's career counts every season the same way). rows are the game's game_stats rows. */
+CG.gameBox = function(g, rows, id2code){
+  var score={}; score[g.home]=g.homeScore; score[g.away]=g.awayScore;
+  /* a forfeit decides the result no matter what the goals say (Rule 4.3): the played
+     numbers are kept, but the club that forfeited takes the loss */
+  var forfeit = g.forfeit || null;
+  var box={}; box[g.home]={}; box[g.away]={};
+  (rows||[]).forEach(function(r){
+    var code = id2code[r.team_id]; if(!code || !box[code]) return;
+    var opp = code===g.home ? g.away : g.home;
+    var key = r.profile_id || ("ea:"+r.id);
+    /* a forfeit decides the goalie's W/L too: in a kept-score FFL the forfeiting club's
+       goalie must not be credited a win the club's ruling took away (Rule 4.3) */
+    var gWon = forfeit ? (forfeit !== code) : (score[code]>score[opp]);
+    /* v4.11: one entry per player per game; a player with a line in each role (skated in one sitting of a
+       restarted game, played goal in another) keeps both, the skating line riding on the goalie line */
+    CG.boxPut(box[code], key, r.is_goalie ? CG.eaGoalieLine(r, gWon, forfeit ? false : g.ot) : CG.eaSkaterLine(r), "ea:"+r.id);
+  });
+  return box;
+};
+/* v4.54 (commissioner, 2026-11-20): "Make sure player stats still appear on player profiles even if they're not on a team
+   at the moment." A player's CAREER: every league game in every season, whatever club, on a roster now or not, one line
+   per season and stage (pre-season, regular season, playoffs kept apart, Rule 6.1). Built from the player's own box
+   lines (game_stats by profile, every season, ~100 rows) and the games the boot already holds for every season, through
+   the same definitions the season on screen uses: CG.liveGame, CG.countedFinal, CG.gameBox (forfeits decide a goalie's
+   decision), and CG.aggregate's rule that a box ENTRY is one game (gp once) and each of its lines adds through
+   CG.addStatLine. Only the entry under the player's own id counts, as in CG.aggregate. */
+CG.careerLines = function(pid, rows){
+  var raw = (CG._bootCache && CG._bootCache[6] && !CG._bootCache[6].error && CG._bootCache[6].data) || null;
+  if (!raw) throw new Error("career: the games are not loaded");
+  /* every club the league has had (the boot's teams slot), not CG.TEAMS, which a past season on screen narrows to its own */
+  var id2code = {}; ((CG._bootCache && CG._bootCache[0] && CG._bootCache[0].data) || CG.TEAMS || []).forEach(function(t){ id2code[t.id] = t.code; });
+  var gById = {}; raw.forEach(function(g){ gById[g.id] = g; });
+  var sById = {}; (CG.SEASONS||[]).forEach(function(x){ sById[x.id] = x; });
+  var byGame = {}; (rows||[]).forEach(function(r){ (byGame[r.game_id] = byGame[r.game_id] || []).push(r); });
+  var out = {};
+  /* in time order, so a season's clubs read in the order the player first played for them (review: row-id order put
+     a traded player's last club first) */
+  Object.keys(byGame).sort(function(a, b){
+    return Date.parse((gById[a] || {}).scheduled_at || 0) - Date.parse((gById[b] || {}).scheduled_at || 0);
+  }).forEach(function(gid){
+    var g0 = gById[gid], sn = g0 && sById[g0.season_id];
+    if (!g0 || !sn) return;
+    var g = CG.liveGame(g0, id2code, null);
+    if (!g.home || !g.away || !CG.countedFinal(g)) return;
+    var box = CG.gameBox(g, byGame[gid], id2code);
+    var stage = g.stage === "preseason" ? "pre" : g.stage === "playoff" ? "po" : "reg";
+    [g.home, g.away].forEach(function(code){
+      var e = box[code][pid]; if (!e) return;
+      var key = sn.number + "|" + stage;
+      var s = out[key];
+      if (!s){ s = out[key] = CG.blankStatLine(); s.season = sn.number; s.stage = stage; s.clubs = []; }
+      s.gp++;
+      CG.boxLines(e).forEach(function(b){ CG.addStatLine(s, b, g.week); });
+      if (s.clubs.indexOf(code) < 0) s.clubs.push(code);
+    });
+  });
+  var ORDER = { pre:0, reg:1, po:2 };
+  return Object.keys(out).map(function(k){ return out[k]; })
+    .sort(function(a, b){ return a.season - b.season || ORDER[a.stage] - ORDER[b.stage]; });
+};
+/* the career, read for one player; a page repaint shows the last answer at once while a fresh one is read */
+CG._careerCache = {}; CG._careerAt = {};
+CG.loadCareer = function(pid){
+  return CG.sbAll("game_stats", "*", "id", true, function(qb){ return qb.eq("profile_id", pid); }).then(function(r){
+    if (!r || r.error) throw (r && r.error) || new Error("career: game_stats failed");
+    var lines = CG.careerLines(pid, r.data || []);
+    CG._careerCache[pid] = lines; CG._careerAt[pid] = Date.now();
+    return lines;
+  });
+};
 CG.buildLiveLeague = async function(opts){
   opts = opts || {};
   var sb = CG.sb;
   CG.LIVE = CG.LIVE || {}; CG.LIVE.partial = {};
   var _hintUsed = CG._seasonHint();      /* which season the box-score query is scoped to */
+  /* v4.54 (review): the season on screen as this build began, read with the hint, so a switch made while the loads are in
+     flight is served by the build it queues, never by one that pairs one season with the other's box scores */
+  var _viewUsed = CG._viewSeasonId || null;
   if (!sb) throw new Error("Supabase client unavailable");
   var q = ((opts.delta || opts.roster) && CG._bootCache) ? await CG._deltaBoot(CG._bootCache, opts.delta, opts.roster, _hintUsed)
         : (opts.slots && CG._bootCache) ? await CG._deltaSlots(CG._bootCache, opts, _hintUsed)
         : await Promise.all(CG._bootLoaders(_hintUsed).map(function(f){ return f(); }));
+  if (!((opts.delta || opts.roster || opts.slots) && CG._bootCache)) CG._bootStatsSeason = _hintUsed || null;
   CG._bootCache = q;
   if (q[12] && q[12].error){
     CG.LIVE.partial.game_stats = String((q[12].error && q[12].error.message) || q[12].error);
@@ -975,8 +1222,16 @@ CG.buildLiveLeague = async function(opts){
        over the whole site while Season 1 was still waiting for puck drop. */
     var open = rows.filter(function(s){ return s.status!=="complete"; })
                    .sort(function(a,b){ return (a.number||0)-(b.number||0); });
-    return rows.find(function(s){ return s.status==="active"; })
+    var live = rows.find(function(s){ return s.status==="active"; })
         || open[0] || rows[0] || null;
+    /* v4.54: the season in play is kept apart, and a completed season the reader opened is built instead */
+    CG.LIVE_SEASON = live;
+    if (_viewUsed){
+      var v = rows.find(function(s){ return s.id===_viewUsed && s.status==="complete"; });
+      if (v && (!live || v.id !== live.id)) return v;
+      if (CG._viewSeasonId === _viewUsed) CG._viewSeasonId = null;
+    }
+    return live;
   };
   /* The season currently taking sign-ups. During the playoffs the DISPLAYED season (active,
      playing out) and the REGISTERING season (next, opened by the rollover) are different rows —
@@ -1006,6 +1261,14 @@ CG.buildLiveLeague = async function(opts){
       awardsRaw=(q[16]&&!q[16].error&&q[16].data)||[];
   transactions = transactions.filter(_inSeason);
   news = news.filter(_inSeason);
+  /* v4.54 (review): a completed season on screen lists the clubs that played it, never a club founded since.
+     shortcut: names, colors and divisions are today's (teams has no per-season history); a rename or division move would
+     show in an earlier season too, so record them per season before the first one happens */
+  if (season && season.status === "complete"){
+    var _played = {};
+    games.forEach(function(g){ if (g.season_id === season.id){ _played[g.home_team_id] = 1; _played[g.away_team_id] = 1; } });
+    teamsRaw = teamsRaw.filter(function(t){ return _played[t.id]; });
+  }
 
   /* public config: feature flags (homepage modules etc.) + site_config (rankings override) */
   CG._flags = {}; flagsRaw.forEach(function(f){ CG._flags[f.key] = !!f.enabled; });
@@ -1049,7 +1312,7 @@ CG.buildLiveLeague = async function(opts){
 
   /* ---- season + cap ---- */
   CG.SEASON = season || {};
-  try { if (CG.SEASON.id && CG._UUID_RE.test(CG.SEASON.id)) localStorage.setItem("cg_season_id", CG.SEASON.id); } catch(e){}
+  try { if (!CG._viewSeasonId && CG.SEASON.id && CG._UUID_RE.test(CG.SEASON.id)) localStorage.setItem("cg_season_id", CG.SEASON.id); } catch(e){}
   /* The hint pointed at a DIFFERENT season than the one we resolved (a rollover happened since
      this browser last visited), so the box scores just loaded belong to the wrong season. Run one
      corrective rebuild — the hint is now correct, so it cannot recur. */
@@ -1083,7 +1346,8 @@ CG.buildLiveLeague = async function(opts){
       if (p.id===team.owner) mgmt="owner";
       else if (p.id===team.gm) mgmt="gm";
       else if (p.id===team.agm) mgmt="agm";
-      else if (c && c.is_manager) mgmt="agm";
+      /* v4.54: an ACTIVE management contract with no seat; an expired one (a seat that ended with its season) is no seat */
+      else if (c && c.is_manager && c.status==="active") mgmt="agm";
       return {
         id: rs.profile_id,
         tag: p.gamertag || p.display_name || "Player",
@@ -1125,18 +1389,7 @@ CG.buildLiveLeague = async function(opts){
      game_stats load below is scoped to one season.) */
   var codeById={}; ((q[CG.BOOT_CODES]&&!q[CG.BOOT_CODES].error&&q[CG.BOOT_CODES].data)||[]).forEach(function(c){ codeById[c.id]=c; });
   var schedule = games.filter(function(g){ return !seasonId || g.season_id===seasonId; }).map(function(g){
-    var cc = codeById[g.id]||{};
-    return { id:g.id, week:g.week||1, stage:g.stage||"regular",
-      limitWeek: g.limit_week != null ? g.limit_week : null,   /* v3.93: the week it counts toward for player limits, when the office ruled it differs */
-      limitsExempt: !!g.limits_exempt,                          /* v3.93: the office ruled it counts toward no week's limits (Rule 3.3) */
-      rescheduledFrom: g.rescheduled_from ? Date.parse(g.rescheduled_from) : null,   /* v4.07: a make-up: where it was first scheduled */
-      home:id2code[g.home_team_id], away:id2code[g.away_team_id],
-      at:Date.parse(g.scheduled_at), feature:false,
-      code:cc.game_code||null, server:cc.server||null, status:g.status,
-      homeScore:g.home_score, awayScore:g.away_score, ot:!!g.went_ot,
-      forfeit:g.forfeit_team_id?id2code[g.forfeit_team_id]:null, voided:!!g.voided,
-      eaMatchId:g.ea_match_id||null,
-      homeShots:g.home_shots, awayShots:g.away_shots };   /* v4.45: EA's club shot counts, read by CG.aggregate through r.shots */
+    return CG.liveGame(g, id2code, codeById[g.id]);
   }).filter(function(g){ return g.home && g.away && g.at; });
 
   /* weeks-played counts, per stage. The engine uses CG.SEASON.completedWeeks two
@@ -1160,36 +1413,13 @@ CG.buildLiveLeague = async function(opts){
      keep a synthetic key so they still render but don't corrupt a profile's totals). */
   var statsByGame = {};
   gameStatsRows.forEach(function(r){ (statsByGame[r.game_id]=statsByGame[r.game_id]||[]).push(r); });
-  var eaSkaterLine = CG.eaSkaterLine;
-  function eaGoalieLine(r, won, ot){
-    var sa=+r.shots_against||0, sv=+r.saves||0;
-    return { goalie:true, sa:sa, sv:sv, ga:+r.goals_against||0,
-      w:won?1:0, l:(!won&&!ot)?1:0, otl:(!won&&ot)?1:0,
-      so:r.shutout?1:0, qs:((sa>0?(sv/sa):1)>=.885)?1:0,
-      brkShots:+r.breakaway_shots||0, brkSv:+r.breakaway_saves||0, pokes:+r.poke_checks||0, dives:+r.diving_saves||0,
-      toi:+r.time_on_ice_seconds||0,
-      name:r.skater_name||null, pos:"G", eaId:r.ea_player_id||null, pid:r.profile_id||null };
-  }
   var results = schedule
-    .filter(function(g){ return g.status==="final" && !g.voided && g.homeScore!=null && g.awayScore!=null; })
+    .filter(CG.countedFinal)
     .map(function(g){
       var score={}; score[g.home]=g.homeScore; score[g.away]=g.awayScore;
-      /* a forfeit decides the result no matter what the goals say (Rule 4.3): the played
-         numbers are kept, but the club that forfeited takes the loss */
       var forfeit = g.forfeit || null;
-      var box={}; box[g.home]={}; box[g.away]={};
+      var box = CG.gameBox(g, statsByGame[g.id], id2code);
       var shots={}; shots[g.home]=g.homeShots; shots[g.away]=g.awayShots;   /* v4.45: keyed by club code, as box is */
-      (statsByGame[g.id]||[]).forEach(function(r){
-        var code = id2code[r.team_id]; if(!code || !box[code]) return;
-        var opp = code===g.home ? g.away : g.home;
-        var key = r.profile_id || ("ea:"+r.id);
-        /* a forfeit decides the goalie's W/L too — in a kept-score FFL the forfeiting club's
-           goalie must not be credited a win his club's ruling took away (Rule 4.3) */
-        var gWon = forfeit ? (forfeit !== code) : (score[code]>score[opp]);
-        /* v4.11: one entry per player per game; a player with a line in each role (skated in one sitting of a
-           restarted game, played goal in another) keeps both, the skating line riding on the goalie line */
-        CG.boxPut(box[code], key, r.is_goalie ? eaGoalieLine(r, gWon, forfeit ? false : g.ot) : eaSkaterLine(r), "ea:"+r.id);
-      });
       /* three stars — top performers across both clubs (linked players only); a two-role game counts both lines */
       var cand = [];
       [g.home, g.away].forEach(function(code){
@@ -1258,21 +1488,41 @@ CG.buildLiveLeague = async function(opts){
   var rosteredNow = {}; players.forEach(function(p){ rosteredNow[p.id] = true; });
   var schedAt = {}; schedule.forEach(function(g){ schedAt[g.id] = g.at; });
   var formerById = {};
+  /* v4.54 (review): EA files a defenseman as D, which names no side; the player's latest roster spot, else their sign-up, does */
+  var _sNum = {}; (CG.SEASONS||[]).forEach(function(x){ _sNum[x.id] = x.number || 0; });
+  var _lastPos = {};
+  roster.forEach(function(rs){ var n0 = _sNum[rs.season_id] || 0, cur = _lastPos[rs.profile_id]; if (!cur || cur.n < n0) _lastPos[rs.profile_id] = { n: n0, pos: rs.position }; });
+  registrations.forEach(function(rg){ if (rg.position && !_lastPos[rg.profile_id]) _lastPos[rg.profile_id] = { n: -1, pos: rg.position }; });
+  var _formerPos = function(r){
+    if (r.is_goalie) return "G";
+    if (CG.POS_NAME[r.position]) return r.position;
+    var lp = (_lastPos[r.profile_id] || {}).pos;
+    return CG.POS_NAME[lp] && lp !== "G" ? lp : (r.position === "D" ? "LD" : "C");
+  };
   gameStatsRows.forEach(function(r){
     if (!r.profile_id || rosteredNow[r.profile_id] || schedAt[r.game_id] == null) return;
     var at = schedAt[r.game_id], cur = formerById[r.profile_id];
     if (cur && cur._at >= at) return;
     var pr = profById[r.profile_id] || {};
+    /* v4.54 (commissioner, 2026-11-20: "Just because a player is not currently on a team does not mean their profile page
+       should not show all their career stats."): a former player carries every field the profile reads, so their page is
+       the full profile, off a roster (no seat, no contract, no camp) */
     formerById[r.profile_id] = { id: r.profile_id, tag: pr.gamertag || r.skater_name || "Former player",
-      team: id2code[r.team_id] || null, pos: r.is_goalie ? "G" : (r.position || "C"), former: true,
-      avatar: pr.avatar_url || "", eaId: pr.ea_id || "", platform: pr.platform || "", _at: at };
+      team: id2code[r.team_id] || null, pos: _formerPos(r), former: true,
+      avatar: pr.avatar_url || "", eaId: pr.ea_id || "", platform: pr.platform || "", _at: at,
+      jersey: pr.jersey_number || 0, server: pr.preferred_server || null, twitch: pr.twitch || null, twitchLive: !!pr.live,
+      overall: (posOvr && posOvr[r.profile_id] && posOvr[r.profile_id].head && posOvr[r.profile_id][posOvr[r.profile_id].head])
+        ? posOvr[r.profile_id][posOvr[r.profile_id].head].ovr : (pr.overall || CG.OVR_CENTER),
+      banned: !!pr.banned, salary: 0, term: 0, mgmt: null, status: "former", squad: "pro", origin: "former",
+      arch: "Two-Way", shoots: "L", joined: "Season 1", depth: 0 };
   });
   var formerPlayers = Object.keys(formerById).map(function(k){ return formerById[k]; })
     .filter(function(p){ return !!p.team; });
   var lg = { players:players, byTeam:byTeam, schedule:schedule, results:regResults,
              allResults:results, playoffGames:playoffGames, clinched:clinchedCfg,
              suspensions:suspMapped, warnings:warnMapped, demoNow:CG.now(), season:season, live:true,
-             posOvr:posOvr, formerPlayers:formerPlayers };
+             posOvr:posOvr, formerPlayers:formerPlayers,
+             _statsSeason: CG._bootStatsSeason || null };   /* v4.54: whose box scores these are (CG.viewReady) */
   /* v4.09: every stage's lines in one engine step: lg.playoff and lg.pre kept apart, ratings from every stage, and the
      regular season alone in lg.pstats, lg.glog and the standings (CG.aggregateStages) */
   CG.aggregateStages(lg, stages, { pre: preWeeksDone, all: allWeeksDone, reg: regMaxWk });
@@ -1306,8 +1556,11 @@ CG.buildLiveLeague = async function(opts){
   var draftedEver={};
   draftPicks.forEach(function(p){ if(p.player_id) draftedEver[p.player_id]=true; });
   var priorSeason={}, serviceSeasons={};
+  var _builtNum = (season && season.number) || 0;
   roster.forEach(function(rs){
     if(!seasonId || rs.season_id===seasonId) return;
+    /* v4.54 (review): only an EARLIER season; with Season 1 on screen a Season 2 roster spot made every rookie a veteran */
+    if (_builtNum && (_sNum[rs.season_id] || 0) >= _builtNum) return;
     priorSeason[rs.profile_id]=true;
     (serviceSeasons[rs.profile_id]=serviceSeasons[rs.profile_id]||{})[rs.season_id]=1;
   });
@@ -1337,7 +1590,7 @@ CG.buildLiveLeague = async function(opts){
   (draftPicks||[]).forEach(function(p){
     if (p.player_id && (p.season_number||0) < curSnR) draftedBefore[p.player_id] = true;
   });
-  players.forEach(function(p){ p.rookie = !(draftedBefore[p.id] || priorSeason[p.id]); });
+  CG.statPlayers(lg).forEach(function(p){ p.rookie = !(draftedBefore[p.id] || priorSeason[p.id]); });   /* v4.54: former players too */
 
   /* extend season stat lines with EA-only advanced metrics (base G/A/P/etc. came
      from the box above via CG.aggregate; these power the advanced leaders + profiles) */
@@ -1473,7 +1726,8 @@ CG.buildLiveLeague = async function(opts){
   };
 
   /* stats-derived ratings are all-zero pre-season — use the real overalls */
-  players.forEach(function(p){
+  /* v4.54: and a former player's, so their full profile has its overall */
+  CG.statPlayers(lg).forEach(function(p){
     lg.ratings[p.id] = lg.ratings[p.id] || { parts:{} };
     lg.ratings[p.id].ovr = p.overall;
     lg.ratings[p.id].parts = lg.ratings[p.id].parts || {};
@@ -9308,9 +9562,11 @@ CG.liveReload = function(opts){
            : (opts.game || opts.roster) ? 1000 + Math.floor(Math.random()*8000) : 1000;
   /* a full reload already on the clock covers any delta: keep its timer (and its spread) */
   if (CG._liveT && CG._liveFullOwed && (opts.game || opts.roster || opts.slots)) return;
+  /* v4.54: a season switch on the clock runs on its own short timer; what arrives meanwhile is folded into it */
+  if (CG._liveT && CG._liveUrgent) return;
   clearTimeout(CG._liveT);
   CG._liveT = setTimeout(function run(){
-    CG._liveT = null;
+    CG._liveT = null; CG._liveUrgent = false;
     if (CG._liveBusy){ CG._liveAgain = true; return; }   /* fold overlapping bursts into one */
     /* v4.05: a hidden tab keeps what is queued and runs it when it is looked at again */
     if (document.visibilityState === "hidden"){ CG._liveHiddenOwed = true; return; }
@@ -9330,11 +9586,14 @@ CG.liveReload = function(opts){
     CG._liveBusy = true;
     var prev = CG.lg;
     CG.buildLiveLeague(full ? {} : slots ? { slots: slots, statsIds: statsIds, statsAll: statsAll } : { delta: delta || null, roster: roster }).then(function(lg){
-      if (!full) CG._carryLg(prev, lg, skipCarry);
+      /* v4.54 (review): a rebuild that changed the season on screen carries nothing across (draft state, lineups, cap
+         exceptions and the rest are per season) and re-reads them for the season now built */
+      var changed = !!(prev && prev.season && lg.season && prev.season.id !== lg.season.id);
+      if (!full && !changed) CG._carryLg(prev, lg, skipCarry);
       CG.lg = lg;
       CG.refreshRole();
       /* a game or roster changing does not move availability or trades; the manager state came across */
-      if (full) return Promise.all([CG.loadManagerData(), CG.loadAvailability(), CG.loadTrades()]);
+      if (full || changed) return Promise.all([CG.loadManagerData(), CG.loadAvailability(), CG.loadTrades()]);
       /* v4.05: a sign-up change re-reads the office's own registration view (with scouting marks) too */
       var r0 = CG.role ? CG.role() : "guest";
       return (manager && (r0 === "mgmt" || r0 === "staff" || r0 === "commish")) ? CG.loadManagerData() : null;

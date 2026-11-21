@@ -1294,6 +1294,20 @@ tr.dr-now td{animation:drGlow 2.2s ease-in-out infinite}
 .seg button{padding:8px 13px;font-family:var(--f-mono);font-size:11.5px;letter-spacing:.05em;color:var(--steel);min-height:40px;border-right:1px solid var(--line)}
 .seg button:last-child{border-right:0}
 .seg button.on{background:var(--bc);color:var(--chrome);font-weight:600}
+/* v4.54: the season switch (CG.seasonSwitch): the same control as links, in the page head and the dark club and player heroes */
+.seg a{display:inline-flex;align-items:center;padding:8px 13px;font-family:var(--f-mono);font-size:11.5px;letter-spacing:.05em;color:var(--steel);min-height:40px;border-right:1px solid var(--line);text-decoration:none;transition:color .15s}
+.seg a:last-child{border-right:0}
+.seg a.on{background:var(--bc);color:var(--chrome);font-weight:600}
+.seg a:focus-visible{outline:2px solid var(--chrome);outline-offset:-2px}
+.season-switch{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px}
+.season-switch.on-ink{margin-top:0}
+.season-switch.on-ink .seg{background:transparent;border-color:#39434B}
+.season-switch.on-ink .seg a{color:var(--on-ink-dim);border-right-color:#39434B}
+.season-switch.on-ink .seg a.on{background:var(--bc2);color:var(--chrome)}
+.season-switch.on-ink .caption{color:var(--on-ink-dim)}
+@media (hover:hover) and (pointer:fine){.seg a:not(.on):hover{color:var(--ink)}.season-switch.on-ink .seg a:not(.on):hover{color:#fff}}
+/* v4.54: the profile's Career card; a career total reads as the sum under the seasons */
+.career tr.tot td{font-weight:700;border-top:1.5px solid var(--ink)}
 
 /* ---------- forms ---------- */
 input,select,textarea{font:inherit;color:var(--ink);background:var(--paper);border:1.5px solid var(--line);

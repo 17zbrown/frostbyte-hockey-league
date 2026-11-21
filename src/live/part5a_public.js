@@ -9,6 +9,7 @@ CG.pageHead = function(eyebrow, title, lede, right){
   return '<section class="sec-tight"><div class="shell"><div class="sec-head" data-rv="mask"><div class="lead">'+
     '<span class="eyebrow chr">'+esc(eyebrow)+'</span><h1 class="h-page" style="margin-top:10px">'+title+'</h1>'+
     (lede?'<p class="lede" style="margin-top:10px">'+lede+'</p>':"")+
+    (CG.seasonSwitch ? CG.seasonSwitch(false) : "")+
     '</div>'+(right||"")+'</div></div></section>';
 };
 /* Empty state for a table that has to keep its <table> element: CG.AFTER.stats binds column
@@ -2000,13 +2001,27 @@ CG.seasonData = function(key){
   return { key:"cur", label:CG.seasonTag()+" · "+CG.seasonYear(), status:"Current",
     teams:CG.lg.teams, pstats:CG.lg.pstats, glog:CG.lg.glog, results:CG.lg.results };
 };
-CG.seasonPicker = function(cur){
-  return '<label style="display:flex;align-items:center;gap:9px">'+
-    '<span class="eyebrow" style="color:var(--on-ink-dim)">Season</span>'+
-    '<select id="seasonPick" aria-label="Season to view" style="width:auto;min-width:200px;background:var(--bc2);color:#fff;border-color:#39434B;font-family:var(--f-mono);font-size:12px">'+
-    CG.SEASONS_LIST().map(function(s){
-      return '<option value="'+s.key+'"'+(cur===s.key?" selected":"")+'>'+esc(s.label)+' — '+esc(s.status)+'</option>';
-    }).join("")+'</select></label>';
+/* v4.54: the season switch on the league pages (CG.SEASON_VIEW_ROUTES): the season in play and every completed season,
+   as links, so the address names the season and a link to it can be shared. A completed season is final and read-only.
+   Nothing shows before a season has been completed. dark: the switch sits in a dark hero (the club and player pages). */
+CG.seasonSwitch = function(dark){
+  if (!CG.SEASON_VIEW_ROUTES || !CG.SEASON_VIEW_ROUTES[CG._routeName]) return "";
+  var past = CG.pastSeasons ? CG.pastSeasons() : [];
+  var live = CG.LIVE_SEASON;
+  if (!past.length || !live) return "";
+  /* a club page offers only the seasons that club played (a club founded since has no earlier page) */
+  if (CG._routeName === "team" && CG._routeParam){
+    var club = ((CG._bootCache && CG._bootCache[0] && CG._bootCache[0].data) || []).filter(function(t){ return t.code === CG._routeParam; })[0];
+    var games = (CG._bootCache && CG._bootCache[6] && CG._bootCache[6].data) || [];
+    past = past.filter(function(s){ return !!club && games.some(function(g){ return g.season_id === s.id && (g.home_team_id === club.id || g.away_team_id === club.id); }); });
+    if (!past.length) return "";
+  }
+  var on = CG._viewSeasonId || live.id;
+  return '<div class="season-switch'+(dark?' on-ink':'')+'"><div class="seg" role="group" aria-label="Season">'+
+    [live].concat(past).map(function(s){
+      return '<a href="'+esc(CG.hashWithSeason(s.number))+'"'+(s.id===on?' class="on" aria-current="page"':'')+'>'+esc(CG.seasonTag(s))+'</a>';
+    }).join("")+'</div>'+
+    (CG._viewSeasonId ? '<span class="caption">Final and read-only</span>' : '')+'</div>';
 };
 
 /* Editorial one-liner computed from live results — always factually current. */
@@ -2115,14 +2130,17 @@ CG.ROUTES.team = function(code, qs){
           CG.form5(s.last5)+'</div></div>'+
       (archived?'':'<div class="hero-ovr" style="text-align:center"><span class="ovrbox" style="min-width:64px;height:52px;font-size:26px">'+lg.teamRatings[code].ovr+'</span>'+
         '<span class="caption" style="display:block;margin-top:6px;color:var(--on-ink-dim)">Team overall</span></div>')+'</div>'+
-    '<div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap;align-items:center">'+
+    /* v4.54: the seats are the season in play's; a completed season on screen shows none of them */
+    (CG.viewingPast() ? '' : '<div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap;align-items:center">'+
       (mgmt.owner?'<span class="chip chip-ink" style="border-color:#39434B">Owner · '+esc(mgmt.owner.tag)+'</span>':"")+
       (mgmt.gm?'<span class="chip chip-ink" style="border-color:#39434B">GM · '+esc(mgmt.gm.tag)+'</span>':"")+
       (mgmt.agm?'<span class="chip chip-ink" style="border-color:#39434B">AGM · '+esc(mgmt.agm.tag)+'</span>':"")+
-      (!mgmt.owner&&!mgmt.gm&&!mgmt.agm?'<span class="chip chip-ink" style="border-color:#39434B">Management not yet named</span>':"")+'</div>'+
+      (!mgmt.owner&&!mgmt.gm&&!mgmt.agm?'<span class="chip chip-ink" style="border-color:#39434B">Management not yet named</span>':"")+'</div>')+
     '<div style="display:flex;gap:12px;align-items:center;margin-top:16px;flex-wrap:wrap">'+
-      CG.seasonPicker(seasonKey)+
+      CG.seasonSwitch(true)+
       (archived?'<span class="chip chip-warn">Archived season — final, read-only</span>'
+        /* v4.54: a completed season on screen says so in the switch beside this */
+        :CG.viewingPast()?''
         /* "Live" is a semantic status. Before a single game exists it is simply untrue, and a
            green pill on an 0-0-0 club dilutes the token everywhere else it is used. */
         :((CG.lg.schedule&&CG.lg.schedule.length)?'<span class="chip chip-win">Live — updates after every final</span>'
@@ -2278,11 +2296,6 @@ CG.AFTER.team = function(code, qs){
   $$("[data-tab]").forEach(function(b){ b.addEventListener("click", function(){
     location.hash="#/team/"+code+"?tab="+this.getAttribute("data-tab")+(season&&season!=="cur"?"&season="+season:"");
   }); });
-  var sp = $("#seasonPick");
-  if (sp) sp.addEventListener("change", function(){
-    var v = this.value;
-    location.hash = "#/team/"+code+(v!=="cur"?"?season="+v:"");
-  });
 };
 
 /* ---------- PLAYERS DIRECTORY ---------- */
@@ -2297,7 +2310,11 @@ CG.ROUTES.players = function(param, qs){
   (lg._registrationsRaw||[]).forEach(function(r){
     if (!r.season_id || (CG.SEASON && r.season_id===CG.SEASON.id)) regByProfile[r.profile_id]=r;
   });
-  var unrostered = (lg._profilesRaw||[]).filter(function(pr){
+  /* v4.54 (review): a completed season on screen lists who played it, its rosters and its former players, with no
+     sign-up pool (that is the season in play's) */
+  var pastSeason = CG.viewingPast();
+  var formers = pastSeason ? (lg.formerPlayers||[]) : [];
+  var unrostered = pastSeason ? [] : (lg._profilesRaw||[]).filter(function(pr){
     return !rosteredIds[pr.id] && !pr.banned && (pr.gamertag||pr.display_name);
   }).map(function(pr){
     var reg = regByProfile[pr.id];
@@ -2307,16 +2324,18 @@ CG.ROUTES.players = function(param, qs){
   });
   var nRostered = lg.players.length;
   var head = CG.pageHead("Player directory","Every skater. Every tendy.",
-    esc((nRostered+unrostered.length)+" players — "+nRostered+" on club rosters, "+unrostered.length+" signed in and waiting on one. "+
+    pastSeason ? esc((nRostered+formers.length)+" players played in "+CG.seasonTag()+": "+nRostered+" on its final rosters"+
+      (formers.length ? " and "+formers.length+" no longer on one by its end" : "")+".") :
+    esc((nRostered+unrostered.length)+" players: "+nRostered+" on club rosters, "+unrostered.length+" signed in and waiting on one. "+
       "An overall measures a player against the league at the position they signed up at, from CGHL box scores alone, and stays pulled toward " + CG.OVR_CENTER + " until their sixth game there; games, points, and save percentage come straight from EA box scores."));
   var filters = '<div class="shell" style="margin-bottom:20px"><div class="filters">'+
     '<input type="search" id="pQ" placeholder="Search gamertag…" value="'+esc(qs.q||"")+'" style="max-width:230px" aria-label="Search players">'+
     '<select id="pTeam" style="max-width:200px" aria-label="Filter by club"><option value="">All clubs</option>'+CG.TEAMS.map(function(t){ return '<option value="'+t.code+'"'+(fTeam===t.code?" selected":"")+'>'+esc(t.name)+'</option>'; }).join("")+
-      '<option value="FA"'+(fTeam==="FA"?" selected":"")+'>No club yet</option></select>'+
+      (pastSeason ? '' : '<option value="FA"'+(fTeam==="FA"?" selected":"")+'>No club yet</option>')+'</select>'+
     '<select id="pPos" style="max-width:150px" aria-label="Filter by position"><option value="">All positions</option>'+["LW","C","RW","LD","RD","G"].map(function(p){ return '<option'+(fPos===p?" selected":"")+'>'+p+'</option>'; }).join("")+'</select>'+
     '<div class="seg"><button data-flag="" class="'+(fFlag===""?"on":"")+'">All</button><button data-flag="rookie" class="'+(fFlag==="rookie"?"on":"")+'">Rookies</button><button data-flag="susp" class="'+(fFlag==="susp"?"on":"")+'">Suspended</button></div>'+
   '</div></div>';
-  var list = lg.players.filter(function(p){
+  var list = lg.players.concat(formers).filter(function(p){
     if (fTeam && p.team!==fTeam) return false;
     if (fPos && p.pos!==fPos) return false;
     if (fQ && p.tag.toLowerCase().indexOf(fQ)<0 && (p.eaId||"").toLowerCase().indexOf(fQ)<0) return false;
@@ -2514,6 +2533,86 @@ CG.formerLeagueHtml = function(pid){
     (po && po.gp ? '<div style="margin-top:18px">'+CG.playoffCardHtml(pid, isG)+'</div>' : '')+
     logs+CG.playoffLogHtml(pid, isG)+'</div></section>';
 };
+/* v4.54: the profile's Career card (CG.loadCareer): a table per role played (skating, in goal), a row per season and stage,
+   and career totals once there is more than one season to add up. Each row opens that season on the profile. "" when the
+   player has no league game in any season. */
+CG.careerHtml = function(pid, lines){
+  lines = lines || [];
+  if (!lines.length) return "";
+  var STAGE = { pre:" pre-season", reg:"", po:" playoffs" };
+  var seasons = {}; lines.forEach(function(s){ seasons[s.season] = 1; });
+  var nSeasons = Object.keys(seasons).length;
+  var role = function(goalie){
+    var rows = lines.filter(function(s){ return goalie ? s.gs > 0 : s.sgp > 0; });
+    if (!rows.length) return null;
+    var cells = function(s){
+      return goalie
+        ? '<td>'+s.gs+'</td><td>'+s.w+'</td><td>'+s.l+'</td><td>'+s.otl+'</td>'+
+          '<td>'+(s.sa ? (s.sv/s.sa).toFixed(3).replace(/^0/,"") : "—")+'</td><td>'+(s.gs ? (s.ga/s.gs).toFixed(2) : "—")+'</td><td class="'+(s.so?"":"z")+'">'+s.so+'</td>'
+        : '<td>'+s.sgp+'</td><td class="'+(s.g?"":"z")+'">'+s.g+'</td><td class="'+(s.a?"":"z")+'">'+s.a+'</td><td class="pts">'+s.p+'</td>'+
+          '<td>'+(s.pm>0?"+":"")+s.pm+'</td><td class="'+(s.pim?"":"z")+'">'+s.pim+'</td><td>'+s.shots+'</td>';
+    };
+    var body = rows.map(function(s){
+      return '<tr class="rowlink" data-go="#/player/'+esc(pid)+'?season='+s.season+'">'+
+        '<td class="tleft">Season&nbsp;'+s.season+STAGE[s.stage]+'</td>'+
+        '<td class="tleft"><span class="teamcell">'+s.clubs.map(function(c){
+          return CG.crest(c,18)+'<span class="mono" style="font-size:11px">'+esc(c)+'</span>'; }).join(' ')+'</span></td>'+
+        cells(s)+'</tr>';
+    }).join("");
+    /* career totals: a stage's seasons added through the one adder's sums, once there is more than one season of it */
+    ["reg","po"].forEach(function(stage){
+      var of = rows.filter(function(s){ return s.stage === stage; });
+      if (of.length < 2) return;
+      var t = CG.blankStatLine();
+      of.forEach(function(s){ ["gp","sgp","gs","g","a","p","pm","shots","pim","w","l","otl","sa","sv","ga","so"].forEach(function(k){ t[k] += s[k]; }); });
+      body += '<tr class="tot"><td class="tleft">Career'+STAGE[stage]+'</td><td></td>'+cells(t)+'</tr>';
+    });
+    return { goalie: goalie, n: rows.reduce(function(a, s){ return a + (goalie ? s.gs : s.sgp); }, 0),
+      html: '<div class="tblwrap"><table class="tbl keepcols"><caption class="sr">Career, '+(goalie?"in goal":"skating")+'</caption><thead><tr>'+
+        '<th class="tleft">Season</th><th class="tleft">Club</th>'+
+        (goalie ? '<th>GP</th><th>W</th><th>L</th><th>OTL</th><th>SV%</th><th>GAA</th><th>SO</th>'
+                : '<th>GP</th><th>G</th><th>A</th><th>P</th><th>+/-</th><th>PIM</th><th>S</th>')+
+        '</tr></thead><tbody>'+body+'</tbody></table></div>' };
+  };
+  /* the role with more games first */
+  var parts = [role(false), role(true)].filter(Boolean).sort(function(a, b){ return b.n - a.n; });
+  return '<div class="card career"><div class="card-h"><h3>Career</h3><span class="chip">'+nSeasons+' season'+(nSeasons===1?'':'s')+'</span></div>'+
+    parts.map(function(x){
+      return (parts.length > 1 ? '<div class="eyebrow" style="padding:14px 16px 0">'+(x.goalie ? "In goal" : "Skating")+'</div>' : '')+x.html;
+    }).join("")+
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Every league game in every season, on any club, whether or not the player is on a roster now. Pre-season and playoff games are kept apart from the regular season (Rule 6.1).</span></div></div>';
+};
+/* v4.54: on the page of a player with no game in the season on screen (the minimal page, #acctHdr), whose address names no
+   season, the profile opens the last completed season they played, so their full profile shows. CG.playerLastSeason finds
+   it from roster spots before the page draws; this catches a player removed from a roster mid-season, who has lines in
+   that season and no roster spot. true when it navigated. */
+CG.careerOpenLast = function(pid, lines){
+  if (!document.getElementById("acctHdr") || /[?&]season=/.test(location.hash)) return false;
+  var live = CG.LIVE_SEASON && CG.LIVE_SEASON.number;
+  var past = (lines || []).filter(function(l){ return l.season !== live; }).map(function(l){ return l.season; });
+  if (!past.length) return false;
+  var n = Math.max.apply(null, past);
+  if (!CG.pastSeasons().some(function(x){ return x.number === n; })) return false;
+  location.replace(location.pathname + location.search + CG.hashWithSeason(n));
+  return true;
+};
+/* fill the profile's #careerCard from the last answer at once, then from a fresh read; a failed read says so */
+CG.paintCareer = function(pid){
+  var box = document.getElementById("careerCard"); if (!box) return;
+  var had = CG._careerCache[pid];
+  if (had) box.innerHTML = CG.careerHtml(pid, had);
+  /* v4.54 (review): a repaint (every live rebuild repaints) reads it again at most once a minute */
+  if (had && Date.now() - (CG._careerAt[pid] || 0) < 60000) return;
+  CG.loadCareer(pid).then(function(lines){
+    var b = document.getElementById("careerCard");
+    if (b && b.getAttribute("data-pid") === pid && CG.careerOpenLast(pid, lines)) return;
+    if (b && b.getAttribute("data-pid") === pid) b.innerHTML = CG.careerHtml(pid, lines);
+  }, function(e){
+    console.error("career for "+pid+" could not be loaded", e);
+    var b = document.getElementById("careerCard");
+    if (b && b.getAttribute("data-pid") === pid && !had) b.innerHTML = '<p class="caption">The career totals could not be loaded. Refresh the page to try again.</p>';
+  });
+};
 /* v4.09: a player's playoff line, kept apart from his regular-season line (Rule 6.1): the same one shape (a line per role
    played, gp counting each game once, v4.11), from lg.playoff, which buildLiveLeague builds from the playoff finals alone. null outside the
    live league; a line of zeros before his first playoff game. */
@@ -2542,14 +2641,21 @@ CG.playoffLogHtml = function(pid, isG){
 CG.ROUTES.player = function(pid, qs){
   var lg = CG.lg;
   pid = pid || (qs && (qs.id || qs.pid)) || null;  /* accept legacy #/player?id=… links */
-  var p = lg.players.find(function(x){ return x.id===pid; });
-  /* Not a rostered league player, but may be a website account holder with pickup stats — render a
-     minimal profile whose header + pickup section are filled async in AFTER.player. */
+  /* v4.54 (commissioner, 2026-11-20): "Just because a player is not currently on a team does not mean their profile page
+     should not show all their career stats." A player with games in the season on screen gets the full profile whether
+     or not they are on a roster now (lg.formerPlayers carry every field it reads); one whose last games were in a
+     completed season opens that season (CG.seasonViewFor). */
+  var p = lg.players.find(function(x){ return x.id===pid; }) || (lg.formerPlayers||[]).find(function(x){ return x.id===pid; });
+  /* No game in the season on screen: a website account holder with pickup stats, or a player whose league games are all
+     in another season (the Career card lists them). A minimal profile whose header + pickup section are filled async in
+     AFTER.player. */
   if (!p) return CG.pageHead("Player", "Player profile", "") +
     '<div class="shell" style="max-width:960px;padding-bottom:2px"><div id="acctHdr" class="note">Loading account…</div>'+
     /* v4.30: a member off every roster keeps a public discipline record (Rules 1.1 and 7.2) */
     CG.disciplineRecordHtml(lg.suspensions.find(function(x){ return x.playerId===pid && x.status!=="lifted"; }))+'</div>' +
     CG.formerLeagueHtml(pid) +
+    /* v4.54: every season the player played, on a team now or not (CG.paintCareer) */
+    '<section class="sec-tight" style="padding-top:10px"><div class="shell" style="max-width:960px"><div id="careerCard" data-pid="'+esc(pid)+'"></div></div></section>' +
     '<section class="sec-tight" style="padding-top:10px"><div class="shell" style="max-width:960px"><div id="pickupSection"></div></div></section>';
   var seasonKey = (qs.season && CG.lg.archive && CG.lg.archive[qs.season]) ? qs.season : "cur";
   var SD = CG.seasonData(seasonKey);
@@ -2573,7 +2679,7 @@ CG.ROUTES.player = function(pid, qs){
     '<div class="hero-row" style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">'+
       /* the club logo itself, tilted in 3D → links to the team page (same site-wide crest mark) */
       '<a href="#/team/'+esc(p.team)+'" class="crest3d" aria-label="'+esc(t.name)+' — team page">'+CG.crest(p.team,52,{decorative:true})+'</a>'+
-      '<div class="hero-main" style="min-width:0;flex:1"><span class="eyebrow chr">'+esc(t.name)+' · '+CG.POS_NAME[p.pos]+' · #'+p.jersey+'</span>'+
+      '<div class="hero-main" style="min-width:0;flex:1"><span class="eyebrow chr">'+esc(t.name)+' · '+CG.POS_NAME[p.pos]+(p.jersey ? ' · #'+p.jersey : '')+'</span>'+
         '<h1 class="h-page" style="color:#fff;margin-top:8px">'+esc(p.tag)+'</h1>'+
         '<div style="display:flex;gap:9px;margin-top:12px;flex-wrap:wrap">'+
           /* v2.61: every identity label is the same outlined chip; Message is the one filled action */
@@ -2586,7 +2692,9 @@ CG.ROUTES.player = function(pid, qs){
           (CG.auth && CG.auth.user && CG.auth.user.id!==p.id
             ? '<a class="chip chip-chrome" href="#/hub/messages" data-pm="'+esc(p.id)+'" style="cursor:pointer">'+CG.ic("msg",12)+' Message</a>' : "")+
           (p.twitchLive&&p.twitch?'<a class="chip" target="_blank" rel="noopener" href="https://twitch.tv/'+encodeURIComponent(p.twitch)+'" style="background:'+CG.TWITCH_PURPLE+';border-color:'+CG.TWITCH_PURPLE+';color:#fff"><span class="live-dot"></span>LIVE on Twitch</a>':"")+
-          (!archived?'<span class="chip chip-ink" style="border-color:#39434B">'+
+          /* v4.54: a seat and a contract belong to the season in play, so a completed season on screen shows neither */
+          (p.former?'<span class="chip chip-ink" style="border-color:#39434B">'+(CG.viewingPast() ? 'Not on a roster at the season’s end' : 'Not on a roster')+'</span>':"")+
+          (!archived && !CG.viewingPast() && !p.former?'<span class="chip chip-ink" style="border-color:#39434B">'+
             (p.mgmt?(p.mgmt==="owner"?"Owner":p.mgmt==="gm"?"GM":"AGM")+" · "+CG.fmtMoney(p.salary):CG.fmtMoney(p.salary)+" · "+p.term+" yr")+'</span>':"")+
           (sus? (sus.status==="served"
             ? '<span class="chip chip-warn">Suspension served</span>'
@@ -2599,7 +2707,7 @@ CG.ROUTES.player = function(pid, qs){
       '<div class="hero-ovr" id="heroOvr" style="text-align:center" title="'+esc(CG.ovrNote(p.id,"title"))+'">'+
         CG.heroOvrInner(p.id, null, r.ovr)+'</div></div>'+
     '<div style="display:flex;gap:12px;align-items:center;margin-top:20px;flex-wrap:wrap">'+
-      CG.seasonPicker(seasonKey)+
+      CG.seasonSwitch(true)+
       /* v2.60: only the archived warning rides beside the picker — the "Live" and "not yet under
          way" status pills were noise on a player's own page */
       (archived?'<span class="chip chip-warn">Archived season — final, read-only</span>':"")+
@@ -2621,9 +2729,15 @@ CG.ROUTES.player = function(pid, qs){
          has never taken a shift. */
       : (anyGp===0
         ? '<div class="card"><div class="card-h"><h3>Rating breakdown</h3><span class="chip">OVR '+r.ovr+'</span></div><div class="card-b">'+
-          '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(p.tag)+' hasn’t played a game yet, so there is nothing to break down. '+
-          'The '+r.ovr+' overall is recomputed after every final and is held toward '+CG.OVR_CENTER+' until their sixth game at the position they signed up at. The category bars '+
-          'appear here once box scores exist.</p></div></div>'
+          /* v4.54: a completed season says so in the past tense; a returning player has a career (CG.paintCareer below), so
+             "yet" is this season and the overall carries over (review: the copy said it starts from the center) */
+          '<p class="small" style="color:var(--steel);line-height:1.65">'+(CG.viewingPast()
+            ? esc(p.tag)+' did not play a league game in '+esc(CG.seasonTag())+', so there is nothing to break down for it. Their seasons are listed under Career below.'
+            : ((lg.careerGp||{})[p.id]||0) > 0
+            ? esc(p.tag)+' hasn’t played a game this season yet. The '+r.ovr+' overall carries over from earlier seasons and is recomputed after every final; this season’s category bars appear here once its box scores exist.'
+            : esc(p.tag)+' hasn’t played a game yet, so there is nothing to break down. '+
+              'The '+r.ovr+' overall is recomputed after every final and is held toward '+CG.OVR_CENTER+' until their sixth game at the position they signed up at. The category bars '+
+              'appear here once box scores exist.')+'</p></div></div>'
         : '<div class="card" id="ratingBreak"><div class="card-h"><h3>Rating breakdown</h3><span class="chip" id="ratingBreakOvr">OVR '+r.ovr+'</span></div><div class="card-b" id="ratingBreakBody">'+
           CG.ratingBars(r.bd, p.id)+
       '</div></div>');
@@ -2682,11 +2796,20 @@ CG.ROUTES.player = function(pid, qs){
         'background:linear-gradient(180deg,rgba(16,21,25,.9),rgba(16,21,25,.32) 46%,rgba(16,21,25,.08) 74%,rgba(16,21,25,.42)),'+
         '#0e1216 url(\'/assets/cinema/fresh-ice-16x9.jpg\') center 62%/cover no-repeat">'+
         '<div style="position:relative;padding:22px 22px 18px">'+
-          '<span class="eyebrow" style="color:var(--chrome)">Fresh sheet</span>'+
-          '<h3 style="font-family:var(--f-disp);font-weight:800;font-size:clamp(22px,3.4vw,30px);color:#fff;line-height:1.04;letter-spacing:-.01em;text-transform:none;margin:8px 0 0">Yet to take a shift</h3>'+
+          '<span class="eyebrow" style="color:var(--chrome)">'+(CG.viewingPast() ? esc(CG.seasonTag())+' · final' : 'Fresh sheet')+'</span>'+
+          '<h3 style="font-family:var(--f-disp);font-weight:800;font-size:clamp(22px,3.4vw,30px);color:#fff;line-height:1.04;letter-spacing:-.01em;text-transform:none;margin:8px 0 0">'+
+            (CG.viewingPast() ? 'No league games this season' : 'Yet to take a shift'+(((lg.careerGp||{})[p.id]||0) > 0 ? ' this season' : ''))+'</h3>'+
         '</div></div>'+
-      '<div class="card-b"><p class="small" style="color:var(--steel);line-height:1.7;margin:0">'+esc(scout)+'</p>'+
-        '<p class="caption" style="margin-top:10px">Goals, assists and the full stat line fill in automatically from EA box scores after '+esc(p.tag)+'’s first final. Every overall opens at '+CG.OVR_CENTER+' and settles onto the real rating over six games at a position, so '+esc(p.tag)+'’s '+r.ovr+' will move as soon as there are games behind it.</p></div></div>';
+      /* v4.54 (review): a completed season is told in the past tense, with no promise of games to come; a returning player's
+         overall carries over */
+      '<div class="card-b">'+(CG.viewingPast()
+        ? '<p class="small" style="color:var(--steel);line-height:1.7;margin:0">'+esc(p.tag)+' was on a '+esc(CG.seasonTag())+' roster and did not play a league game that season. Every season they played is listed under Career below.</p>'
+        : '<p class="small" style="color:var(--steel);line-height:1.7;margin:0">'+esc(scout)+'</p>'+
+          '<p class="caption" style="margin-top:10px">Goals, assists and the full stat line fill in automatically from EA box scores after '+esc(p.tag)+'’s first final'+
+          (((lg.careerGp||{})[p.id]||0) > 0
+            ? ' this season. '+esc(p.tag)+'’s '+r.ovr+' overall carries over from earlier seasons and is recomputed after every final.'
+            : '. Every overall opens at '+CG.OVR_CENTER+' and settles onto the real rating over six games at a position, so '+esc(p.tag)+'’s '+r.ovr+' will move as soon as there are games behind it.')+'</p>')+
+      '</div></div>';
     /* Stat Lab viz for players with a REGULAR-SEASON game sample: skater DNA radar + efficiency
        gauges (goalies get goaltending gauges). Gated on s.gp (season only) — a player with just
        pre-season games has an all-zero season line, which would collapse the radar to its floor,
@@ -2741,7 +2864,8 @@ CG.ROUTES.player = function(pid, qs){
     var scoutCard = '<div class="card"><div class="card-h"><h3>'+(archived?"Season summary":"Scouting the numbers")+'</h3><span class="chip">'+(archived?"Archived":"Derived from box scores")+'</span></div><div class="card-b">'+
         '<p class="small" style="color:var(--steel);line-height:1.65">'+esc(scout)+'</p></div></div>';
     if (isEmpty) sideCard = "";   /* the fresh-sheet card already explains the scouted overall */
-    var contractCard = archived ? "" : (
+    /* v4.54: a contract is the season in play's, so a completed season on screen shows none */
+    var contractCard = (archived || CG.viewingPast() || p.former) ? "" : (
         '<div class="card"><div class="card-h"><h3>Contract</h3>'+
         (p.mgmt?'<span class="chip chip-chrome">'+(p.mgmt==="owner"?"Owner":p.mgmt==="gm"?"GM":"AGM")+'</span>'
                :(CG.signedExtensionOf&&CG.signedExtensionOf(p.id))?'<span class="chip chip-win">Signed thru S'+esc(String(CG.signedExtensionOf(p.id).end_season))+'</span>':'<span class="chip">Under contract</span>')+'</div><div class="card-b">'+
@@ -2769,6 +2893,8 @@ CG.ROUTES.player = function(pid, qs){
          { html: posCard, wide: true },
          { html: preCard, wide: true },
          { html: advCard, wide: true }]);
+    /* v4.54: every season the player played (CG.paintCareer) */
+    body += '<div id="careerCard" data-pid="'+esc(p.id)+'" style="margin-top:18px"></div>';
   }
   if (tab==="log"){
     var log = SD.glog[p.id];
@@ -2815,7 +2941,7 @@ CG.ROUTES.player = function(pid, qs){
       CG.disciplineRecordHtml(sus)+
       /* v4.13: once he has played, the Team history card is his season split by club (CG.clubHistoryHtml); the full
          season stays on the main page. Before his first game: the club he is on and how he got there. */
-      (CG.clubHistoryHtml(p, s) ||
+      (CG.clubHistoryHtml(p, s, { former: !!p.former }) ||
       /* `joined` was a hardcoded "Season 1" on every player and nobody is an "original roster"
          member of a season that has not started — so say only what is actually known: the club
          he is on right now, and how he got there (origin is real, set at placement). */
@@ -3336,6 +3462,7 @@ CG.scoutLine = function(p){
   return txt+" This summary is computed from verified game data only.";
 };
 CG.AFTER.player = function(pid, qs){
+  if (CG.paintCareer) CG.paintCareer(pid);
   /* v3.71 (Q30): the Position picker re-renders the season line in place, never the page */
   var pv = document.getElementById("posView");
   if (pv) pv.addEventListener("change", function(){
@@ -3343,7 +3470,7 @@ CG.AFTER.player = function(pid, qs){
     var box = document.getElementById("posKpi");
     if (box){
       if (v === "all"){
-        var pl = (CG.lg.players || []).find(function(x){ return x.id === id; }) || {};
+        var pl = CG.statPlayerById(CG.lg, id) || {};   /* v4.54: a former goaltender too */
         box.innerHTML = CG.profileSeasonHtml((CG.lg.pstats || {})[id], pl.pos === "G");   /* v4.08: every role he played */
       } else {
         box.innerHTML = CG.statCellsHtml(CG.profileStatCells(CG.posGroupLines(id)[v], v === "G"));
@@ -3359,7 +3486,7 @@ CG.AFTER.player = function(pid, qs){
   /* Account-only profile (not a rostered league player): fill the minimal header with the gamertag.
      The rest of this handler's selectors are all guarded and no-op on the minimal page; the pickup
      fetch below targets #pickupSection and runs for any account. */
-  if (!CG.lg.players.find(function(x){ return x.id===pid; }) && CG.sb){
+  if (!CG.statPlayerById(CG.lg, pid) && CG.sb){
     CG.sb.from("profiles").select("gamertag,ea_id,platform").eq("id", pid).maybeSingle().then(function(r){
       var hdr = document.getElementById("acctHdr"); if (!hdr) return;
       if (r && r.data) hdr.innerHTML = '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><b style="font-family:var(--f-disp);font-size:16px;flex:1">'+esc(r.data.gamertag||"Player")+'</b>'+
@@ -3369,7 +3496,7 @@ CG.AFTER.player = function(pid, qs){
           ? '<a class="chip chip-chrome" href="#/hub/messages" data-pm="'+esc(pid)+'" style="cursor:pointer">'+CG.ic("msg",12)+' Message</a>' : "")+
         '</div><p class="caption" style="margin:4px 0 0">'+(CG.formerLeagueHtml(pid)
           ? 'No longer on a league roster. This season’s league games stay in the official record (Rule 6.1).'
-          : 'This account isn’t on a league roster, so only pickup game stats show here.')+'</p>';
+          : 'Not on a league roster right now.')+'</p>';
       else { hdr.innerHTML = '<b>Profile not found.</b>'; var ps=document.getElementById("pickupSection"); if (ps) ps.innerHTML=""; }
     }, function(){});
   }
@@ -3377,15 +3504,10 @@ CG.AFTER.player = function(pid, qs){
   $$("[data-tab]").forEach(function(b){ b.addEventListener("click", function(){
     location.hash="#/player/"+pid+"?tab="+this.getAttribute("data-tab")+(season&&season!=="cur"?"&season="+season:"");
   }); });
-  var sp = $("#seasonPick");
-  if (sp) sp.addEventListener("change", function(){
-    var v = this.value;
-    location.hash = "#/player/"+pid+(v!=="cur"?"?season="+v:"");
-  });
   /* Twitch controls (own profile only) */
   var twT = $("#twToggle");
   if (twT) twT.addEventListener("click", function(){
-    var me = CG.lg.players.find(function(x){ return x.id===pid; });
+    var me = CG.statPlayerById(CG.lg, pid);   /* v4.54: a former player's own profile too */
     CG.setTwitchLive(!(me && me.twitchLive));
   });
   var twC = $("#twChange");

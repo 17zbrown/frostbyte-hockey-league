@@ -50,7 +50,8 @@ A("review fix: lobby codes re-read through their slot and the boot cache keeps t
   /if \(\(m\.codes \|\| k === "scores"\) && signedIn\) slots\[CG\.BOOT_CODES\] = 1;/.test(live) && /if \(CG\._bootCache\) CG\._bootCache\[CG\.BOOT_CODES\] = r;/.test(live));
 A("review fix: a re-read sign-up pool or pick list is not overwritten by the office's older copy",
   /if \(slots\.indexOf\(9\) >= 0 \|\| slots\.indexOf\(10\) >= 0\)\{ skipCarry = \["_draftPicksRaw", "_registrationsRaw"\]; manager = true; \}/.test(live) &&
-  /if \(!full\) CG\._carryLg\(prev, lg, skipCarry\);/.test(live));
+  /* v4.54: and nothing is carried across a change of the season on screen */
+  /if \(!full && !changed\) CG\._carryLg\(prev, lg, skipCarry\);/.test(live));
 A("review fix: what a delta could not read is retried, at most three times, later each time",
   /CG\._deltaFailed = \(failed\.slots\.length \|\| failed\.statsAll \|\| failed\.statsIds\) \? failed : null;/.test(live) &&
   /if \(f && \(CG\._liveRetries \|\| 0\) < 3\)\{/.test(live) && /if \(slots && \(CG\._liveRetries \|\| 0\) < 3\)\{/.test(live));

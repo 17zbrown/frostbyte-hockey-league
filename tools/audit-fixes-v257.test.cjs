@@ -32,7 +32,8 @@ console.log("— the herd (P0-3): a games change is a delta rebuild, spread out"
   /* v4.05: liveReload also takes the pulse's slots, so its head is longer; the games jitter is unchanged */
   A("liveReload takes the changed game and jitters 1–9 s", /CG\.liveReload = function\(opts\)\{[\s\S]{0,1600}1000 \+ Math\.floor\(Math\.random\(\)\*8000\)/.test(live));
   /* v2.72: a delta (games or roster) skips the manager loads but CARRIES the manager state across the rebuilt lg */
-  A("...and skips the manager/availability/trade loads on a delta", /if \(full\) return Promise\.all\(\[CG\.loadManagerData\(\), CG\.loadAvailability\(\), CG\.loadTrades\(\)\]\);/.test(live) && /if \(!full\) CG\._carryLg\(prev, lg, skipCarry\);/.test(live));
+  /* v4.54: a rebuild that changed the season on screen re-reads them as a full one does (the office data is per season) */
+  A("...and skips the manager/availability/trade loads on a delta", /if \(full \|\| changed\) return Promise\.all\(\[CG\.loadManagerData\(\), CG\.loadAvailability\(\), CG\.loadTrades\(\)\]\);/.test(live) && /if \(!full && !changed\) CG\._carryLg\(prev, lg, skipCarry\);/.test(live));
   A("a full reload still owes a full rebuild after a delta was queued", /else if \(!opts\.resume\)\{ CG\._liveFullOwed = true; \}/.test(live) && /var full = !!CG\._liveFullOwed/.test(live));
   A("a roster delta re-reads roster_spots and contracts only", /if \(roster\)\{\n    var rs = await CG\.sbAll\("roster_spots","\*","id"\);/.test(live) && /CG\.liveReload\(\{ roster: true \}\);/.test(live));
 }
