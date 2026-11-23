@@ -123,7 +123,8 @@ console.log("— review round 2: nothing renders a partial record as a complete 
   A("case messages are scoped to the cases loaded", /return qb\.in\("request_id", ids\); \}\);/.test(live));
   A("...and paged, so nothing is silently capped", /CG\.sbAll\("action_messages"/.test(live));
   A("opening a DM thread pulls that pair's own history", /CG\.loadDmThread = function\(other\)/.test(live));
-  A("...merged by id, not replacing the list", /var added = r\.data\.filter\(function\(m\)\{ return !have\[m\.id\]; \}\);/.test(live));
+  /* v4.56: the merge also leaves out a deleted direct message (tools/message-edit-delete-v456.test.cjs) */
+  A("...merged by id, not replacing the list", /var added = r\.data\.filter\(function\(m\)\{ return !have\[m\.id\] && !m\.deleted_at; \}\);/.test(live));
   A("...and forgotten on sign-out", /CG\._dm\._threadLoaded = \{\};/.test(live));
 }
 

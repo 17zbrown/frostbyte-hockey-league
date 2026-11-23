@@ -1029,6 +1029,47 @@ html.rv-on .na-wrap.pins-in .na-pin{opacity:1;transform:translate(-50%,-50%) sca
 /* direct messages (v2.72): a day divider in the thread */
 .dm-day{display:flex;align-items:center;gap:10px;align-self:stretch;margin:6px 0 2px;font-family:var(--f-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--steel)}
 .dm-day::before,.dm-day::after{content:"";flex:1;height:1px;background:var(--line)}
+/* v4.56 (commissioner, 2026-11-23): "make the text boxes wrap text if the text is longer than the single line box", and
+   "right click the text on desktop, or hold on mobile and a mini menu pops up with a copy, edit or delete option".
+   A message box grows with what is typed up to about eight lines, then scrolls (field-sizing where the browser has it,
+   CG.growTa elsewhere). The menu opens at the pointer out of the corner nearest it, 140ms ease-out, opacity and scale
+   only; opened from the keyboard it appears at once. */
+/* direct messages: the conversation list beside the thread; on a phone the list sits above it, or the thread got
+   ninety-odd pixels and every word its own line */
+.dm-grid{grid-template-columns:280px 1fr;gap:0;min-height:520px}
+.dm-list{border-right:1px solid var(--line);overflow-y:auto;max-height:600px}
+@media (max-width:720px){.dm-grid{grid-template-columns:1fr;min-height:0}.dm-list{border-right:0;border-bottom:1px solid var(--line);max-height:220px}}
+textarea.grow{resize:none;overflow-y:auto;max-height:220px;line-height:1.45;field-sizing:content}
+.msg-menu{position:fixed;z-index:1300;min-width:188px;padding:5px;background:var(--paper);border:1px solid var(--line);border-radius:10px;
+  box-shadow:0 14px 34px -12px rgba(16,21,25,.34),0 2px 6px rgba(16,21,25,.08);
+  transition:opacity 140ms var(--ease-out),transform 140ms var(--ease-out)}
+@starting-style{.msg-menu{opacity:0;transform:scale(.96)}}
+.msg-menu.instant{transition:none}
+.msg-menu button{display:flex;align-items:center;gap:10px;width:100%;min-height:40px;padding:0 12px;border:0;border-radius:7px;background:none;
+  font:inherit;font-size:14px;color:var(--ink);text-align:left;cursor:pointer;touch-action:manipulation;-webkit-user-select:none;user-select:none}
+.msg-menu button svg{flex-shrink:0;opacity:.75}
+.msg-menu button:focus-visible{outline:2px solid var(--ink);outline-offset:-2px}
+.msg-menu button:active{background:var(--line-soft)}
+.msg-menu button.danger{color:var(--red-ink)}
+@media (hover:hover) and (pointer:fine){.msg-menu button:hover{background:var(--ice)}}
+@media (pointer:coarse){.msg-menu button{min-height:46px;font-size:15px}}
+@media (prefers-reduced-motion:reduce){.msg-menu{transition:opacity 140ms ease}}
+/* on a touch screen a message is held for its menu, so holding must not start a text selection or the system callout;
+   Copy text in the menu replaces it. Links and media inside keep theirs. */
+@media (pointer:coarse){[data-msg]{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+  [data-msg] a,[data-msg] img,[data-msg] video{-webkit-touch-callout:default}}
+[data-msg]{transition:opacity 120ms var(--ease-out)}
+[data-msg].msg-pressing{opacity:.72}
+[data-msg]:focus-visible{outline:2px solid var(--chrome-deep);outline-offset:3px;border-radius:10px}
+.msg-edited{margin-left:6px;font-size:10px;font-family:var(--f-mono);letter-spacing:.04em;color:var(--steel)}
+button.msg-edited{border:0;background:none;padding:0;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px}
+.msg-bubble .msg-edited{color:inherit}   /* the bubble's own ink, on yellow or gray */
+.msg-gone{font-size:12px;font-style:italic;color:var(--steel);padding:4px 2px}
+.msg-gone button.msg-edited{font-style:normal}
+.msg-edit{margin-top:4px;min-width:min(260px,70vw)}
+.msg-edit textarea{background:var(--paper);color:var(--ink)}
+.msg-edit-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
+.msg-edit-row .caption{font-size:11px;color:inherit;opacity:.72}   /* reads on the yellow bubble and on a card alike */
 /* roster blocks (v2.72): the active roster and training camp are two blocks in every roster table */
 tr.squad-head td{background:var(--ice);padding:8px 12px;border-top:1px solid var(--line)}
 tr.squad-head .caption{margin-left:6px}

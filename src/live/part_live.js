@@ -2154,7 +2154,7 @@ CG.loadManagerData = async function(){
       /* PostgREST caps a response at 1000 rows and truncates SILENTLY. This was newest-first with a cap of 900, so a
          long-running thread lost its oldest messages without a sign. v4.12: every message, read by key, newest first,
          re-sorted for display in the grouper. */
-      jobs.push(CG.sbAll("application_messages","app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)","created_at",false)
+      jobs.push(CG.sbAll("application_messages","id,app_type,application_id,sender_id,body,created_at,edited_at,deleted_at,deleted_by, sender:profiles!application_messages_sender_id_fkey(gamertag,role)","created_at",false)
         .then(function(mm){ CG.lg._appMsgs = CG._groupAppMsgs((mm && !mm.error && mm.data) || []); }, function(){ CG.lg._appMsgs = {}; }));
       /* GM/AGM appointment applications — two FKs to profiles (submitter + nominee) so qualify both.
          RLS: the office sees all; an owner their own; a nominee theirs. */
@@ -5544,7 +5544,7 @@ CG.ROUTES.owner = function(){
     (ownWithdrawable ? '<button class="btn btn-ghost btn-sm" id="ow-withdraw" style="color:var(--red-ink);margin-left:8px">Withdraw application</button>' : '')+
   '</div></div>';
   /* once they've applied, a chat with the league office sits between the status and the form */
-  var chat = CG.auth.ownerApp && CG.auth.ownerApp.id ? CG.appChatSection("owner", CG.auth.ownerApp.id, {office:false}) : "";
+  var chat = CG.auth.ownerApp && CG.auth.ownerApp.id ? CG.appChatSection("owner", CG.auth.ownerApp.id, {office:false, status:CG.auth.ownerApp.status, mine:true}) : "";
   return head + '<div class="shell" style="max-width:720px;padding-bottom:48px"><div id="ow-status">'+statusCard+'</div>'+chat+'<div id="ow-form">'+body+'</div></div>';
 };
 CG.AFTER.owner = function(){
@@ -5730,7 +5730,7 @@ CG.ROUTES.staffapply = function(){
     : "";
   var v = function(k){ return app ? esc(app[k]||"") : ""; };
   var pickedDepts = (app && app.departments) || [];
-  var chat = app && app.id ? CG.appChatSection("staff", app.id, {office:false}) : "";
+  var chat = app && app.id ? CG.appChatSection("staff", app.id, {office:false, status:app.status, mine:true}) : "";
   return head + '<div class="shell" style="max-width:640px;padding-bottom:48px"><div id="sa-status">'+staffNote+statusNote+'</div>'+chat+
     '<div id="sa-form"><div class="card"><div class="card-h"><h3>'+(app?"Update application":"Application")+'</h3>'+
       (app?'<span class="chip '+(app.status==="pending"?"chip-warn":app.status==="waitlisted"?"chip-chrome":app.status==="withdrawn"?"":app.status==="approved"?"chip-win":"chip-loss")+'" style="text-transform:capitalize">'+esc(app.status)+'</span>':'<span class="chip chip-chrome">Open</span>')+'</div><div class="card-b">'+
@@ -7264,7 +7264,7 @@ CG.loadDMs = async function(){
        the most recent conversation once a heavy user crossed it */
     var r = await CG.sb.from("direct_messages").select("*").or("sender_id.eq."+me+",recipient_id.eq."+me).order("created_at",{ascending:false}).limit(900);
     if (r && r.data) r.data = r.data.slice().sort(CG._byCreatedAsc);
-    CG._dm.msgs = r.data||[];
+    CG._dm.msgs = (r.data||[]).filter(function(m){ return !m.deleted_at; });   /* v4.56: a deleted direct message is gone for both people */
     var need = {}; CG._dm.msgs.forEach(function(m){ var o=CG.dmOtherId(m); if(o&&!CG._dm.profiles[o]) need[o]=1; });
     var ids = Object.keys(need);
     if (ids.length){ var ps = await CG.sb.from("profiles").select(CG._DM_SEL).in("id",ids); (ps.data||[]).forEach(function(p){ CG._dm.profiles[p.id]=p; }); }
@@ -7408,7 +7408,7 @@ CG.loadDmThread = function(other){
       CG._dm._threadLoaded = CG._dm._threadLoaded || {};
       CG._dm._threadLoaded[other] = true;
       var have = {}; (CG._dm.msgs||[]).forEach(function(m){ have[m.id] = true; });
-      var added = r.data.filter(function(m){ return !have[m.id]; });
+      var added = r.data.filter(function(m){ return !have[m.id] && !m.deleted_at; });
       if (!added.length) return false;
       CG._dm.msgs = (CG._dm.msgs||[]).concat(added).sort(CG._byCreatedAsc);
       if (CG.router && location.hash.indexOf("/messages")>=0) CG.router();
@@ -7427,6 +7427,10 @@ CG.subscribeDMs = function(){
         var finish=function(){ if(CG.sound) CG.sound.play(); CG.renderChrome(); if(onView) CG.router(); else CG.toast("New message from "+CG.dmName(m.sender_id),"ok"); };
         if(!CG._dm.profiles[m.sender_id]){ CG.sb.from("profiles").select(CG._DM_SEL).eq("id",m.sender_id).maybeSingle().then(function(res){ if(res.data)CG._dm.profiles[res.data.id]=res.data; finish(); }); }
         else finish();
+      })
+      /* v4.56: the other person's edit or delete repaints that one bubble, or takes it away */
+      .on("postgres_changes",{event:"UPDATE",schema:"public",table:"direct_messages",filter:"recipient_id=eq."+me},function(payload){
+        CG.msgApplyUpdate("direct", payload && payload.new);
       }).subscribe();
   } catch(e){}
 };
@@ -7737,8 +7741,7 @@ CG.messagesBody = function(){
   var newBtn = '<div style="padding:10px;border-bottom:1px solid var(--line)">'+
     '<button class="btn btn-chrome btn-sm" id="dmNew" style="width:100%">'+CG.ic("msg",14)+' New message</button></div>';
   var listHtml = list.length ? list.map(function(c){
-    var prev = c.last ? ((c.last.sender_id===me?"You: ":"")+
-      (c.last.body || (/^video\//.test(c.last.media_type||"") ? "\uD83C\uDFAC Video" : c.last.media_path ? "\uD83D\uDCF7 Photo" : ""))) : "New conversation";
+    var prev = CG.dmPreview(c.last);
     return '<div class="notif'+(c.other===active?" unread":"")+'" data-dm-open="'+c.other+'" style="cursor:pointer'+(c.other===active?';background:var(--chrome-tint)':"")+'">'+CG.dmAva(c.other)+
       '<span style="min-width:0;flex:1"><b style="font-family:var(--f-disp);font-size:13.5px">'+esc(CG.dmName(c.other))+'</b>'+
       '<p style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(prev)+'</p></span>'+
@@ -7760,33 +7763,45 @@ CG.messagesBody = function(){
     var msgs = CG._dm.msgs.filter(function(m){ return CG.dmOtherId(m)===active; });
     var lastDay = null;
     var body = msgs.length ? msgs.map(function(m){
-      var mine = m.sender_id===me;
-      var media = "";
       /* v2.72: a thread runs for weeks; each bubble carries its day and a divider opens each new day */
       var ts = Date.parse(m.created_at), day = CG.fmtDay(ts), divider = "";
       if (day !== lastDay){ lastDay = day; divider = '<div class="dm-day" role="separator"><span>'+esc(day)+'</span></div>'; }
-      if (m.media_path){
-        var mu = (CG._dm.mediaUrls||{})[m.media_path];
-        if (mu === undefined) media = '<span class="caption" style="display:block;opacity:.75">Loading attachment\u2026</span>';
-        else if (!mu) media = '<span class="caption" style="display:block;opacity:.75">Attachment unavailable</span>';
-        else if (/^video\//.test(m.media_type||"")) media = '<video controls playsinline preload="metadata" src="'+esc(mu)+'" style="max-width:100%;max-height:340px;border-radius:10px;display:block"></video>';
-        else media = '<a href="'+esc(mu)+'" target="_blank" rel="noopener"><img src="'+esc(mu)+'" alt="Attachment" loading="lazy" style="max-width:100%;max-height:340px;border-radius:10px;display:block"></a>';
-      }
-      return divider + '<div style="max-width:78%;align-self:'+(mine?"flex-end":"flex-start")+';background:'+(mine?"var(--chrome)":"var(--ice)")+';color:'+(mine?"#101519":"var(--ink)")+';padding:9px 13px;border-radius:14px;font-size:14px;line-height:1.45">'+media+(m.body?esc(m.body):"")+
-        '<span style="display:block;font-size:10px;opacity:.6;margin-top:3px" title="'+esc(CG.fmtFull(ts))+'">'+esc(CG.fmtFull(ts))+'</span></div>';
+      return divider + CG.msgRow("direct", m, CG.dmBubble);
     }).join("") : '<div class="empty" style="padding:40px"><p>No messages yet — say hi.</p></div>';
     thread = '<div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center">'+CG.dmAva(active)+'<b style="font-family:var(--f-disp)">'+esc(CG.dmName(active))+'</b></div>'+
       '<div id="dmMsgs" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px;min-height:300px">'+body+'</div>'+
       '<div style="padding:12px 14px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:flex-end">'+
       '<button class="btn btn-ghost btn-sm" id="dmAttach" title="Send a photo or video" aria-label="Send a photo or video" style="padding:8px 10px">'+CG.ic("plus",15)+'</button>'+
       '<input type="file" id="dmFile" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime" hidden>'+
-      '<textarea id="dmInput" rows="1" placeholder="Message '+esc(CG.dmName(active))+'…" maxlength="2000" style="flex:1;resize:none"></textarea><button class="btn btn-chrome btn-sm" id="dmSend">Send</button></div>';
+      '<textarea id="dmInput" class="grow" rows="1" enterkeyhint="send" placeholder="Message '+esc(CG.dmName(active))+'…" maxlength="2000" style="flex:1;resize:none"></textarea><button class="btn btn-chrome btn-sm" id="dmSend">Send</button></div>';
   }
   return head + '<div class="card" style="padding:0;overflow:hidden">'+
-    '<div class="grid" style="grid-template-columns:280px 1fr;gap:0;min-height:520px">'+
-    '<div style="border-right:1px solid var(--line);overflow-y:auto;max-height:600px">'+newBtn+listHtml+'</div>'+
+    '<div class="grid dm-grid">'+
+    '<div class="dm-list">'+newBtn+listHtml+'</div>'+
     '<div style="display:flex;flex-direction:column">'+thread+'</div>'+
     '</div></div>';
+};
+/* v4.56: one direct message, drawn alone so an edit, a delete or a live change repaints just this bubble. The text
+   keeps its line breaks (Shift+Enter writes them). */
+/* the conversation list's one-line preview of a thread's last message; v4.56 repaints it after an edit or a delete */
+CG.dmPreview = function(last){
+  if (!last) return "New conversation";
+  return (last.sender_id===CG.dmUid()?"You: ":"")+
+    (last.body || (/^video\//.test(last.media_type||"") ? "\uD83C\uDFAC Video" : last.media_path ? "\uD83D\uDCF7 Photo" : ""));
+};
+CG.dmBubble = function(m){
+  if (m.deleted_at) return "";
+  var mine = m.sender_id===CG.dmUid(), ts = Date.parse(m.created_at), media = "";
+  if (m.media_path){
+    var mu = (CG._dm.mediaUrls||{})[m.media_path];
+    if (mu === undefined) media = '<span class="caption" style="display:block;opacity:.75">Loading attachment\u2026</span>';
+    else if (!mu) media = '<span class="caption" style="display:block;opacity:.75">Attachment unavailable</span>';
+    else if (/^video\//.test(m.media_type||"")) media = '<video controls playsinline preload="metadata" src="'+esc(mu)+'" style="max-width:100%;max-height:340px;border-radius:10px;display:block"></video>';
+    else media = '<a href="'+esc(mu)+'" target="_blank" rel="noopener"><img src="'+esc(mu)+'" alt="Attachment" loading="lazy" style="max-width:100%;max-height:340px;border-radius:10px;display:block"></a>';
+  }
+  return '<div class="msg-bubble"'+CG.msgAttrs("direct", m, CG.msgPerms("direct", m))+' style="max-width:78%;align-self:'+(mine?"flex-end":"flex-start")+';background:'+(mine?"var(--chrome)":"var(--ice)")+';color:'+(mine?"#101519":"var(--ink)")+';padding:9px 13px;border-radius:14px;font-size:14px;line-height:1.45">'+media+
+    '<span class="msg-body" style="white-space:pre-wrap">'+(m.body?esc(m.body):"")+'</span>'+
+    '<span style="display:block;font-size:10px;opacity:.6;margin-top:3px" title="'+esc(CG.fmtFull(ts))+'">'+esc(CG.fmtFull(ts))+CG.msgEditedMark("direct", m)+'</span></div>';
 };
 CG.AFTER.messages = function(param){
   var dc=document.getElementById("dcSignIn"); if(dc) dc.addEventListener("click", function(){ CG.signIn(); });
@@ -10460,23 +10475,29 @@ CG.actionCard = function(a, review, opts){
     /* v4.32: the final decision statement (Rule 1.4), escaped, its line breaks kept. A filer's reply reopens a decided
        case; until it is decided again the old statement shows as the earlier one */
     (a.response?'<div class="note grn" style="margin:0"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">'+(closed?"Final decision statement":"Earlier decision statement")+'</b><span style="white-space:pre-wrap">'+esc(a.response)+'</span></div>':"");
-  if (msgs.length){
-    h += '<div class="stack" style="gap:8px;border-top:1px solid var(--line-soft);padding-top:10px">'+msgs.map(function(m){
+  /* v4.56: a deleted message is gone for members, and the office keeps a marker where it was (CG.msgGone). The author
+     changes their own while the filing is open; the office may delete on it, save a staff member who filed it or is
+     named in it (the conflict rule above). */
+  var msgCtx = { open: !closed, mod: CG.msgOffice() && (isCommish || (a.profile_id!==uid && a.target_profile_id!==uid)) };
+  var shownMsgs = msgs.filter(function(m){ return !m.deleted_at || CG.msgOffice(); });
+  if (shownMsgs.length){
+    h += '<div class="stack" style="gap:8px;border-top:1px solid var(--line-soft);padding-top:10px">'+shownMsgs.map(function(m){ return CG.msgRow("action", m, function(m){
+      if (m.deleted_at) return CG.msgGone("action", m);
       var isStaff = m.profiles && (m.profiles.role==="staff" || m.profiles.role==="commissioner");
       var att = (m.attachments||[]).map(function(u){
         /* render ONLY http(s) links — never a javascript:/data: scheme a filer could inject */
         return /^https?:\/\//i.test(String(u))
           ? '<a href="'+esc(u)+'" target="_blank" rel="noopener nofollow" class="caption" style="border-bottom:2px solid var(--chrome)">'+CG.ic("link",12)+' attachment</a>'
           : '<span class="caption">'+esc(String(u))+'</span>'; }).join(" ");
-      return '<div style="display:flex;flex-direction:column;gap:3px'+(m.internal?';background:var(--chrome-tint);border-radius:8px;padding:8px 10px':'')+'">'+
+      return '<div'+CG.msgAttrs("action", m, CG.msgPerms("action", m, msgCtx))+' style="display:flex;flex-direction:column;gap:3px'+(m.internal?';background:var(--chrome-tint);border-radius:8px;padding:8px 10px':'')+'">'+
         '<div style="display:flex;gap:9px"><b class="mono" style="font-size:11px;color:'+(isStaff?"var(--chrome-deep)":"var(--steel)")+';flex-shrink:0">'+esc((m.profiles&&m.profiles.gamertag)||"member")+(isStaff?" · league office":"")+(m.internal?' · staff-only note':"")+'</b>'+
-        '<span class="small" style="color:var(--steel);white-space:pre-wrap;flex:1">'+esc(m.body||"")+'</span></div>'+
+        '<span class="small msg-body" style="color:var(--steel);white-space:pre-wrap;flex:1">'+esc(m.body||"")+'</span>'+CG.msgEditedMark("action", m)+'</div>'+
         (att?'<div style="padding-left:2px">'+att+'</div>':"")+'</div>';
-    }).join("")+'</div>';
+    }); }).join("")+'</div>';
   }
   if (!closed){
     h += '<div style="display:flex;flex-direction:column;gap:6px">'+
-      '<div style="display:flex;gap:8px"><input data-reply-for="'+a.id+'" placeholder="Add a reply or more detail…" style="flex:1">'+
+      '<div style="display:flex;gap:8px;align-items:flex-end"><textarea class="grow" rows="1" enterkeyhint="send" data-reply-for="'+a.id+'" placeholder="Add a reply or more detail…" style="flex:1"></textarea>'+
         '<button class="btn btn-ghost btn-sm" data-reply-send="'+a.id+'">Reply</button></div>'+
       '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><input data-reply-att="'+a.id+'" placeholder="Attach a link (optional)" style="flex:1;min-width:180px">'+
         (review && !conflicted && !club?'<label class="caption" style="display:flex;gap:6px;align-items:center;cursor:pointer;white-space:nowrap"><input type="checkbox" data-reply-internal="'+a.id+'"> staff-only note</label>':"")+'</div></div>';
@@ -10807,6 +10828,12 @@ CG.AFTER._complaintsLive = function(){
   });
   document.querySelectorAll("[data-case-filter]").forEach(function(b){ b.addEventListener("click", function(){
     CG._caseFilter = this.getAttribute("data-case-filter"); if(CG.router) CG.router();
+  }); });
+  /* v4.56: Enter sends the reply, Shift+Enter starts a new line */
+  document.querySelectorAll("[data-reply-for]").forEach(function(ta){ ta.addEventListener("keydown", function(e){
+    if (!CG.enterSends(e)) return;
+    e.preventDefault();
+    var b = document.querySelector('[data-reply-send="'+this.getAttribute("data-reply-for")+'"]'); if (b) b.click();
   }); });
   document.querySelectorAll("[data-reply-send]").forEach(function(b){ b.addEventListener("click", function(){
     var id=this.getAttribute("data-reply-send");
@@ -11317,11 +11344,13 @@ CG.loadAppMessages = function(){
   /* newest first: _groupAppMsgs re-sorts for display, so the fingerprint below reads the NEWEST row from the front of
      the list. v4.12: every message, read by key, the same read loadManagerData makes; the old cap of 900 would have
      dropped a long thread's oldest messages without a sign. */
-  return CG.sbAll("application_messages","app_type,application_id,sender_id,body,created_at, sender:profiles!application_messages_sender_id_fkey(gamertag,role)","created_at",false)
+  return CG.sbAll("application_messages","id,app_type,application_id,sender_id,body,created_at,edited_at,deleted_at,deleted_by, sender:profiles!application_messages_sender_id_fkey(gamertag,role)","created_at",false)
     .then(function(mm){
       if (!mm || mm.error) return false;
       var rows = mm.data || [];
-      var fp = rows.length + "|" + (rows.length ? rows[0].created_at : "");
+      /* v4.56: an edit or a delete changes the thread too, so the newest change mark joins the fingerprint */
+      var marked = rows.reduce(function(a, m){ var t = m.deleted_at || m.edited_at || ""; return t > a ? t : a; }, "");
+      var fp = rows.length + "|" + (rows.length ? rows[0].created_at : "") + "|" + marked;
       var changed = fp !== CG._appMsgsFp;
       CG._appMsgsFp = fp;
       if (CG.lg) CG.lg._appMsgs = CG._groupAppMsgs(rows);
@@ -11361,9 +11390,13 @@ CG.subscribeAppMessages = function(){
             var cur = document.querySelector("[data-appchat-input]");
             var draft = cur ? cur.value : "", hadFocus = cur && document.activeElement===cur;
             CG.router();
-            if (draft){ var ni = document.querySelector("[data-appchat-input]"); if(ni){ ni.value = draft; if(hadFocus){ ni.focus(); try{ ni.setSelectionRange(draft.length, draft.length); }catch(e){} } } }
+            if (draft){ var ni = document.querySelector("[data-appchat-input]"); if(ni){ ni.value = draft; CG.growTa(ni); if(hadFocus){ ni.focus(); try{ ni.setSelectionRange(draft.length, draft.length); }catch(e){} } } }
           } else { CG.toast("New message on an application","ok"); }
         });
+      })
+      /* v4.56: an edit or a delete, by the author or the office, repaints that one message in place */
+      .on("postgres_changes",{ event:"UPDATE", schema:"public", table:"application_messages" }, function(payload){
+        CG.msgApplyUpdate("application", payload && payload.new);
       }).subscribe();
   } catch(e){}
 };
@@ -11384,6 +11417,10 @@ CG.subscribeActions = function(){
         if (!m || m.author_id === me) return;   /* my own reply already re-rendered the thread */
         if (CG.refreshActions) CG.refreshActions();
       })
+      /* v4.56: an edit or a delete repaints that one message in place */
+      .on("postgres_changes",{ event:"UPDATE", schema:"public", table:"action_messages" }, function(payload){
+        CG.msgApplyUpdate("action", payload && payload.new);
+      })
       .on("postgres_changes",{ event:"*", schema:"public", table:"action_requests" }, function(){
         if (CG.refreshActions) CG.refreshActions();
       }).subscribe();
@@ -11398,28 +11435,34 @@ CG.appChatSection = function(type, appId, opts){
   opts = opts || {}; var office = !!opts.office;
   var uid = CG.auth.user && CG.auth.user.id;
   var msgs = CG.appMsgsFor(type, appId);
+  /* v4.56: a deleted message is gone for members; the office keeps a marker where it was (CG.msgGone). An author
+     changes their own while the application is pending; the office may delete on it unless it is their own. */
+  var shown = msgs.filter(function(m){ return !m.deleted_at; }).length;
+  var ctx = { open: opts.status === "pending", mod: office && CG.msgOffice() && !opts.mine };
+  var row = function(m){
+    if (m.deleted_at) return CG.msgGone("application", m);
+    var mine = m.sender_id===uid;
+    var isStaff = m.sender && (m.sender.role==="staff" || m.sender.role==="commissioner");
+    var who = mine ? "You"
+      : isStaff ? (office ? ((m.sender&&m.sender.gamertag)||"Official")+" · league office" : "League office")
+      : ((m.sender&&m.sender.gamertag)||"Applicant");
+    return '<div'+CG.msgAttrs("application", m, CG.msgPerms("application", m, ctx))+' style="display:flex;flex-direction:column;align-items:'+(mine?"flex-end":"flex-start")+'">'+
+      '<div style="max-width:84%;background:'+(mine?"var(--chrome-tint)":"var(--ice)")+';border:1px solid var(--line-soft);border-radius:12px;padding:8px 12px">'+
+        '<div style="display:flex;gap:8px;align-items:baseline;margin-bottom:2px"><b class="mono" style="font-size:10.5px;color:'+(isStaff?"var(--chrome-deep)":"var(--steel)")+'">'+esc(who)+'</b>'+
+        '<span class="caption" style="font-size:10px">'+(m.created_at?CG.fmtFull(Date.parse(m.created_at)):"")+'</span>'+CG.msgEditedMark("application", m)+'</div>'+
+        '<span class="small msg-body" style="white-space:pre-wrap;color:var(--ink-2)">'+esc(m.body||"")+'</span></div></div>';
+  };
   var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+(office?"Messages with the applicant":"Messages with the league office")+'</h3>'+
-    (msgs.length?'<span class="chip chip-xs">'+msgs.length+' message'+(msgs.length===1?"":"s")+'</span>':"")+'</div><div class="card-b">';
-  if (msgs.length){
-    h += '<div class="stack" style="gap:10px;margin-bottom:14px">'+msgs.map(function(m){
-      var mine = m.sender_id===uid;
-      var isStaff = m.sender && (m.sender.role==="staff" || m.sender.role==="commissioner");
-      var who = mine ? "You"
-        : isStaff ? (office ? ((m.sender&&m.sender.gamertag)||"Official")+" · league office" : "League office")
-        : ((m.sender&&m.sender.gamertag)||"Applicant");
-      return '<div style="display:flex;flex-direction:column;align-items:'+(mine?"flex-end":"flex-start")+'">'+
-        '<div style="max-width:84%;background:'+(mine?"var(--chrome-tint)":"var(--ice)")+';border:1px solid var(--line-soft);border-radius:12px;padding:8px 12px">'+
-          '<div style="display:flex;gap:8px;align-items:baseline;margin-bottom:2px"><b class="mono" style="font-size:10.5px;color:'+(isStaff?"var(--chrome-deep)":"var(--steel)")+'">'+esc(who)+'</b>'+
-          '<span class="caption" style="font-size:10px">'+(m.created_at?CG.fmtFull(Date.parse(m.created_at)):"")+'</span></div>'+
-          '<span class="small" style="white-space:pre-wrap;color:var(--ink-2)">'+esc(m.body||"")+'</span></div></div>';
-    }).join("")+'</div>';
+    (shown?'<span class="chip chip-xs">'+shown+' message'+(shown===1?"":"s")+'</span>':"")+'</div><div class="card-b">';
+  if (shown || (msgs.length && CG.msgOffice())){
+    h += '<div class="stack" style="gap:10px;margin-bottom:14px">'+msgs.map(function(m){ return CG.msgRow("application", m, row); }).join("")+'</div>';
   } else {
     h += '<p class="caption" style="margin-bottom:14px">'+(office
       ? "No messages yet. Reach out to the applicant with any questions before the ballot or a decision — they can read and reply here."
       : "No messages yet. The league office may reach out here about your application, and you can message them any time. You’ll get a notification when they reply.")+'</p>';
   }
   var key = type+":"+appId;
-  h += '<div style="display:flex;gap:8px"><input data-appchat-input="'+esc(key)+'" placeholder="Write a message…" aria-label="Write a message to '+(office?"the applicant":"the league office")+'" autocomplete="off" style="flex:1">'+
+  h += '<div style="display:flex;gap:8px;align-items:flex-end"><textarea class="grow" rows="1" enterkeyhint="send" data-appchat-input="'+esc(key)+'" placeholder="Write a message…" aria-label="Write a message to '+(office?"the applicant":"the league office")+'" style="flex:1"></textarea>'+
     '<button class="btn btn-ink btn-sm" data-appchat-send="'+esc(key)+'">Send</button></div>';
   h += '<p class="caption" style="margin-top:10px">'+(office
     ? "The applicant can read and reply to this thread. The staff ballot below stays private to the league office."
@@ -11428,6 +11471,12 @@ CG.appChatSection = function(type, appId, opts){
 };
 /* shared binder — used by the office detail page and both applicant views */
 CG.wireAppChat = function(){
+  /* v4.56: the box grows with what is typed; Enter sends, Shift+Enter starts a new line */
+  document.querySelectorAll("[data-appchat-input]").forEach(function(ta){ ta.addEventListener("keydown", function(e){
+    if (!CG.enterSends(e)) return;
+    e.preventDefault();
+    var b = document.querySelector('[data-appchat-send="'+this.getAttribute("data-appchat-input")+'"]'); if (b && !b.disabled) b.click();
+  }); });
   document.querySelectorAll("[data-appchat-send]").forEach(function(b){ b.addEventListener("click", function(){
     var key = this.getAttribute("data-appchat-send"), btn = this;
     var inp = document.querySelector('[data-appchat-input="'+key+'"]');
@@ -11439,12 +11488,291 @@ CG.wireAppChat = function(){
       btn.disabled = false;
       if (r.error){ CG.toast("Couldn’t send: "+r.error.message,"err"); return; }
       if (!r.data || !r.data.length){ CG.toast("You can’t message on this application.","err"); return; }
-      if (inp) inp.value = "";
+      if (inp){ inp.value = ""; CG.growTa(inp); }
       CG.toast("Message sent","ok");
       CG.loadAppMessages().then(function(){ if(CG.router) CG.router(); });
     });
   }); });
 };
+/* ================================================================
+   v4.56: MESSAGES CAN BE EDITED AND DELETED (Rule 1.3), AND MESSAGE BOXES GROW
+   Commissioner, 2026-11-23: "Can you make the text boxes wrap text if the text is longer than the single line box? Can
+   you also allow people to edit and delete messages they send in text boxes on the website similar to how discord
+   allows you to right click the text on desktop, or hold on mobile and a mini menu pops up with a copy, edit or delete
+   option?" Rulings the same day: a deleted message leaves the conversation for its members and the league office keeps
+   a copy; an edited one says (edited) and the office can read what it said; the author changes their own message only
+   until the filing or application is decided (a direct message any time); "Commissioners and staff, but keep the data
+   so other staff and commissioners can still view them."
+   Three threads draw messages: the Action Center (action_messages), applications (application_messages) and direct
+   messages (direct_messages). Each renders every message through CG.msgRow, which keeps that message's row renderer,
+   so an edit, a delete or a live change repaints the one row in place and nothing else on the page moves.
+   public.edit_message and public.delete_message are the only writers and re-check every permission the menu offers
+   (sql/2026-11-23-message-edit-delete-v456.sql). Test: tools/message-edit-delete-v456.test.cjs.
+   ================================================================ */
+CG._msgRows = {};
+/* the row renderer a thread registers for one message; it returns "" for a row the viewer should not see */
+CG.msgRow = function(src, m, render){
+  CG._msgRows[src+":"+m.id] = render;
+  return render(m);
+};
+/* the attributes that make a row a message: the menu reads what it may offer from them, the DB decides */
+CG.msgAttrs = function(src, m, perms){
+  return ' data-msg="'+src+':'+esc(m.id)+'" tabindex="0"'+(perms.edit?' data-msg-edit="1"':"")+(perms.del?' data-msg-del="1"':"");
+};
+CG.msgOffice = function(){ var r = CG.role(); return r==="commish" || r==="staff"; };
+/* mirrors edit_message / delete_message: the author while the conversation is open (a direct message always); the
+   office may delete on a filing or an application (ctx.mod), never edit another member's words */
+CG.msgPerms = function(src, m, ctx){
+  var uid = CG.auth.user && CG.auth.user.id;
+  if (!uid || m.deleted_at) return { edit:false, del:false };
+  var own = (m.author_id || m.sender_id) === uid, open = src==="direct" || !!(ctx && ctx.open);
+  return { edit: own && open, del: (own && open) || (src!=="direct" && !!(ctx && ctx.mod)) };
+};
+/* (edited) for everyone; for the office it opens what the message said before */
+CG.msgEditedMark = function(src, m){
+  if (!m.edited_at) return "";
+  return CG.msgOffice() && src!=="direct"
+    ? '<button type="button" class="msg-edited" data-msg-hist="'+src+':'+esc(m.id)+'" title="See what it said before">(edited)</button>'
+    : '<span class="msg-edited" title="'+esc("Edited "+CG.fmtFull(Date.parse(m.edited_at)))+'">(edited)</span>';
+};
+/* a deleted message: gone for members; the office sees where it was, who removed it, and can read it */
+CG.msgGone = function(src, m){
+  if (src==="direct" || !CG.msgOffice()) return "";
+  var names = (CG.lg && CG.lg._profName) || {}, uid = CG.auth.user && CG.auth.user.id;
+  var by = m.deleted_by === (m.author_id || m.sender_id) ? "its author" : m.deleted_by === uid ? "you" : (names[m.deleted_by] || "the league office");
+  return '<div class="msg-gone" data-msg="'+src+':'+esc(m.id)+'">Message deleted by '+esc(by)+
+    ' <button type="button" class="msg-edited" data-msg-hist="'+src+':'+esc(m.id)+'">See what it said</button></div>';
+};
+CG.msgFind = function(src, id){
+  var lists = src==="direct" ? [CG._dm.msgs || []]
+    : Object.keys((src==="action" ? (CG.lg && CG.lg._actionMsgs) : (CG.lg && CG.lg._appMsgs)) || {})
+        .map(function(k){ return (src==="action" ? CG.lg._actionMsgs : CG.lg._appMsgs)[k]; });
+  for (var i = 0; i < lists.length; i++) for (var j = 0; j < lists[i].length; j++) if (lists[i][j].id === id) return lists[i][j];
+  return null;
+};
+CG.msgRepaint = function(src, id){
+  var m = CG.msgFind(src, id), render = CG._msgRows[src+":"+id];
+  var row = document.querySelector('[data-msg="'+src+':'+id+'"]');
+  if (!m || !render || !row) return;
+  var html = render(m);
+  if (html) row.outerHTML = html; else row.remove();
+  /* a deleted direct message leaves the list too, so the conversation preview and the unread count forget it */
+  if (src==="direct"){
+    if (m.deleted_at){ CG._dm.msgs = CG._dm.msgs.filter(function(x){ return x.id !== id; }); if (CG.renderChrome) CG.renderChrome(); }
+    var other = CG.dmOtherId(m), left = document.querySelector('[data-dm-open="'+other+'"] p');
+    if (left){ var thread = CG._dm.msgs.filter(function(x){ return CG.dmOtherId(x)===other; }); left.textContent = CG.dmPreview(thread[thread.length-1]); }
+  }
+};
+/* a change made elsewhere (the other party, the office, another tab) arrives on the live channel */
+CG.msgApplyUpdate = function(src, row){
+  if (!row || !row.id) return;
+  var m = CG.msgFind(src, row.id); if (!m) return;
+  ["body","edited_at","deleted_at","deleted_by","attachments","media_path","media_type"].forEach(function(k){ if (k in row) m[k] = row[k]; });
+  /* a row open in its editor keeps it; the repaint waits for Save or Cancel, unless the message is gone */
+  if (!m.deleted_at && document.querySelector('[data-msg="'+src+':'+row.id+'"] .msg-edit')) return;
+  CG.msgRepaint(src, row.id);
+};
+CG.msgErr = function(e){
+  var s = String((e && e.message) || e || "");
+  return /^[A-Z_]+: /.test(s) ? s.slice(s.indexOf(": ")+2) : (s || "Something went wrong");
+};
+
+/* ---- message boxes that grow with what is typed ----
+   field-sizing:content does it in CSS where supported; elsewhere the box is sized on every input. Capped by max-height
+   in CSS, after which it scrolls. */
+CG._fieldSizing = typeof CSS !== "undefined" && !!CSS.supports && CSS.supports("field-sizing", "content");
+CG.growTa = function(ta){
+  if (!ta || CG._fieldSizing) return;
+  ta.style.height = "auto";
+  ta.style.height = (ta.scrollHeight + ta.offsetHeight - ta.clientHeight) + "px";
+};
+/* Enter sends and Shift+Enter starts a new line, as in direct messages; never mid-composition (IME) */
+CG.enterSends = function(e){ return e.key==="Enter" && !e.shiftKey && !e.isComposing; };
+
+/* ---- the menu ---- */
+CG.msgMenuClose = function(){ var el = document.getElementById("msgMenu"); if (el) el.remove(); CG._msgMenuFor = null; };
+CG.msgMenuOpen = function(row, x, y, byKeyboard){
+  CG.msgMenuClose();
+  var key = row.getAttribute("data-msg") || "", i = key.indexOf(":"), src = key.slice(0, i), id = key.slice(i+1);
+  var m = CG.msgFind(src, id); if (!m || m.deleted_at) return;
+  var items = (m.body ? '<button type="button" role="menuitem" data-mm="copy">'+CG.ic("copy",15)+'Copy text</button>' : "")+
+    (row.hasAttribute("data-msg-edit") ? '<button type="button" role="menuitem" data-mm="edit">'+CG.ic("pen",15)+'Edit message</button>' : "")+
+    (row.hasAttribute("data-msg-del") ? '<button type="button" role="menuitem" class="danger" data-mm="delete">'+CG.ic("trash",15)+'Delete message</button>' : "");
+  if (!items) return;
+  var menu = document.createElement("div");
+  menu.id = "msgMenu"; menu.className = "msg-menu"+(byKeyboard ? " instant" : "");
+  menu.setAttribute("role", "menu"); menu.setAttribute("aria-label", "Message actions");
+  menu.innerHTML = items;
+  document.body.appendChild(menu);
+  /* open at the pointer, kept inside the viewport, growing out of the corner nearest the pointer */
+  var w = menu.offsetWidth, h = menu.offsetHeight, pad = 8, left = x, top = y, ox = "left", oy = "top";
+  if (left + w > window.innerWidth - pad){ left = Math.max(pad, x - w); ox = "right"; }
+  if (top + h > window.innerHeight - pad){ top = Math.max(pad, y - h); oy = "bottom"; }
+  left = Math.max(pad, Math.min(left, window.innerWidth - w - pad)); top = Math.max(pad, Math.min(top, window.innerHeight - h - pad));
+  menu.style.left = left+"px"; menu.style.top = top+"px"; menu.style.transformOrigin = oy+" "+ox;
+  CG._msgMenuFor = { row:row, src:src, id:id };
+  var first = menu.querySelector("button"); if (first) first.focus({ preventScroll:true });
+};
+CG.msgCopy = function(src, id, row){
+  var m = CG.msgFind(src, id); if (!m) return;
+  /* a selection inside the message copies just that part; otherwise the whole message */
+  var s = window.getSelection ? window.getSelection() : null, part = s ? String(s) : "";
+  var text = part && row && s.anchorNode && row.contains(s.anchorNode) ? part : (m.body || "");
+  var fallback = function(){
+    var ta = document.createElement("textarea"); ta.value = text; ta.setAttribute("readonly", "");
+    ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select();
+    var ok = false; try { ok = document.execCommand("copy"); } catch(e){}
+    ta.remove(); return ok;
+  };
+  var done = function(ok){ CG.toast(ok ? "Copied" : "Couldn’t copy. Select the text and copy it instead.", ok ? "ok" : "err"); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function(){ done(true); }, function(){ done(fallback()); });
+  else done(fallback());
+};
+CG.msgEditStart = function(src, id){
+  var row = document.querySelector('[data-msg="'+src+':'+id+'"]'), m = CG.msgFind(src, id);
+  var body = row && row.querySelector(".msg-body");
+  if (!m || !body || row.querySelector(".msg-edit")) return;
+  var box = document.createElement("div"); box.className = "msg-edit";
+  box.innerHTML = '<textarea class="grow" rows="1" aria-label="Edit your message"'+(src==="direct" ? ' maxlength="2000"' : "")+'></textarea>'+
+    '<div class="msg-edit-row"><button type="button" class="btn btn-ink btn-sm" data-me-save>Save</button>'+
+    '<button type="button" class="btn btn-ghost btn-sm" data-me-cancel>Cancel</button>'+
+    '<span class="caption">Enter to save, Esc to cancel</span></div>';
+  body.hidden = true; body.parentNode.insertBefore(box, body.nextSibling);
+  var ta = box.querySelector("textarea"), saveBtn = box.querySelector("[data-me-save]");
+  ta.value = m.body || ""; CG.growTa(ta); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+  var close = function(){ CG.msgRepaint(src, id); var r = document.querySelector('[data-msg="'+src+':'+id+'"]'); if (r) r.focus({ preventScroll:true }); };
+  var save = function(){
+    var next = ta.value.trim();
+    if (next === (m.body || "").trim()){ close(); return; }
+    if (!next && !m.media_path && !(m.attachments && m.attachments.length)){ CG.toast("A message needs some text. Delete it instead.", "err"); return; }
+    saveBtn.disabled = true;
+    CG.sb.rpc("edit_message", { p_source:src, p_id:id, p_body:next }).then(function(r){
+      if (r.error){ saveBtn.disabled = false; CG.toast(CG.msgErr(r.error), "err"); return; }
+      var d = r.data || {};
+      if (typeof d.body === "string") m.body = d.body;
+      if (d.edited_at) m.edited_at = d.edited_at;
+      close();
+    }, function(e){ saveBtn.disabled = false; CG.toast(CG.msgErr(e), "err"); });
+  };
+  box.querySelector("[data-me-cancel]").addEventListener("click", close);
+  saveBtn.addEventListener("click", save);
+  ta.addEventListener("keydown", function(e){
+    if (e.key==="Escape"){ e.preventDefault(); e.stopPropagation(); close(); }
+    else if (CG.enterSends(e)){ e.preventDefault(); save(); }
+  });
+};
+CG.msgDelete = function(src, id){
+  var m = CG.msgFind(src, id); if (!m) return;
+  var uid = CG.auth.user && CG.auth.user.id, own = (m.author_id || m.sender_id) === uid;
+  var why = src==="direct" ? "It disappears from this conversation for both of you. A copy stays in the league’s records."
+    : own ? "It disappears from this conversation. The league office keeps a copy."
+    : "It disappears from this conversation for its members. The league office keeps a copy and can still read it.";
+  CG.confirm("Delete this message?", why, "Delete", function(){
+    CG.sb.rpc("delete_message", { p_source:src, p_id:id }).then(function(r){
+      if (r.error){ CG.toast(CG.msgErr(r.error), "err"); return; }
+      var d = r.data || {};
+      m.deleted_at = d.deleted_at || new Date().toISOString(); m.deleted_by = uid;
+      m.body = src==="action" ? null : ""; m.attachments = []; m.media_path = null; m.media_type = null;
+      CG.msgRepaint(src, id);
+      CG.toast("Message deleted", "ok");
+    }, function(e){ CG.toast(CG.msgErr(e), "err"); });
+  });
+};
+/* what a message said before: every edit and the delete, oldest first. RLS shows it to staff and commissioners only,
+   and never for a direct message. */
+CG.msgHistoryModal = function(src, id){
+  var m = CG.msgFind(src, id) || {}, names = (CG.lg && CG.lg._profName) || {};
+  CG.sb.from("message_history").select("kind,body,detail,changed_by,changed_at").eq("source", src).eq("message_id", id)
+    .order("changed_at", { ascending:true }).then(function(r){
+      if (r.error){ CG.toast("Couldn’t load the history: "+r.error.message, "err"); return; }
+      var rows = r.data || [];
+      if (!rows.length){ CG.toast("No earlier versions are on record", "err"); return; }
+      var item = function(label, body, at){
+        return '<div style="border-top:1px solid var(--line-soft);padding:10px 0">'+
+          '<div class="caption" style="margin-bottom:4px">'+esc(label)+(at ? " · "+esc(CG.fmtFull(Date.parse(at))) : "")+'</div>'+
+          '<div class="small" style="white-space:pre-wrap;color:var(--ink-2)">'+(body ? esc(body) : '<i>(no text)</i>')+'</div></div>';
+      };
+      var html = rows.map(function(h){
+        var who = names[h.changed_by] || "a member";
+        return item(h.kind==="delete" ? "What it said when "+who+" deleted it" : "Before an edit by "+who, h.body, h.changed_at);
+      }).join("") + (m.deleted_at ? "" : item("What it says now", m.body, m.edited_at));
+      CG.modal("Message history", '<p class="caption" style="margin:0 0 6px">Only league staff and commissioners can read this.</p>'+html,
+        '<button class="btn btn-ink" data-close>Done</button>');
+    });
+};
+
+if (typeof document !== "undefined" && !CG._msgMenuWired){
+  CG._msgMenuWired = true;
+  var msgRowOf = function(t){ return t && t.closest ? t.closest("[data-msg]") : null; };
+  /* links, media and text boxes keep the browser's own menu */
+  var msgNative = function(t){ return !!(t && t.closest && t.closest("a,video,img,textarea,input,button,.msg-edit")); };
+  var msgPress = null;
+  var msgPressEnd = function(){ if (msgPress){ clearTimeout(msgPress.t); msgPress.row.classList.remove("msg-pressing"); msgPress = null; } };
+  document.addEventListener("contextmenu", function(e){
+    var row = msgRowOf(e.target); if (!row || msgNative(e.target)) return;
+    e.preventDefault();
+    if (CG._msgPressAt && Date.now() - CG._msgPressAt < 800) return;   /* Android also fires this for the press already handled */
+    /* the ContextMenu key or Shift+F10 arrives with no pointer position: open it at the message, without animation */
+    var kb = !e.clientX && !e.clientY, rc = row.getBoundingClientRect();
+    CG.msgMenuOpen(row, kb ? rc.left + 16 : e.clientX, kb ? rc.top + 16 : e.clientY, kb);
+  });
+  document.addEventListener("pointerdown", function(e){
+    var menu = document.getElementById("msgMenu");
+    if (menu && !menu.contains(e.target)){ CG.msgMenuClose(); CG._msgSwallowAt = Date.now(); }
+    if (e.pointerType !== "touch") return;
+    var row = msgRowOf(e.target); if (!row || msgNative(e.target)) return;
+    var x = e.clientX, y = e.clientY;
+    row.classList.add("msg-pressing");
+    msgPress = { row:row, x:x, y:y, t:setTimeout(function(){
+      msgPress = null; row.classList.remove("msg-pressing"); CG._msgPressAt = Date.now();
+      /* a short tick on Android; Chrome refuses vibrate (and logs it) before the page's first real tap */
+      if (navigator.vibrate && (!navigator.userActivation || navigator.userActivation.hasBeenActive)) try { navigator.vibrate(8); } catch(err){}
+      CG.msgMenuOpen(row, x, y, false);
+    }, 450) };
+  }, { passive:true });
+  /* a press that turns into a scroll is not a hold: the browser cancels the pointer, or it moves */
+  document.addEventListener("pointermove", function(e){
+    if (msgPress && (Math.abs(e.clientX - msgPress.x) > 10 || Math.abs(e.clientY - msgPress.y) > 10)) msgPressEnd();
+  }, { passive:true });
+  document.addEventListener("pointerup", msgPressEnd, { passive:true });
+  document.addEventListener("pointercancel", msgPressEnd, { passive:true });
+  document.addEventListener("click", function(e){
+    var mm = e.target.closest && e.target.closest("#msgMenu [data-mm]");
+    if (mm){
+      var f = CG._msgMenuFor, act = mm.getAttribute("data-mm"); CG.msgMenuClose(); if (!f) return;
+      if (act==="copy") CG.msgCopy(f.src, f.id, f.row);
+      else if (act==="edit") CG.msgEditStart(f.src, f.id);
+      else if (act==="delete") CG.msgDelete(f.src, f.id);
+      return;
+    }
+    /* the tap that closed the menu, or the lift that ended a hold, does not also press what is underneath */
+    if ((CG._msgSwallowAt && Date.now() - CG._msgSwallowAt < 500) || (CG._msgPressAt && Date.now() - CG._msgPressAt < 600 && msgRowOf(e.target))){
+      CG._msgSwallowAt = 0; e.preventDefault(); e.stopPropagation(); return;
+    }
+    var hb = e.target.closest && e.target.closest("[data-msg-hist]");
+    if (hb){ var k = hb.getAttribute("data-msg-hist"), j = k.indexOf(":"); CG.msgHistoryModal(k.slice(0, j), k.slice(j+1)); }
+  }, true);
+  document.addEventListener("keydown", function(e){
+    /* the Menu key or Shift+F10 on a focused message opens its menu there, the same in every browser */
+    if ((e.key==="ContextMenu" || (e.shiftKey && e.key==="F10")) && e.target && e.target.matches && e.target.matches("[data-msg]")){
+      e.preventDefault(); var kr = e.target.getBoundingClientRect(); CG.msgMenuOpen(e.target, kr.left + 16, kr.top + 16, true); return;
+    }
+    var menu = document.getElementById("msgMenu"); if (!menu) return;
+    var items = [].slice.call(menu.querySelectorAll("button")), at = items.indexOf(document.activeElement);
+    if (e.key==="Escape"){
+      e.preventDefault(); var f = CG._msgMenuFor; CG.msgMenuClose();
+      if (f && f.row && f.row.isConnected) f.row.focus({ preventScroll:true });
+    } else if (e.key==="ArrowDown" || e.key==="ArrowUp"){
+      e.preventDefault(); items[(at + (e.key==="ArrowDown" ? 1 : -1) + items.length) % items.length].focus();
+    } else if (e.key==="Tab"){ CG.msgMenuClose(); }
+  });
+  window.addEventListener("scroll", function(){ CG.msgMenuClose(); }, { passive:true, capture:true });
+  window.addEventListener("resize", function(){ CG.msgMenuClose(); });
+  window.addEventListener("hashchange", function(){ CG.msgMenuClose(); });
+  document.addEventListener("input", function(e){
+    var t = e.target; if (t && t.tagName==="TEXTAREA" && t.classList.contains("grow")) CG.growTa(t);
+  });
+}
 /* ---- club management appointments: owners must APPLY to appoint a GM/AGM; the reviewer vote
    approves. Rendered on the roster page (Team HQ). ---- */
 CG.clubMgmt = function(){
@@ -11615,7 +11943,7 @@ CG.hubManagement = function(){
     h+='<div class="card" style="margin-bottom:12px"><div class="card-h"><h3>'+esc((a.nominee&&a.nominee.gamertag)||"Nominee")+' — '+esc(rl)+'</h3>'+
       '<span class="chip chip-warn chip-xs">Pending the reviewer vote</span></div><div class="card-b">'+
       '<button class="btn btn-ghost btn-sm" data-mgmt-withdraw="'+a.id+'">Withdraw this nomination</button></div></div>';
-    h+=CG.appChatSection("management", a.id, {office:false});
+    h+=CG.appChatSection("management", a.id, {office:false, status:a.status, mine:true});
   });
   h+='<div class="note" style="margin-top:6px"><b style="font-family:var(--f-disp)">How appointments work.</b> '+
     (m.isOwner ? (CG.seasonUnderway()
@@ -11947,7 +12275,7 @@ CG.appBallotSection = function(type, a, decided){
   if (!decided && !waitlisted && isReviewer){
     h += '<div style="border-top:1px solid var(--line-soft);padding-top:12px">'+
       '<span class="caption" style="display:block;margin-bottom:8px">'+(mine?"Your vote. Change it any time until the application is decided, the moment "+need+" of "+N+" reviewers agree":"Cast your vote: "+need+" of "+N+" reviewers decide it")+'</span>'+
-      '<input id="appVoteNote" placeholder="Add a reason (optional)" autocomplete="off" aria-label="Reason for your vote" style="width:100%;margin-bottom:8px" value="'+esc((mine&&mine.note)||"")+'">'+
+      '<textarea id="appVoteNote" class="grow" rows="1" placeholder="Add a reason (optional)" aria-label="Reason for your vote" style="width:100%;margin-bottom:8px">'+esc((mine&&mine.note)||"")+'</textarea>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
         '<button class="btn '+(mine&&mine.vote==="approve"?"btn-chrome":"btn-ghost")+' btn-sm" data-vote-cast="approve" aria-pressed="'+!!(mine&&mine.vote==="approve")+'" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Approve</button>'+
         '<button class="btn '+(mine&&mine.vote==="deny"?"btn-ink":"btn-ghost")+' btn-sm" data-vote-cast="deny" aria-pressed="'+!!(mine&&mine.vote==="deny")+'" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Deny</button>'+
@@ -12124,7 +12452,8 @@ CG.hubApplicationDetail = function(id, type){
   /* which club they're getting is decided before the vote lands — the approval acts on it */
   if (isOwner) h += CG.ownerGoAheadCard(a) + CG.ownerAppClubPicker(a);
   /* the applicant chat sits above the vote: talk to the applicant, then the reviewers decide */
-  h += CG.appChatSection(type, a.id, {office:true});
+  h += CG.appChatSection(type, a.id, {office:true, status:a.status,
+    mine: !!(CG.auth.user && (a.profile_id || a.submitted_by) === CG.auth.user.id)});
   /* the reviewer vote IS the decision — no manual approve/deny */
   h += CG.appBallotSection(type, a, decided);
   return h;
