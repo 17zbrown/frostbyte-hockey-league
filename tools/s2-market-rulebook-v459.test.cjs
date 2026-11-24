@@ -76,9 +76,12 @@ const STALE = [
   "refused at once", "marked themselves available for the night", "nightly request", "a night played from the training camp pool",
   "only in steps of $250,000", "A club bids only within its roster limit",
 ];
-/* held rulings: never in the current site's book until the commissioner releases them */
+/* held rulings: never in the current site's book until the commissioner releases them. v4.61: the playoff ruling ("2 of
+   the first 4", the floor at the signed-up position group) was released on 2026-11-24, when the commissioner kept it
+   ("Keep 2 of the first 4") and it shipped with its database record; tools/s2-playoff-rules-v461.test.cjs pins its text,
+   so "series' first four" and "at the position group they signed up for" left this list. */
 const HELD = [
-  "series' first four", "at the position group they signed up for", "may issue a suspension within the limits",
+  "may issue a suspension within the limits",
   "with no departments", "an owner, staff, General Manager or Assistant General Manager application", "public from then",
 ];
 const DASHES = new RegExp("[" + String.fromCharCode(0x2014, 0x2013) + "]| - ");
