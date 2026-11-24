@@ -27,6 +27,7 @@ const CG = {
                 { key: "statsmgr", label: "Stats manager", dept: "statistics", icon: "chart" }],
   WEEK8: { open: false }, availGet: () => true,
   incomingCount: () => 0, mgmtPendingCount: () => 0, unreadCount: () => 0,
+  marketOn: () => false,   /* v4.58: the Season 2 market gate (part_live); off here, as in Season 1 */
   visibleComplaints: () => [],
 };
 global.location = { hash: "#/hub" };

@@ -72,7 +72,9 @@ A("nothing posts to Discord", !/discord_http_post|notify_discord|_announce_once|
 A("the button calls the one door, colors the toast by d.ok, and repaints the league", /CG\.sb\.rpc\("office_found_owner_club", \{ p_app:id, p_division:div \}\)/.test(live) && /CG\.toast\(d\.message \|\| "Club added", d\.ok === false \? "err" : "ok"\);/.test(live) && /office_found_owner_club "\+/.test(live.slice(live.indexOf("CG.ROLE_RPCS = ("), live.indexOf("CG.ROLE_RPCS = (") + 400)));
 A("the Control Center and the Staff Desk list held applications for the commissioner", /waiting on your go-ahead',\s*heldApps\.length===1/.test(live) && /owner_apps_awaiting_go_ahead:\(lg\._ownerApps\|\|\[\]\)\.filter/.test(live) && /waiting on your go-ahead for a new club", go:"#\/admin", warn:true/.test(live));
 A("Add a club refuses a franchise a held application waits on, and points to the go-ahead", /An approved owner application is waiting on the go-ahead for this club\./.test(live));
-A("the review board's waitlist copy matches (a new club waits for the go-ahead)", /a new one waits for a commissioner’s go-ahead/.test(desk) && /A club the league does not field yet is added only when a commissioner gives the go-ahead\./.test(desk) && !/creates it if it does not exist yet/.test(desk));
+/* v4.58 re-pin (commissioner, 2026-11-23: "remove the waitlist entirely from the website and rulebook"): the review board's
+   Waitlist card, the only place this copy lived, is gone; the go-ahead itself is pinned by the checks around this one */
+A("the review board's waitlist card, and with it its admit copy, is gone (v4.58), and nothing promises to create a club", !/data-wl-admit|waitlist_admit|Admit into the league/.test(desk.replace(/\/\*[\s\S]*?\*\//g, "")) && !/creates it if it does not exist yet/.test(desk));
 A("the ballot and Staff Desk captions state the majority rule, not 'once all reviewers vote'", /it is approved once more than half of all "\+N\+" reviewer/.test(live) && !/once all "\+N\+" reviewer/.test(live) && !/Once all <b>'\+revCount/.test(live));
 
 console.log("\n4. Rules and changelog");

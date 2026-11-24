@@ -182,7 +182,9 @@ CG.isPreseason = function(){ return !!(CG.lg && CG.lg.results && CG.lg.results.l
    free-agency deals, waivers, releases, trades, draft picks. Registrations and Discord joins are
    member activity, not moves, and were never meant to appear here; whitelisting rather than
    blacklisting means a new activity type added elsewhere cannot leak into it by default. */
-CG.TX_MOVE_TYPES = ["management","sign","signing","fa","free_agency","trade","waive","release","draft","claim"];
+/* v4.58: Season 2 waivers write 'claim' (a waiver claimed), 'clear' (a waiver cleared into the training camp pool) and
+   'placed' (a random draw restoring a roster minimum, Rule S2.4); all three are completed moves, so the log shows them */
+CG.TX_MOVE_TYPES = ["management","sign","signing","fa","free_agency","trade","waive","release","draft","claim","clear","placed"];
 CG.teamMoves = function(list){
   return (list || []).filter(function(tx){
     return tx && tx.text && CG.TX_MOVE_TYPES.indexOf(String(tx.type || "")) >= 0;
@@ -191,7 +193,7 @@ CG.teamMoves = function(list){
 CG.txIcon = function(t){
   return t === "trade" ? "swap" : t === "draft" ? "grid"
        : t === "management" ? "users"
-       : (t === "waive" || t === "release") ? "back"
+       : (t === "waive" || t === "release" || t === "clear") ? "back"
        : "check";
 };
 CG.txText = function(s){ return esc(String(s||"")).replace(/&lt;b&gt;/g,"<b>").replace(/&lt;\/b&gt;/g,"</b>"); };
@@ -1092,6 +1094,7 @@ CG.ROUTES.home = function(){
       '<span class="chip chip-chrome">'+esc(CG.seasonTag(sR))+' registration is open</span>'+
       '<span style="color:var(--on-ink-dim);font-size:13px">'+(draftEligible
         ? 'Register by '+CG.fmtFull(regDl)+' to be draft-eligible'
+        : (CG.marketOn && CG.marketOn()) ? 'The draft sign-up cutoff has passed: sign up now and you join the league-wide training camp pool'
         : 'The draft-eligibility deadline has passed — sign up now and you’re placed on a club automatically after the draft')+'</span>'+
       '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap">'+
       (draftEligible?'<span style="display:inline-flex;align-items:baseline;gap:9px"><span class="eyebrow" style="color:var(--on-ink-dim)">Deadline in</span>'+
@@ -1283,7 +1286,8 @@ CG.ROUTES.home = function(){
   if (CG.modOn("deadlines")){
     var s0 = CG.SEASON||{};
     var mile = (CG.isBasic() ? [
-      [s0.registration_deadline, "Sign-up cutoff", "Register by now and you are in the draft. Later sign-ups still play — they’re placed on a club as depth after it."],
+      [s0.registration_deadline, "Sign-up cutoff", (CG.marketOn && CG.marketOn()) ? "Register by now and you are in the draft. Later sign-ups still play, from the league-wide training camp pool."
+        : "Register by now and you are in the draft. Later sign-ups still play: they’re placed on a club as depth after it."],
       [s0.draft_at, "Draft night", CG.fmt("draft_rounds")+" rounds in a snake order, live on the site — everyone registered by the cutoff is in the pool."],
       [s0.starts_at, "Puck drop", "The regular season begins — the Wednesday after the draft."],
       [s0.playoffs_start_at, "Playoffs begin", "Six of eight qualify: the division winners rest through round one, then the division finals, then the final."]

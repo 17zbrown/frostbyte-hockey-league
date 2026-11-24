@@ -93,6 +93,9 @@ CG.tradePlayerLine = function(pid){
 /* v2.38: the management-permissions queue is installed by part_live; in the prototype build every
    move is simply made (the wrapper resolves false), so these pages never depend on load order. */
 if (!CG.mgmtQueue) CG.mgmtQueue = function(){ return Promise.resolve(false); };
+/* v4.58: part_live installs the real CG.marketOn (the season's rules from the database); before it, and in the prototype
+   build, no season runs the Season 2 market */
+if (!CG.marketOn) CG.marketOn = function(){ return false; };
 /* v3.24 — ONE dashboard at a time.
    Commissioner: "Can you separate the different dashboards to make each one feel less messy? If I
    click on My Hub I shouldn't see the staff desk or team HQ. I should only see the dashboard I
@@ -147,7 +150,9 @@ CG.hubGroups = function(){
        until now there was NO page that listed one. The only way in was the notification link, so a
        seat that missed the bell never saw the request at all. */
     if (CG.LIVE_MODE && CG.can("roster.manage") && CG.hubClubRequests) club.push(["clubrequests","Player requests","flag"]);
-    if (CG.LIVE_MODE && CG.can("roster.manage")) club.push(["freeagents","Free agents","search"]);
+    /* v4.58: Season 2 has no free agency (fa_open is false in a market season); the same page key is the club's Waivers
+       page there, its claim door, which is the page the database gates claims on (mgmt_access 'freeagents') */
+    if (CG.LIVE_MODE && CG.can("roster.manage")) club.push(["freeagents", CG.marketOn() ? "Waivers" : "Free agents", "search"]);
     if (CG.LIVE_MODE && CG.can("roster.manage") && CG.hubDraftLive) club.push(["draft","Draft","play"]);
     /* v2.38: pages the Owner withheld from this seat are not listed (and not routable) */
     if (CG.mgmtAccess) club = club.filter(function(it){ return CG.mgmtAccess(it[0]) !== "hidden"; });
@@ -216,7 +221,8 @@ CG.hubNav = function(section){
     '<div class="hs-group">'+CG.HUB_DASH_META[dash][0]+'</div>'+render(g[dash]||[])+'</nav>';
 };
 CG.hubShell = function(section, inner){
-  var notice = "";
+  /* v4.58 (review, fail loud): every Team HQ page, the draft desk included, says when the season's rules did not load */
+  var notice = CG.seasonRulesNote ? CG.seasonRulesNote() : "";
   return '<section class="sec-tight"><div class="shell"><div class="hub-grid">'+CG.hubNav(section)+'<div>'+notice+inner+'</div></div></div></section>';
 };
 CG.unauthorized = function(need){
@@ -2185,6 +2191,9 @@ CG.squadSwapWhy = function(club, p){
 };
 function squadBtn(p){
   if (!p.spotId) return "";
+  /* v4.58: Season 2 has no club camps (season_rules camp_max 0; commissioner, 2026-11-02: "Rostered players can be sent down
+     to the league training camps only after being placed on waivers"), so an active player has nothing to be sent down to */
+  if (CG.marketOn() && p.squad!=="tc") return "";
   /* v3.79 locked a suspended player in place for their club here (Rule 7.2), the office excepted. v4.25 (commissioner,
      2026-10-21: "allow suspended players to be moved between training camp and the active roster, or traded but not
      waived"): the lock is gone, in guard_squad_move and here, so a suspended player gets the same buttons as anyone;
@@ -2226,6 +2235,24 @@ function squadBtn(p){
   /* the group (or camp) is full: a straight swap within the position group is the only legal move */
   return '<button class="btn btn-ghost btn-sm" data-squad-swap="'+p.spotId+'" title="'+esc(CG.squadSwapWhy(club, p)+' '+title)+'">Swap…</button>';
 }
+/* v4.58 (commissioner, 2026-11-23: "do 3 forwards, 2 defensemen, and 1 goalie"; no position maximums, no club camps): the
+   Team HQ Squads card in a market season shows each group against its minimum, the roster against its limit, and no camp.
+   The roster page passes its own counts and meter so the two cards read the same numbers. */
+CG.squadsCardMarket = function(proSq, tcSq, posN, grpN, meter){
+  var mn = CG.ROSTER_MIN || {};
+  var minMeter = function(label, nv, least){
+    return '<div><b class="num" style="font-size:22px;color:'+(nv<least?"var(--red)":"inherit")+'">'+nv+'</b>'+
+      '<span class="caption" style="display:block">'+label+' · at least '+least+'</span></div>';
+  };
+  return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Squads</h3>'+
+    '<span class="chip">'+proSq.length+' of '+CG.ROSTER_MAX+' on the roster</span></div><div class="card-b">'+
+    '<div style="display:flex;gap:22px;flex-wrap:wrap">'+minMeter("forwards ("+posN("C")+" C · "+posN("LW")+" LW · "+posN("RW")+" RW)",grpN("F"),mn.F||0)+
+    minMeter("defensemen ("+posN("LD")+" LD · "+posN("RD")+" RD)",grpN("D"),mn.D||0)+minMeter("goaltenders",grpN("G"),mn.G||0)+
+    meter("active roster",proSq.length,CG.ROSTER_MAX)+(tcSq.length?meter("training camp",tcSq.length,null):"")+'</div>'+
+    '<p class="caption" style="margin-top:12px">Rule S2.4: the roster is '+CG.ROSTER_MAX+' players, with at least '+esc(CG.rosterMinWords())+' and no position maximums; your Owner, GM and AGM hold spots inside it and count toward the minimums. '+
+    'A move your club makes that would take it below a minimum is refused. There are no club training camps: a player leaves your roster through waivers, any other club may claim them for 24 hours, and an unclaimed player joins the league-wide training camp pool (Rule S2.5). '+
+    'There is no weekly game limit (Rule S2.7). Trades stay open until the movement deadline (Rule 2.4).</p></div></div>';
+};
 CG.hubRoster = function(qs){
   var lg = CG.lg, club = CG.myClub(), t = CG.TEAM[club];
   var roster = lg.byTeam[club].slice().sort(function(a,b){
@@ -2430,7 +2457,7 @@ CG.hubRoster = function(qs){
       return '<div><b class="num" style="font-size:22px;color:'+(over?"var(--red)":"inherit")+'">'+nv+(cap!=null?' / '+cap:'')+'</b>'+
         '<span class="caption" style="display:block">'+label+'</span></div>';
     }
-    tail += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Squads</h3>'+
+    tail += (CG.marketOn() && CG.ROSTER_MIN) ? CG.squadsCardMarket(proSq, tcSq, posN, grpN, meter) : '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Squads</h3>'+
       '<span class="chip">'+proSq.length+' pro · '+tcSq.length+' in camp'+(loanSq.length?' · '+loanSq.length+' loaned':'')+(depthSq.length?' · '+depthSq.length+' depth':'')+'</span></div><div class="card-b">'+
       '<div style="display:flex;gap:22px;flex-wrap:wrap">'+meter("forwards ("+posN("C")+" C · "+posN("LW")+" LW · "+posN("RW")+" RW)",grpN("F"),CG.ROSTER_QUOTA.F)+
       meter("defensemen ("+posN("LD")+" LD · "+posN("RD")+" RD)",grpN("D"),CG.ROSTER_QUOTA.D)+
@@ -2495,17 +2522,22 @@ CG.hubRoster = function(qs){
       '<p class="caption" style="margin-top:12px">Rule 8.3: a player needs '+minGp+' regular-season games to be dressed in the playoffs. A player first placed after opening night (*) needs the same share of the games his club had left when he was placed, rounded to the nearest game, a fraction of .4 or less down: '+CG.roundFloorShare(minGp/2)+' with half the season left. The club has '+leftGp+' regular-season game'+(leftGp===1?'':'s')+' left; a player who can no longer reach his number within his weekly limit is marked. Spread the games so the players you want in the playoffs get there.</p></div></div>';
   }
   /* v2.7: the 30% playoff floor is abolished in the full format — the basic format's floor is the Road card above.
-     The card states the caps that DO exist. */
+     The card states the caps that DO exist. v4.58 (Rule S2.7): a season with no weekly limit (CG.weeklyCap is Infinity,
+     Season 2) shows one "no weekly limit" tile in place of the three weekly figures. */
+  var noWeekCap = !isFinite(CG.weeklyCap({ pos:"C" })) && !isFinite(CG.weeklyCap({ pos:"G" }));
   tail += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Game limits</h3>'+
     (CG.playoffMinGp() ? '<span class="chip">'+CG.playoffMinGp()+' games to be playoff-eligible</span>' : '<span class="chip chip-win">every rostered player is playoff-eligible</span>')+'</div><div class="card-b">'+
     '<div style="display:flex;gap:26px;flex-wrap:wrap">'+
-      '<div><b class="num" style="font-size:22px">'+CG.weeklyCap({ pos:"C" })+'</b><span class="caption" style="display:block">games a week — skaters</span></div>'+
-      '<div><b class="num" style="font-size:22px">'+CG.weeklyCap({ pos:"G" })+'</b><span class="caption" style="display:block">games a week — goaltenders</span></div>'+
-      '<div><b class="num" style="font-size:22px">'+CG.weeklyCap({ squad:"tc" })+'</b><span class="caption" style="display:block">games a week — training camp</span></div>'+
+      (noWeekCap
+        ? '<div><b class="num" style="font-size:22px">None</b><span class="caption" style="display:block">weekly game limit, rostered or from the pool</span></div>'
+        : '<div><b class="num" style="font-size:22px">'+CG.weeklyCap({ pos:"C" })+'</b><span class="caption" style="display:block">games a week, skaters</span></div>'+
+          '<div><b class="num" style="font-size:22px">'+CG.weeklyCap({ pos:"G" })+'</b><span class="caption" style="display:block">games a week, goaltenders</span></div>'+
+          '<div><b class="num" style="font-size:22px">'+CG.weeklyCap({ squad:"tc" })+'</b><span class="caption" style="display:block">games a week, training camp</span></div>')+
       '<div><b class="num" style="font-size:22px">'+CG.seriesCap({ pos:"C" })+'</b><span class="caption" style="display:block">of a playoff series'+(CG.seriesCap({ pos:"C" })===CG.seriesCap({ pos:"G" })?'':' — skaters')+'</span></div>'+
       (CG.playoffMinGp()?'<div><b class="num" style="font-size:22px">'+CG.playoffMinGp()+'</b><span class="caption" style="display:block">regular-season games to be playoff-eligible</span></div>':'')+'</div>'+
     '<p class="caption" style="margin-top:12px">'+
-    (CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)
+    (noWeekCap ? 'There is no weekly limit on the games a player may play this season (Rule S2.7). '
+      : CG.preseasonOnlyAhead && CG.preseasonOnlyAhead(club)
       ? 'No weekly cap applies in the pre-season (Rule 5.2) — these limits start with the regular season. '
       : 'Weekly caps are the limit, not a minimum (Rule 5.2). ')+
     (CG.seriesCap({ pos:"C" })===CG.seriesCap({ pos:"G" })
@@ -2653,6 +2685,29 @@ CG.AFTER._roster = function(){
   }); });
   $$("[data-waive]").forEach(function(b){ b.addEventListener("click", function(){
     var pid = this.getAttribute("data-waive"), p = CG.playerById(CG.lg, pid);
+    /* v4.58 (commissioner, 2026-11-02 and 2026-11-23): Season 2 waivers. A waived player is on waivers for the season's
+       waiver hours (24), the first valid claim by another club wins at once, the waiving club cannot claim them back, and
+       an unclaimed player joins the training camp pool, where the waiving club may bid on them. "Teams must not waive
+       inactive players but should report them to league staff": waive_player(p_profile, p_not_inactive) refuses a club's
+       waiver without the confirmation, so the confirm says what pressing it attests, and the call carries it (the Owner's
+       approval queue too, which v462's mgmt_request_move checks). The ruled confirm comes first. */
+    if (CG.LIVE_MODE && CG.marketOn()){
+      var wh = (CG.SEASON_RULES.mk && CG.SEASON_RULES.mk.waiver_hours) || 24;
+      CG.confirm("Place "+p.tag+" on waivers?", [
+        "Your club cannot get "+p.tag+" back until they clear waivers and become available in Saturday bidding.",
+        "They come off your roster now and their "+CG.fmtMoney(p.salary)+" cap hit clears. For the next "+wh+" hours any other club with an open roster spot and room under the salary cap may claim them at that salary, and the first valid claim wins at once; your club may not claim them. Unclaimed, they join the training camp pool (Rule S2.5).",
+        "A club may not waive a player for being inactive: report an inactive player to the league office instead. Pressing Waive confirms this player is not being waived for being inactive."],
+        "Waive", function(){
+        CG.mgmtQueue("waive_player", { p_profile:pid, p_not_inactive:true }, "place "+p.tag+" on waivers").then(function(q){ if (q) return;
+        CG.sb.rpc("waive_player",{ p_profile:pid, p_not_inactive:true }).then(function(r){
+          if (r.error){ CG.toast("Couldn’t waive: "+r.error.message,"err"); return; }
+          CG.toast(String(r.data||p.tag)+" placed on waivers: other clubs may claim them for "+wh+" hours, then they join the training camp pool","ok");
+          CG.reloadLeague();
+        });
+        });
+      });
+      return;
+    }
     if (CG.LIVE_MODE){
       var sx = CG.signedExtensionOf ? CG.signedExtensionOf(pid) : null;
       CG.confirm("Waive "+p.tag+"?",

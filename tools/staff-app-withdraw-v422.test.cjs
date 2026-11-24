@@ -51,10 +51,15 @@ A("the rehearsal shows each hole before and fixed after", /BEFORE: 1 waitlisted,
 console.log("\n4. The site");
 const live = R("src/live/part_live.js");
 const route = live.slice(live.indexOf("CG.ROUTES.staffapply = function(){"), live.indexOf("CG.AFTER.staffapply = function(){"));
-A("a Withdraw button for a pending or waitlisted staff application", /var staffWithdrawable = !!\(app && app\.id && \(app\.status==="pending" \|\| app\.status==="waitlisted"\)\);/.test(route) &&
+/* v4.58 re-pin (commissioner, 2026-11-23: "remove the waitlist entirely from the website and rulebook"): the site shows no
+   waitlist note, chip, button or toast, and an application is never treated as waitlisted, so the checks below pin the
+   page without them; withdraw_staff_application and guard_app_decision (the database) are unchanged until the waitlist
+   objects are dropped after the switch, and the SQL checks of this file stay as they were */
+const noCm = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "");
+A("a Withdraw button for a pending staff application (v4.58: no waitlisted branch)", /var staffWithdrawable = !!\(app && app\.id && app\.status==="pending"\);/.test(route) && !/waitlist/i.test(noCm(route)) &&
   /\(staffWithdrawable \? '<button class="btn btn-ghost btn-sm" id="sa-withdraw" style="color:var\(--red-ink\)">Withdraw application<\/button>' : ''\)/.test(route));
 A("a withdrawn or denied application offers Resubmit; withdrawn reads neutral", /\(app\.status==="withdrawn"\|\|app\.status==="denied"\)\?"Resubmit application":"Update application"/.test(route) &&
-  /app\.status==="waitlisted"\?"chip-chrome":app\.status==="withdrawn"\?"":app\.status==="approved"\?"chip-win":"chip-loss"/.test(route) && /You withdrew your application\.<\/b> You may file it again at any time below; the reviewers then vote on it afresh\./.test(route));
+  /app\.status==="pending"\?"chip-warn":app\.status==="withdrawn"\?"":app\.status==="approved"\?"chip-win":"chip-loss"/.test(route) && /You withdrew your application\.<\/b> You may file it again at any time below; the reviewers then vote on it afresh\./.test(route));
 A("the status note and form repaint in place; the chat is not wired twice", /<div id="sa-status">'\+staffNote\+statusNote\+'<\/div>'\+chat\+/.test(route) && /'<div id="sa-form"><div class="card">/.test(route) &&
   /\["sa-status","sa-form"\]\.forEach/.test(live) && /CG\.wireStaffForm = function\(\)\{/.test(live) && !/CG\.wireStaffForm = function\(\)\{[^}]*wireAppChat/.test(live));
 const wd = live.slice(live.indexOf("CG.withdrawStaffApp = function(){"), live.indexOf("/* ================================================================\n   PARITY: DRAFT ROOM"));
@@ -62,20 +67,22 @@ A("the RPC is the only write, success is its confirmed status, and no page reset
   /if \(r\.error \|\| !r\.data \|\| !r\.data\.ok \|\| r\.data\.status !== "withdrawn"\)\{/.test(wd) && /CG\.repaintStaffParts\(\);/.test(wd) && !/CG\.router\(\)/.test(wd) &&
   !/from\("staff_applications"\)\.update\(/.test(live));
 A("typed answers and department picks survive the repaint (one toggle look)", /typed\[el\.id\] = el\.value;/.test(live) && /CG\.setStaffDept\(b, picked\.indexOf/.test(live) && /var set = CG\.setStaffDept;/.test(live));
-A("saving a waitlisted application says it stays on the waitlist", /"Application updated\. You are still on the waitlist\."/.test(live) && /"Application filed again\. The reviewers will vote on it afresh\."/.test(live));
+A("saving says a refile is voted afresh, and no toast mentions a waitlist (v4.58)", !/You are still on the waitlist/.test(live) && /"Application filed again\. The reviewers will vote on it afresh\."/.test(live));
 A("the dead staff decision client and its role-sync entry are gone", !/CG\.decideStaffApp = function/.test(live) && !/rpc\("decide_staff_application"/.test(live) && !/override_application_decision decide_staff_application/.test(live));
 A("the office vote counts only ballots since filed_at, as the database does", /var f = a && a\.filed_at \? Date\.parse\(a\.filed_at\) : 0;\s+return CG\.appBallotsFor\(type, a\.id\)\.filter\(function\(v\)\{ return !f \|\| Date\.parse\(v\.updated_at\) >= f; \}\);/.test(live) && /earlier vote'\+\(earlier===1\?"":"s"\)\+', cast before it was last filed/.test(live));
-A("a waitlisted application shows no vote or override buttons, and says why", /if \(!decided && !waitlisted && isReviewer\)\{/.test(live) && /if \(!decided && !waitlisted && isCommish\)\{/.test(live) &&
-  /"On the waitlist, so the reviewers’ votes do not decide it\. Nobody is admitted automatically:/.test(live) && /a\.status==="waitlisted" \? '<span class="chip chip-chrome">Waitlisted<\/span>'/.test(live));
+A("the office's vote and override buttons wait only on the decision; no waitlist state, chip or Waitlist button (v4.58)", /if \(!decided && isReviewer\)\{/.test(live) && /if \(!decided && isCommish\)\{/.test(live) &&
+  !/On the waitlist|data-app-waitlist|rpc\("waitlist_application"|>Waitlisted<|var waitlisted/.test(noCm(live)));
 A("the hub chip links to the page, with no dash", /'" href="#\/staffapply" style="cursor:pointer">Join the staff: '\+esc\(sa\.status\)\+'<\/a>'/.test(live) && !/Join the staff — /.test(live));
 
 console.log("\n5. Rule 2.6 and the changelog");
 global.window = global; global.CG = {}; eval(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook, sec = [].concat(...rb.chapters.map((c) => c.sections || [])).find((x) => x.id === "2.6") || {}, p3 = (sec.paragraphs || [])[3] || "";
+/* v4.58 re-pin (commissioner, 2026-11-23: "remove the waitlist entirely from the website and rulebook"): Rule 2.6 no longer
+   carries the waitlist, so the rulebook checks here pin the text without it; the database and site checks are unchanged */
 A("Rule 2.6 [4]: staff withdraw at any time, refile at any time, an approved one through the office",
-  /An applicant may withdraw a pending or waitlisted staff application at any time and may file a staff application again at any time; an approved staff application is not withdrawn, and a staff member who wishes to leave the staff asks the league office\./.test(p3));
+  /An applicant may withdraw a pending staff application at any time and may file a staff application again at any time; an approved staff application is not withdrawn, and a staff member who wishes to leave the staff asks the league office\./.test(p3));
 A("...a refiled application is voted afresh", /An application filed again after it was withdrawn or denied goes before the reviewers afresh: votes cast before it was filed again are kept on the record but do not count\./.test(p3));
-A("...and it follows the owner withdraw sentence", /given up through the league office\. An applicant may withdraw a pending or waitlisted staff application/.test(p3));
+A("...and it follows the owner withdraw sentence", /given up through the league office\. An applicant may withdraw a pending staff application/.test(p3));
 A("the rendered Rule 2.6 has no automatic fill", !/fills it automatically|automatic appointment/.test(JSON.stringify(sec)));
 const e = rb.changelog.find((c) => c.version === "4.22") || {};
 A("the changelog has its 4.22 entry, right before 4.21", e.version === "4.22" && (rb.changelog[rb.changelog.indexOf(e) + 1] || {}).version === "4.21");
@@ -102,8 +109,9 @@ A("the daily casework nudge counts only fresh votes too", /select=id,profile_id,
   /application_ballots\?select=app_type,application_id,voter_id,updated_at/.test(sched) && /if \(filedAt\[key\] && Date\.parse\(b\.updated_at\) < filedAt\[key\]\) continue;/.test(sched));
 A("an approved staff application reads green and offers Apply again; saving an existing one repaints in place", /app\.status==="approved"\?"chip-win":"chip-loss"/.test(live) &&
   /app\.status==="approved"\?"Apply again"/.test(live) && /if \(prevSt\) CG\.repaintStaffParts\(\); else CG\.router\(\);/.test(live));
-A("a waitlisted application with no reviewers promises no override", /\} else if \(!decided && !waitlisted\)\{/.test(live));
-A("Rule 2.6 says what owner admission does, and its full text matches the basic text (nothing shelved)", /an owner applicant who cannot then be seated under Rule 2\.7 is not seated as Owner until it is\./.test(p3) &&
+A("an undecided application with no reviewers names the override (v4.58: no waitlisted exception left)", /\} else if \(!decided\)\{/.test(live));
+/* v4.58: admission from the waitlist left Rule 2.6 with the waitlist; the full text must still match the basic text */
+A("Rule 2.6 carries no waitlist admission (v4.58), and its full text matches the basic text (nothing shelved)", !/waitlist/.test(p3) &&
   (sec.full || [])[3] === p3);
 
 console.log("\n" + (n - fail) + "/" + n + " passed");

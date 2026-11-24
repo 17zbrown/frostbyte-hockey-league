@@ -67,20 +67,24 @@ const rb = CG.CONTENT.rulebook;
 eval(R("src/live/part5b_public2.js").match(/CG\.rulebookForFormat = function\(rb, fmt\)\{[\s\S]*?\n\};/)[0]);
 const book = JSON.stringify(CG.rulebookForFormat(rb, "basic").chapters);
 const sec = (id) => (rb.chapters.flatMap((c) => c.sections || []).find((s) => s.id === id) || { paragraphs: [] }).paragraphs.join(" ");
-A("S2.3: nine rounds, the GM and the AGM before the draft", /^The draft is nine \(9\) rounds\. An Owner may nominate their General Manager and their Assistant General Manager before the draft, so that the club's three front-office seats and its nine \(9\) selections make up its twelve \(12\) players \(Rule S2\.4\)\.$/.test(sec("S2.3")), sec("S2.3"));
-A("S2.4: twelve for the whole of Season 2, the minimums unchanged", /^A club's roster limit is twelve \(12\) players for the whole of Season 2, from the draft through the end of the playoffs\./.test(sec("S2.4")) &&
-  /at least five \(5\) forwards, three \(3\) defensemen and one \(1\) goaltender/.test(sec("S2.4")));
+/* v4.58 re-pin (commissioner rulings, 2026-11-23: "10 round draft", the AGM nominated only after the draft from the club's own
+   roster, minimums of 3 F / 2 D / 1 G): S2.3, S2.4 and 2.1 below now pin the newer rulings in place of v4.52's nine rounds,
+   GM and AGM before the draft and 5/3/1. The rest of v4.52 (twelve all season, a floor of six) stands. */
+A("S2.3: ten rounds, the Owner and GM before the draft, the AGM after it (v4.58, superseding v4.52's nine)", /^The draft is ten \(10\) rounds\. Every club must have its Owner and its General Manager seated before the draft begins: .*so that the Owner, the General Manager and the club's ten \(10\) selections make up its twelve \(12\) players \(Rule S2\.4\)\. An Owner may nominate their Assistant General Manager only after the draft is complete/.test(sec("S2.3")), sec("S2.3"));
+A("S2.4: twelve for the whole of Season 2, the minimums 3/2/1 (v4.58)", /^A club's roster limit is twelve \(12\) players for the whole of Season 2, from the draft through the end of the playoffs\./.test(sec("S2.4")) &&
+  /at least three \(3\) forwards, two \(2\) defensemen and one \(1\) goaltender/.test(sec("S2.4")));
 A("S2.7: six games, prorated", /the playoff eligibility floor of Rule 8\.3, six \(6\) regular-season games, prorated for a player first placed after opening night/.test(sec("S2.7")));
 A("8.3: six, why, and the rounding worked on six", /\(the playoff eligibility floor\) is six \(6\), the number of league games at a position after which a player's rating is no longer held toward the middle \(Rule 6\.1\)/.test(sec("8.3")) &&
   /forty-five \(45\) of the club's fifty-four \(54\) games left needs five \(5\)/.test(sec("8.3")) && /For Season 1 the commissioner set the floor at fourteen \(14\) games in place of that figure/.test(sec("8.3")));
 A("...and 6 x 45 / 54 is 5", 6 * 45 / 54 === 5);
 A("Rule 6.1 says what the six stands on", /A rating is held toward the middle until a player's sixth league game at that position/.test(sec("6.1")));
-A("2.1 names Season 2's twelve", /For Season 2 the commissioner has set the roster at twelve \(12\) players for the whole season \(Rule S2\.4\)\./.test(sec("2.1")));
+A("2.1 names Season 2's twelve (and, since v4.58, its minimums)", /For Season 2 the commissioner has set the roster at twelve \(12\) players for the whole season, with minimums of three \(3\) forwards, two \(2\) defensemen and one \(1\) goaltender, no maximum in any position group and no club training camps \(Rules S2\.4 and S2\.5\)\./.test(sec("2.1")));
 A("2.8, 0.1, 0.8 and 10.1 say six", /floor of six \(6\) regular-season games that Rule 8\.3 sets/.test(sec("2.8")) && /is not a setting: it is six \(6\) regular-season games/.test(sec("0.1")) &&
   /at least six \(6\) regular-season games, the playoff eligibility floor \(Rule 8\.3\)/.test(sec("0.8")) && /Rule 8\.3 fixes it at six \(6\) regular-season games/.test(sec("10.1")));
-A("the rendered book has none of the old wording", book.indexOf("ten (10) rounds") < 0 && book.indexOf("fifteen (15) after it") < 0 && book.indexOf("may be selected only after the draft concludes") < 0 &&
+/* v4.58: "ten (10) rounds" is the newer ruling's wording again, so the old-wording check looks for v4.52's nine instead */
+A("the rendered book has none of the old wording", book.indexOf("The draft is nine (9) rounds") < 0 && book.indexOf("fifteen (15) after it") < 0 && book.indexOf("may be selected only after the draft concludes") < 0 &&
   book.indexOf("thirty percent (30%) of a club's regular-season schedule") < 0 && book.indexOf("sixteen (16) games while Season 2") < 0 && book.indexOf("sets from the season's length") < 0);
-A("the rendered book carries the new wording", book.indexOf("twelve (12) players for the whole of Season 2") > -1 && book.indexOf("The draft is nine (9) rounds") > -1);
+A("the rendered book carries the new wording", book.indexOf("twelve (12) players for the whole of Season 2") > -1 && book.indexOf("The draft is ten (10) rounds") > -1);
 
 console.log("\n# the changelog");
 {

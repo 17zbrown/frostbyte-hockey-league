@@ -45,9 +45,11 @@ A("...every club decided again; none decided before the close", /Every club's ow
 /* v4.52 (commissioner, 2026-11-17): "Keep the roster size at 12 for the full season", "The draft should be 9 rounds since
    owners can select their GMs and AGMs pre-draft" and a playoff floor of six games. This pinned 10 rounds, 12 then 15 and
    sixteen games (v4.01's 30%) until then; it pins the new rulings and that the old wording is gone */
-A("...the format: 9 rounds with the GM and AGM before the draft, 12 all season, 5/3/1, league-wide camp, Saturday bidding, no weekly limits, a floor of six (v4.52)", /The draft is nine \(9\) rounds\. An Owner may nominate their General Manager and their Assistant General Manager before the draft/.test(t) && /twelve \(12\) players for the whole of Season 2/.test(t) && /five \(5\) forwards, three \(3\) defensemen and one \(1\) goaltender/.test(t)
+/* v4.58 re-pin (commissioner rulings, 2026-11-23): the draft is ten rounds with the Owner and GM seated before it and the AGM
+   named after it, and the minimums are 3 F / 2 D / 1 G; they supersede v4.52's nine rounds and 5/3/1 pinned here */
+A("...the format: 10 rounds with the Owner and GM before the draft, 12 all season, 3/2/1, league-wide camp, Saturday bidding, no weekly limits, a floor of six (v4.52, v4.58)", /The draft is ten \(10\) rounds\. Every club must have its Owner and its General Manager seated before the draft begins/.test(t) && /twelve \(12\) players for the whole of Season 2/.test(t) && /three \(3\) forwards, two \(2\) defensemen and one \(1\) goaltender/.test(t)
   && /one league-wide training camp pool/.test(t) && /every Saturday at 9:00 PM Eastern and runs for one hour/.test(t) && /There is no weekly limit/.test(t) && /the playoff eligibility floor of Rule 8\.3, six \(6\) regular-season games, prorated/.test(t)
-  && !/ten \(10\) rounds|fifteen \(15\) after it|only after the draft concludes|sixteen \(16\) games while Season 2/.test(t));
+  && !/nine \(9\) rounds|fifteen \(15\) after it|only after the draft concludes|sixteen \(16\) games while Season 2/.test(t));
 const cl = rb.changelog.find((c) => c.version === "3.95");
 A("changelog 3.95 says what changed", !!cl && /Chapter S2/.test(cl.summary));
 A("no em dash in what v3.95 wrote", !/—/.test(t) && !/—/.test(JSON.stringify(cl)) && !/—/.test(sql.replace(/to be draft-eligible — join later/g, "")));

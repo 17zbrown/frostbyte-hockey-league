@@ -117,6 +117,27 @@ CG.FORMAT_RULES = {
 CG.FORMAT_NAME = { basic:"Basic format", full:"Full format" };
 CG.seasonFormat = function(s){ s = s || CG.SEASON || {}; return s.format === "full" ? "full" : "basic"; };
 CG.isBasic = function(s){ return CG.seasonFormat(s) === "basic"; };
+/* v4.58 (commissioner, 2026-11-23, decision D2: the current site carries "the Season 2 text the database enforces" until the
+   switch): the season's own rules come from the database, public.season_rules(season) for the season on screen, read on
+   every full league load (anon may execute it) into CG.SEASON_RULES, so the site keeps no second copy of the Season 2
+   rules. CG.marketOn() mirrors public.market_on(): true for Season 2 and later basic seasons once the draft-night guards
+   record is applied. Until then, and for Season 1 or its archive, it is false and every page takes its old path. */
+CG.SEASON_RULES = null;
+CG.marketOn = function(){ return !!(CG.SEASON_RULES && CG.SEASON_RULES.market === true); };
+CG._rulesLoads = {};
+/* v4.58 (review, fail loud): what Team HQ, the draft desk and the draft room say when the read below fails */
+CG.SEASON_RULES_FAIL = "The season’s rules did not load, so limits shown may be wrong. Refresh the page.";
+CG.seasonRulesLoad = function(id, fresh){
+  if (!id || !CG._UUID_RE || !CG._UUID_RE.test(id) || !CG.sb) return Promise.resolve(null);
+  if (fresh || !CG._rulesLoads[id]) CG._rulesLoads[id] = CG.sb.rpc("season_rules", { p_season:id }).then(function(r){
+    if (r.error) throw r.error;
+    if (!r.data || typeof r.data !== "object") throw new Error("season_rules returned no rules for season "+id);
+    return r.data;
+  });
+  return CG._rulesLoads[id];
+};
+/* v4.58: the draft is complete for the season on screen (draft_state 'complete'); the Season 2 AGM seat waits for it */
+CG.draftComplete = function(){ var st = CG.lg && CG.lg.draftState; return !!(st && String(st.status) === "complete"); };
 CG.fmt = function(key, s){
   /* Rule 2.8 (v2.64): the round count is a commissioner-published season setting — the format's
      figure is only the default. Mirrors public.season_rules(). */
@@ -131,11 +152,16 @@ CG.fmt = function(key, s){
   if (key === "roster_max"){ var sr = s || CG.SEASON; if (sr && sr.roster_max) return sr.roster_max; }
   return CG.FORMAT_RULES[CG.seasonFormat(s)][key];
 };
-/* Rule 5.2: the weekly appearance cap for one player — mirrors public.weekly_cap() */
+/* Rule 5.2: the weekly appearance cap for one player, mirroring public.weekly_cap().
+   v4.58 (Rule S2.7): a market season's own rules (season_rules, the season on screen) carry its limits, and null there is
+   no limit: Season 2 has none, so every reader gets Infinity, which the lineup checks, the week chips and the Game limits
+   card read as "no limit". Every other season keeps the format's figures, unchanged. */
 CG.weeklyCap = function(o){ o = o || {}; var r = CG.FORMAT_RULES[CG.seasonFormat(o.season)];
   if (o.stage === "preseason" && r.preseason) return Infinity;
-  if (o.squad === "tc") return r.cap_camp;
-  return o.pos === "G" ? r.cap_goalie : r.cap_skater; };
+  var k = o.squad === "tc" ? "cap_camp" : o.pos === "G" ? "cap_goalie" : "cap_skater";
+  var sr = (CG.marketOn && CG.marketOn() && (!o.season || o.season.id === CG.SEASON_RULES._season)) ? CG.SEASON_RULES : null;
+  if (sr && Object.prototype.hasOwnProperty.call(sr, k)) return sr[k] == null ? Infinity : sr[k];
+  return r[k]; };
 /* Rule 8.3: the cap on one player's appearances in one playoff series — the format's own figure where it
    sets one, otherwise the weekly cap serves (mirrors public.series_cap()) */
 CG.seriesCap = function(o){ o = o || {}; var r = CG.FORMAT_RULES[CG.seasonFormat(o.season)];
@@ -381,16 +407,18 @@ CG.weekLoadChip = function(load, size){
   /* v3.93: the number is games PLAYED. Sheets filed for games still to come are shown beside it (+N) and named in
      the tooltip, but they count only once played; playing past the limit forfeits that game (Rule 5.2). */
   var split = load.filed ? "+" + load.filed : null;
+  /* v4.58: no weekly limit (Season 2, or a game exempt from the limits) shows the count alone, never "of Infinity" */
+  var capped = isFinite(load.cap);
   var tip = (load.full ? "At the weekly limit (Rule 5.2). " : "")
-    + load.used + " of " + load.cap + " games played this week."
-    + (load.filed ? " " + load.filed + " more on a filed sheet, counted only once played. Playing him past the limit forfeits the game." : "")
+    + load.used + (capped ? " of " + load.cap : "") + " games played this week" + (capped ? "." : ", with no weekly limit.")
+    + (load.filed ? " " + load.filed + " more on a filed sheet, counted only once played." + (capped ? " Playing them past the limit forfeits the game." : "") : "")
     + (load.sat ? " " + load.sat + " game" + (load.sat === 1 ? "" : "s") + " he was dressed for but did not play do not count." : "")
     + (load.forfeit ? " " + load.forfeit + " forfeit" + (load.forfeit === 1 ? "" : "s") + " nobody took the ice for do not count." : "")
     + " Click for the week game by game.";
   return '<button type="button" class="chip wk-chip '+cls+'" style="font-size:'+(size==="xs"?9:10)+'px;cursor:pointer" '+
     'data-weekledger="'+esc(load.pid)+'" data-wl-club="'+esc(load.club)+'" data-wl-game="'+esc(load.gameId)+'" '+
     'title="'+esc(tip)+'" aria-label="'+esc((load.tag||"This player")+": "+tip)+'">'+
-    load.used+'/'+load.cap+(split?'<span class="wk-split">'+split+'</span>':'')+'</button>';
+    load.used+(capped?'/'+load.cap:'')+(split?'<span class="wk-split">'+split+'</span>':'')+'</button>';
 };
 /* the week, game by game, with a reason on every line. This is the answer to "why does it say six
    when he has played three", and it is one click from the number that raised the question. */
@@ -414,7 +442,7 @@ CG.weekLedgerModal = function(pid, club, gameId){
       '<span class="wk-why caption">'+esc(m.why)+'</span></div>';
   };
   CG.modal((p && p.tag ? p.tag : "This player") + " · week " + CG.limitWeekOf(game),
-    '<div class="wk-sum"><b class="num">'+load.used+' of '+load.cap+'</b>'+
+    '<div class="wk-sum"><b class="num">'+load.used+(isFinite(load.cap)?' of '+load.cap:'')+'</b>'+
       '<span class="caption">games played'+(load.full?", at the limit":"")+'</span>'+
       '<span class="wk-sum-split caption">'+load.filed+' more on a filed sheet, not counted until played'+
       (load.exempt?' · '+load.exempt+' exempt from the limits':'')+
@@ -444,6 +472,7 @@ CG.OUTSIDE_SHAPE_ORIGINS = { preseason_random:1, latecomer_random:1 };
 CG.spotOutsideShape = function(p){ return !!p && !p.mgmt && !!CG.OUTSIDE_SHAPE_ORIGINS[p.origin]; };
 /* the shape and camp size for the CURRENT season — rewritten from the format on every league load */
 CG.ROSTER_QUOTA = Object.assign({}, CG.FORMAT_RULES.basic.quota);
+CG.ROSTER_MIN = null;   /* v4.58: the position-group minimums of a market season (season_rules quota_min); null otherwise */
 CG.CAMP_MAX = CG.FORMAT_RULES.basic.camp_max;
 CG.GROUP_NAME = { F:"Forwards", D:"Defensemen", G:"Goaltenders" };
 
@@ -1193,6 +1222,10 @@ CG.buildLiveLeague = async function(opts){
      flight is served by the build it queues, never by one that pairs one season with the other's box scores */
   var _viewUsed = CG._viewSeasonId || null;
   if (!sb) throw new Error("Supabase client unavailable");
+  /* v4.58: a full load reads the season's rules afresh, started beside the boot reads for the season the hint names so it
+     costs no extra round trip when the hint is right; a delta rebuild reuses the last answer (CG.seasonRulesLoad) */
+  var _fullBuild = !((opts.delta || opts.roster || opts.slots) && CG._bootCache);
+  if (_fullBuild && _hintUsed) CG.seasonRulesLoad(_hintUsed, true).catch(function(){ /* read again and reported below */ });
   var q = ((opts.delta || opts.roster) && CG._bootCache) ? await CG._deltaBoot(CG._bootCache, opts.delta, opts.roster, _hintUsed)
         : (opts.slots && CG._bootCache) ? await CG._deltaSlots(CG._bootCache, opts, _hintUsed)
         : await Promise.all(CG._bootLoaders(_hintUsed).map(function(f){ return f(); }));
@@ -1322,8 +1355,40 @@ CG.buildLiveLeague = async function(opts){
   }
   CG.CAP = (season && season.salary_cap) ? season.salary_cap : CG.fmt("salary_cap", season);
   CG.ROSTER_MAX = (season && season.roster_max) || CG.fmt("roster_max", season);   /* Rule 2.1: 15 = 7 F / 5 D / 3 G (basic, v3.64) or 17 = 9 F / 6 D / 2 G (full) */
+  /* v4.58: the season's rules from the database (CG.marketOn). A failed read is reported and leaves the format's figures in
+     place, which is Season 1's shape; the database still refuses anything Season 2 does not allow. */
+  var _rulesPrev = CG.SEASON_RULES;
+  CG.SEASON_RULES = null;
+  if (season && season.id){
+    try { CG.SEASON_RULES = await CG.seasonRulesLoad(season.id, _fullBuild && season.id !== _hintUsed); }
+    catch(e){
+      delete CG._rulesLoads[season.id];
+      /* a delta rebuild keeps the last answer for the same season rather than dropping to Season 1's figures */
+      if (!_fullBuild && _rulesPrev && _rulesPrev._season === season.id) CG.SEASON_RULES = _rulesPrev;
+      CG.LIVE.partial.season_rules = String((e && e.message) || e);
+      console.warn("season_rules failed to load: Season 2 roster rules fall back to the format's figures", e);
+    }
+    if (CG.SEASON_RULES) CG.SEASON_RULES._season = season.id;
+  }
   CG.ROSTER_QUOTA = Object.assign({}, CG.fmt("quota", season));
   CG.CAMP_MAX = CG.fmt("camp_max", season);
+  CG.ROSTER_MIN = null;
+  /* v4.58 (commissioner, 2026-11-23: "do 3 forwards, 2 defensemen, and 1 goalie"): in a market season the database's
+     quota is the roster limit in every group (no position maximums), quota_min the minimums and camp_max 0 (no club
+     camps). Every other season keeps the format's figures above, unchanged. */
+  if (CG.marketOn()){
+    var _sr = CG.SEASON_RULES;
+    if (!(_sr.quota && _sr.quota_min && _sr.camp_max != null)){
+      CG.LIVE.partial.season_rules = "a market season without quota, quota_min or camp_max";
+      console.error("season_rules: a market season without quota, quota_min or camp_max", _sr);
+    }
+    if (_sr.quota) CG.ROSTER_QUOTA = Object.assign({}, _sr.quota);
+    CG.ROSTER_MIN = _sr.quota_min || null;
+    if (_sr.camp_max != null) CG.CAMP_MAX = _sr.camp_max;
+  }
+  /* v4.58 (review, fail loud): the console alone told nobody. One toast per load that failed, and Team HQ, the draft desk
+     and the draft room carry the red note (CG.seasonRulesNote) until a load reads the rules */
+  if (CG.LIVE.partial.season_rules && CG.toast) CG.toast(CG.SEASON_RULES_FAIL, "err");
   var seasonId = season ? season.id : null;
 
   /* ---- players from roster_spots (+ profile + contract) ---- */
@@ -2915,10 +2980,11 @@ CG._wrapHubDashboard = function(){
                automatically" the instant the deadline arrives. */
             (!s.registration_deadline || (reg.created_at && Date.parse(reg.created_at) <= Date.parse(s.registration_deadline)))
             ? (CG.isBasic(s) ? 'You registered in time — you’re in the draft pool.' : 'You registered in time — you’ll be randomly assigned for the pre-season, then enter the draft.')
+            : CG.marketOn() ? 'You registered after the sign-up cutoff, so you’re not in the draft: you join the league-wide training camp pool (Rule S2.5).'
             : 'You registered after the sign-up deadline, so you’ll be placed on a club automatically — watch your notifications.')+'</p>'+
           (!p.ea_id?'<div class="note red" style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("flag",15)+'<span style="flex:1">Your <b>EA ID</b> is missing — stats can’t link to you without it.</span><button class="btn btn-ghost btn-sm" id="hubEaBtn">Add EA ID</button></div>':"")
         : (s.registration_open
-            ? '<p class="small" style="color:var(--steel)">Registration is open'+(s.registration_deadline?' — register by <b>'+CG.fmtFull(Date.parse(s.registration_deadline))+'</b> to be draft-eligible. Join later and you still play; you’re placed on a club automatically.':'.')+'</p>'+
+            ? '<p class="small" style="color:var(--steel)">Registration is open'+(s.registration_deadline?': register by <b>'+CG.fmtFull(Date.parse(s.registration_deadline))+'</b> to be draft-eligible. '+(CG.marketOn() ? 'Join later and you still play, from the league-wide training camp pool (Rule S2.5).' : 'Join later and you still play; you’re placed on a club automatically.'):'.')+'</p>'+
               '<a class="btn btn-chrome" style="margin-top:12px" href="#/register">Register to play</a>'
             : '<p class="small" style="color:var(--steel)">Registration isn’t open right now — watch the announcements channel.</p>'))+
       '</div></div>';
@@ -2928,7 +2994,7 @@ CG._wrapHubDashboard = function(){
     var oa = CG.auth.ownerApp, sa = CG.auth.staffApp;
     h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Applications</h3></div><div class="card-b" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">'+
       (oa?'<a class="chip '+(oa.status==="approved"?"chip-win":oa.status==="denied"?"chip-loss":oa.status==="withdrawn"?"":"chip-warn")+'" href="#/owner" style="cursor:pointer">Own a club: '+esc(oa.status)+'</a>':'<a class="chip" href="#/owner" style="cursor:pointer">Apply to own a club</a>')+
-      (sa?'<a class="chip '+(sa.status==="approved"?"chip-win":sa.status==="denied"?"chip-loss":sa.status==="withdrawn"?"":sa.status==="waitlisted"?"chip-chrome":"chip-warn")+'" href="#/staffapply" style="cursor:pointer">Join the staff: '+esc(sa.status)+'</a>':'<a class="chip" href="#/staffapply" style="cursor:pointer">Apply to join the staff</a>')+
+      (sa?'<a class="chip '+(sa.status==="approved"?"chip-win":sa.status==="denied"?"chip-loss":sa.status==="withdrawn"?"":"chip-warn")+'" href="#/staffapply" style="cursor:pointer">Join the staff: '+esc(sa.status)+'</a>':'<a class="chip" href="#/staffapply" style="cursor:pointer">Apply to join the staff</a>')+
       '<span class="caption" style="flex-basis:100%">Owner applications are reviewed in the off-season window; staff applications any time.</span></div></div>';
     return h;
   };
@@ -5468,15 +5534,19 @@ CG.ROUTES.owner = function(){
   var p = CG.auth.profile, a = CG.auth.ownerApp||{};
   /* Rule 2.7 — the league office and a club's front office aren't held at once, except that staff
      whose ONLY department is Media may run a club (Media rules on nothing). */
-  var r = CG.role(), lockedFromOwning = (r==="commish" || (r==="staff" && !CG.isMediaOnlyStaff()));
+  /* v4.58 (Rule 2.7, commissioner ruling 2026-11-23): a member of league staff, a commissioner included, may not submit an
+     owner application until they step down, and no department is exempt any more; the database refuses the submission
+     (owner_applications guard), so the page shows the refusal before the form is filled in */
+  var r = CG.role(), lockedFromOwning = (r==="commish" || r==="staff");
   /* the owner-application window (seasons.owner_app_deadline) is now enforced in the database;
      mirror it here so a member sees the closed state instead of hitting the wall on submit. An
      applicant who already has one in can still withdraw, but not edit, after the close. */
   var s = (CG.regSeason && CG.regSeason()) || CG.SEASON || {};   /* owner applications are for the season taking sign-ups */
   var deadlineClosed = !!(s.owner_app_deadline && Date.parse(s.owner_app_deadline) <= CG.now());
-  /* v4.21 (commissioner, 2026-10-18): "add a withdraw application button". The applicant's own pending or waitlisted
-     application, before or after the close (withdraw_owner_application); an approved one is given up through the office. */
-  var ownWithdrawable = !!(CG.auth.ownerApp && a.id && (a.status === "pending" || a.status === "waitlisted"));
+  /* v4.21 (commissioner, 2026-10-18): "add a withdraw application button". The applicant's own pending application,
+     before or after the close (withdraw_owner_application); an approved one is given up through the office. v4.58: a
+     waitlisted one is no longer offered (the waitlist left the website, commissioner 2026-11-23). */
+  var ownWithdrawable = !!(CG.auth.ownerApp && a.id && a.status === "pending");
   var closedNote = (deadlineClosed && !lockedFromOwning)
     ? '<div class="note red" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("flag",15)+
       '<span style="flex:1">Owner applications closed on <b>'+CG.fmtFull(Date.parse(s.owner_app_deadline))+'</b>. '+
@@ -5487,14 +5557,13 @@ CG.ROUTES.owner = function(){
     : "";
   var conflictNote = lockedFromOwning
     ? '<div class="note" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("shield",15)+
+      /* v4.58 (Rule 2.7, ruling 2026-11-23): a commissioner, like a staffer, applies only after stepping down; the database
+         refuses the application itself (guard_app_role_conflict) */
       '<span style="flex:1">'+(r==="commish"
-        ? 'Commissioners can’t own or manage a club — it keeps roster and management decisions impartial. You’re welcome to play as a rostered member; ownership applications are disabled for your role.'
-        : 'Staff can’t own or manage a club unless <b>Media</b> is the only department they hold (Rule 2.7) — it keeps roster and management decisions impartial. You’re welcome to play as a rostered member.')+
+        ? 'A commissioner may not submit an owner application until they step down as commissioner (Rule 2.7). It keeps roster and management decisions impartial. You’re welcome to play as a rostered member.'
+        : 'A member of league staff may not submit an owner application until they step down from the staff (Rule 2.7), and no staff department is exempt. It keeps roster and management decisions impartial. You’re welcome to play as a rostered member.')+
       '</span></div>'
-    : (r==="staff"
-      ? '<div class="note grn" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("shield",15)+
-        '<span style="flex:1">You’re on <b>Media</b> only, which is the one staff department that may also run a club (Rule 2.7). Take on a second department and you’d have to give the club seat up.</span></div>'
-      : "");
+    : "";
   /* v4.19: an approval for a new club waits on the commissioner's go-ahead, and the applicant is told so */
   var heldMine = CG.auth.ownerApp ? CG.ownerAppHeldClub(a) : null;
   /* v4.20 (commissioner, 2026-10-18): "allow applicants to edit their application one time." The database stamps
@@ -5603,7 +5672,9 @@ CG.withdrawOwnerApp = function(){
 CG.submitOwnerApp = async function(){
   if(!CG.sb||!CG.auth.user){ CG.toast("Sign in first","err"); return; }
   var r0=CG.role();
-  if(r0==="commish"||r0==="staff"){ CG.toast((r0==="commish"?"Commissioners":"Staff")+" can’t own or manage a club — you can still play as a member","err"); return; }
+  /* v4.58 (Rule 2.7): the same sentences guard_app_role_conflict refuses with, so the page and the database agree */
+  if(r0==="commish"){ CG.toast("Commissioners cannot apply to own a club (Rule 2.7). Step down as commissioner first, then apply.","err"); return; }
+  if(r0==="staff"){ CG.toast("Members of the league staff cannot apply to own a club (Rule 2.7). Leave the staff first, then apply.","err"); return; }
   var _s=(CG.regSeason&&CG.regSeason())||CG.SEASON||{};
   if(_s.owner_app_deadline && Date.parse(_s.owner_app_deadline) <= CG.now()){ CG.toast("Owner applications closed on "+CG.fmtFull(Date.parse(_s.owner_app_deadline)),"err"); return; }
   /* v3.99: only a signed-up player can apply (the database refuses it too) */
@@ -5703,14 +5774,16 @@ CG.ROUTES.staffapply = function(){
      already staff, so neither needs to apply; and anyone holding a club seat is blocked until they
      step down. Everyone still sees the exact form members see. */
   /* a club seat holder is no longer locked out — they may apply, for Media alone (Rule 2.7) */
-  var lockedFromStaff = (r==="staff" || r==="commish");
+  /* v4.58 (Rule 2.7, commissioner ruling 2026-11-23): a club's Owner, GM or AGM may not submit a staff application until they
+     step down from the seat, for any department; the database refuses the submission (staff_applications guard) */
+  var lockedFromStaff = (r==="staff" || r==="commish" || r==="mgmt");
   var mgmtMediaOnly = (r==="mgmt");
   var lockMsg = r==="commish"
     ? 'As a commissioner you already have full staff access — there’s nothing to apply for. The Staff Desk is in your hub.'
     : r==="staff"
     ? 'You’re already on the league staff. This is the form exactly as members see it; there’s nothing to submit.'
     : r==="mgmt"
-    ? 'You currently own or manage a club. <b>Media</b> is the only staff department that can be held alongside a club seat (Rule 2.7) — apply for Media on its own, or step down from your Owner, GM, or AGM seat to apply for anything else.'
+    ? 'You currently hold a club’s Owner, GM or AGM seat. A seat holder may not submit a staff application until they step down from the seat, whatever the department (Rule 2.7). This is the form exactly as members see it; there’s nothing to submit.'
     : '';
   var staffNote = (lockedFromStaff || mgmtMediaOnly)
     ? '<div class="note'+(mgmtMediaOnly?"":"")+'" style="margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+CG.ic("shield",15)+
@@ -5720,10 +5793,11 @@ CG.ROUTES.staffapply = function(){
   var app = CG.auth.staffApp;
   /* v4.22 (commissioner, 2026-10-19): "add a withdraw button for staff applications" and "Waitlist applications should
      not fill automatically"; a refiled application is voted afresh ("Fresh vote"). */
-  var staffWithdrawable = !!(app && app.id && (app.status==="pending" || app.status==="waitlisted"));
+  /* v4.58 (commissioner, 2026-11-23: "remove the waitlist entirely from the website and rulebook"): no waitlist note,
+     chip or withdraw branch; only a pending application is withdrawn */
+  var staffWithdrawable = !!(app && app.id && app.status==="pending");
   var statusNote = app
     ? (app.status==="pending" ? '<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Application received.</b> The league office reviews staff applications, and you’ll get a notification either way. You can update or withdraw yours below.</div>'
-      : app.status==="waitlisted" ? '<div class="note chr" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re on the staff waitlist.</b> There is no seat for you right now. Nobody is admitted automatically: when a seat opens, the league office’s reviewers admit from the waitlist, and you’ll be notified if it’s you. Updating your application keeps your place; withdrawing it gives the place up.</div>'
       : app.status==="denied" ? '<div class="note red" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your last application wasn’t approved.</b> You’re welcome to update it and reapply; the reviewers vote on it afresh.</div>'
       : app.status==="withdrawn" ? '<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You withdrew your application.</b> You may file it again at any time below; the reviewers then vote on it afresh.</div>'
       : (app.status==="approved" && !lockedFromStaff) ? '<div class="note grn" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Your last application was approved.</b> If you have since left the staff, you may apply again below; the reviewers vote on it afresh.</div>' : "")
@@ -5733,7 +5807,7 @@ CG.ROUTES.staffapply = function(){
   var chat = app && app.id ? CG.appChatSection("staff", app.id, {office:false, status:app.status, mine:true}) : "";
   return head + '<div class="shell" style="max-width:640px;padding-bottom:48px"><div id="sa-status">'+staffNote+statusNote+'</div>'+chat+
     '<div id="sa-form"><div class="card"><div class="card-h"><h3>'+(app?"Update application":"Application")+'</h3>'+
-      (app?'<span class="chip '+(app.status==="pending"?"chip-warn":app.status==="waitlisted"?"chip-chrome":app.status==="withdrawn"?"":app.status==="approved"?"chip-win":"chip-loss")+'" style="text-transform:capitalize">'+esc(app.status)+'</span>':'<span class="chip chip-chrome">Open</span>')+'</div><div class="card-b">'+
+      (app?'<span class="chip '+(app.status==="pending"?"chip-warn":app.status==="withdrawn"?"":app.status==="approved"?"chip-win":"chip-loss")+'" style="text-transform:capitalize">'+esc(app.status)+'</span>':'<span class="chip chip-chrome">Open</span>')+'</div><div class="card-b">'+
     '<div class="fld"><span>Departments * <span class="caption">(pick up to 2)</span></span><p class="caption" style="margin:2px 0 8px">Name the two departments you’d work — the league office assigns duties from here. Two keeps an application honest about where you’ll actually spend your time.</p>'+
       '<div class="stack" style="gap:8px">'+CG.STAFF_DEPARTMENTS.map(function(d){
         var on = pickedDepts.indexOf(d[0])>=0;
@@ -5795,8 +5869,8 @@ CG.wireStaffForm = function(){
         if (clash && o.getAttribute("aria-pressed")==="true"){ set(o, false); cleared = true; }
       });
       if (cleared) CG.toast(mine==="media"
-        ? "Media is held on its own — the other departments were cleared (Rule 2.7)"
-        : "Media can’t be held alongside another department — Media was cleared (Rule 2.7)", "ok");
+        ? "Media is held on its own, so the other departments were cleared"
+        : "Media can’t be held alongside another department, so Media was cleared", "ok");
     }
   }); });
 };
@@ -5810,6 +5884,11 @@ CG.submitStaffApp = async function(){
   var r0=CG.role();
   if(r0==="commish"){ CG.toast("As a commissioner you already have staff access — no application needed","err"); return; }
   if(r0==="staff"){ CG.toast("You’re already on the league staff","err"); return; }
+  /* Rule 2.7: a club seat holder may join the staff on Media and nothing else. The DB refuses the
+     approval either way; catching it here means they aren't left waiting on a vote that can't pass.
+     v4.58 (Rule 2.7, ruling 2026-11-23) supersedes the Media exception: a club seat holder may not submit a staff
+     application for any department, and the database refuses the submission itself */
+  if(r0==="mgmt"){ CG.toast("Owners, General Managers and Assistant General Managers cannot apply to join the league staff (Rule 2.7). Step down from your club seat first, then apply.","err"); return; }
   function v(id){ var el=document.getElementById(id); return el?(el.value||"").trim():""; }
   var pitch=v("sa-pitch");
   var depts=[].slice.call(document.querySelectorAll('[data-sa-dept][aria-pressed="true"]')).map(function(b){ return b.getAttribute("data-sa-dept"); });
@@ -5817,11 +5896,6 @@ CG.submitStaffApp = async function(){
   /* the toggles already cap this; re-checked here so a stale page can't post a wider set (the DB
      trigger staff_app_department_cap is the real gate — this just gives a readable error) */
   if(depts.length>CG.STAFF_DEPT_MAX){ CG.toast("Pick at most "+CG.STAFF_DEPT_MAX+" departments","err"); return; }
-  /* Rule 2.7 — a club seat holder may join the staff on Media and nothing else. The DB refuses the
-     approval either way; catching it here means they aren't left waiting on a vote that can't pass. */
-  if(r0==="mgmt" && !depts.every(function(d){ return String(d).toLowerCase()==="media"; })){
-    CG.toast("You own or manage a club, so Media is the only department you can apply for (Rule 2.7)","err"); return;
-  }
   if(!pitch){ CG.toast("Tell the league office why you — the pitch is the application","err"); return; }
   var payload={ profile_id: CG.auth.user.id, departments:depts, timezone:v("sa-tz")||null, availability:v("sa-avail")||null,
     experience:v("sa-exp")||null, pitch:pitch, status:"pending", updated_at:new Date().toISOString() };
@@ -5829,9 +5903,9 @@ CG.submitStaffApp = async function(){
   var r=await CG.sb.from("staff_applications").upsert(payload,{onConflict:"profile_id"}).select().maybeSingle();
   if(r.error){ CG.toast("Couldn’t submit: "+r.error.message,"err"); return; }
   CG.auth.staffApp=r.data||payload; /* keep the row (with its id) so the office chat appears at once */
-  /* v4.22: saving a waitlisted application keeps it on the waitlist (guard_app_decision); a refile is voted afresh */
-  CG.toast(CG.auth.staffApp.status==="waitlisted" ? "Application updated. You are still on the waitlist."
-    : (prevSt==="withdrawn"||prevSt==="denied"||prevSt==="approved") ? "Application filed again. The reviewers will vote on it afresh."
+  /* v4.22: a refile is voted afresh. (A saved waitlisted application stayed waitlisted, guard_app_decision; the waitlist
+     left the website in v4.58.) */
+  CG.toast((prevSt==="withdrawn"||prevSt==="denied"||prevSt==="approved") ? "Application filed again. The reviewers will vote on it afresh."
     : prevSt ? "Application updated." : "Application submitted. The league office will review it.","ok");
   if (prevSt) CG.repaintStaffParts(); else CG.router();   /* v4.22: a first submit builds the office chat, so it renders the page */
 };
@@ -5860,8 +5934,7 @@ CG.withdrawStaffApp = function(){
   var a = CG.auth.staffApp;
   if(!CG.sb||!CG.auth.user||!a||!a.id){ CG.toast("Sign in first","err"); return; }
   CG.confirm("Withdraw your staff application?",
-    a.status==="waitlisted" ? "The reviewers stop considering it and you give up your place on the waitlist. You may file it again at any time, and it is voted on afresh."
-                            : "The reviewers stop voting on it. You may file it again at any time, and it is voted on afresh.",
+    "The reviewers stop voting on it. You may file it again at any time, and it is voted on afresh.",
     "Withdraw", async function(){
       var btn = document.getElementById("sa-withdraw"); if(btn) btn.disabled = true;
       var r = await CG.sb.rpc("withdraw_staff_application", { p_app: a.id });
@@ -5871,8 +5944,8 @@ CG.withdrawStaffApp = function(){
         CG.toast(/WITHDRAW:/.test(em) ? em.replace(/^.*WITHDRAW:\s*/,"") : "Couldn’t withdraw: "+em, "err");
         return;
       }
-      CG.auth.staffApp = Object.assign({}, a, { status:"withdrawn", waitlisted_at:null, updated_at:new Date().toISOString() });
-      ((CG.lg && CG.lg._staffApps) || []).forEach(function(x){ if (x.id === a.id){ x.status = "withdrawn"; x.waitlisted_at = null; } });
+      CG.auth.staffApp = Object.assign({}, a, { status:"withdrawn", updated_at:new Date().toISOString() });
+      ((CG.lg && CG.lg._staffApps) || []).forEach(function(x){ if (x.id === a.id){ x.status = "withdrawn"; } });
       CG.toast("Application withdrawn. You may file it again at any time.", "ok");
       CG.repaintStaffParts();
     });
@@ -5892,6 +5965,9 @@ CG.ROUTES.draft = function(){
   var head = CG.pageHead("The draft room","Draft board", spectate
     ? "Watch the CGHL entry draft live — every pick lands here the moment it's made, and in #draft-hub on the Discord."
     : "Clubs draft their own picks on the clock; the commissioner runs the room — pause, skip, or reverse. The board updates live for everyone.");
+  /* v4.58 (review, fail loud): the room's limits come from the season's rules, so a failed read is said here too */
+  var _rulesNote = CG.seasonRulesNote();
+  if (_rulesNote) head += '<div class="shell">'+_rulesNote+'</div>';
   var picks = lg.draftPicks||[];
   if (spectate && !picks.length && !CG._spectatorDraftTried){
     /* first visit before the spectator data has loaded — AFTER.draft fetches it and re-renders */
@@ -5945,7 +6021,7 @@ CG.ROUTES.draft = function(){
     clockBox = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Start the draft</h3><span class="chip">Season '+maxSn+' · '+total+' picks</span></div><div class="card-b" style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap">'+
       '<label class="fld" style="max-width:170px;margin-bottom:0"><span>Seconds per pick</span><input type="number" id="draftSecs" value="120" min="15" max="600"></label>'+
       '<button class="btn btn-chrome" data-draft-start>'+CG.ic("play",14)+'Start live draft</button>'+
-      '<span class="caption" style="flex:1;min-width:200px">Puts the first club on the clock — the order was locked when the board was generated and holds every round. Clubs draft their own picks; you run the clock and can pause, skip, or reverse.</span></div></div>';
+      '<span class="caption" style="flex:1;min-width:200px">Puts the first club on the clock. The order was locked when the board was generated; in a snake draft every even round runs it in reverse. Clubs draft their own picks; you run the clock and can pause, skip, or reverse.</span></div></div>';
   } else {
     /* spectators (and staff) have no club — don't talk to them about "your club's picks" */
     clockBox = '<div class="note chr" style="margin-bottom:18px">The draft hasn’t started yet. When the commissioner opens it, '+
@@ -6108,7 +6184,7 @@ CG.draftStart = function(){
         '<button class="btn btn-chrome" data-close>OK</button>');
       return;
     }
-    CG.confirm("Start the live draft?","This puts the first club on the clock — the order was locked when the board was generated and holds every round. Clubs draft their own picks; you run the clock.","Start draft", function(){
+    CG.confirm("Start the live draft?","This puts the first club on the clock. The order was locked when the board was generated; in a snake draft every even round runs it in reverse. Clubs draft their own picks; you run the clock.","Start draft", function(){
       CG.sb.rpc("start_draft",{ p_season_number:sn, p_pick_seconds:secs }).then(function(r){
         if(r.error) CG.toast("Couldn’t start: "+r.error.message,"err"); else { CG.toast("The draft is live","ok"); CG.refreshDraft(); }
       });
@@ -6545,12 +6621,51 @@ CG.draftFits = function(club, pos){
   var q = CG.ROSTER_QUOTA || CG.fmt("quota") || {}, max = CG.ROSTER_MAX || CG.fmt("roster_max");
   var counted = (CG.lg.byTeam[club]||[]).filter(function(p){ return (p.status||"active")==="active" && (p.squad||"pro")!=="tc" && ["preseason_random","latecomer_random"].indexOf(p.origin) < 0; });
   if (counted.length >= max) return "roster full · "+max;
+  if (CG.ROSTER_MIN) return CG.draftMinFit(club, pos, counted, max);
   var grp = CG.posGroup(pos||"C"), n = counted.filter(function(p){ return CG.posGroup(p.pos)===grp; }).length;
   if (q[grp] != null && n >= q[grp]) return "no room · "+q[grp]+" "+(grp==="G"?"G":grp==="D"?"D":"F");
   return null;
 };
 /* The club's roster room by position group (Rule 2.1), management included — what the draft desk
    and the room show so a manager knows what still fits before the clock is his. */
+/* v4.58 (commissioner, 2026-11-23: "do 3 forwards, 2 defensemen, and 1 goalie", no position maximums, "10 round draft"):
+   a market season's pick, mirroring the database's draft_fits() in Season 2, which is what refuses the pick. After the
+   pick the club must still be able to reach every minimum (CG.ROSTER_MIN, season_rules quota_min) with the spots and the
+   picks it has left; the Owner and GM spots count. A pick in a group that is still short always fits. The picks left are
+   the club's unused picks (a skipped pick is still owed a player after the draft) less the players already placed for them
+   (origin postdraft_random) less this one. Main-session decision D-SUPPLY (2026-11-24): a group counts as short only
+   while an undrafted, eligible player of it is left in the pool, so a group the pool has run out of never blocks a pick
+   in another group and the draft cannot deadlock; the club stays short and fills the spot after the draft by a waiver
+   claim or in bidding. The answer is the shortfall in words, or null. */
+CG.draftMinFit = function(club, pos, counted, max){
+  var mn = CG.ROSTER_MIN, grp = CG.posGroup(pos||"C"), GR = ["F","D","G"];
+  var pool = (CG.lg.draftPool||[]).filter(function(p){ return CG.eligOf(p.profileId).ok; });
+  var supply = {}; pool.forEach(function(p){ supply[CG.posGroup(p.pos)] = true; });
+  var have = { F:0, D:0, G:0 }; counted.forEach(function(p){ have[CG.posGroup(p.pos)]++; });
+  var gapBefore = 0, gap = { F:0, D:0, G:0 }, short = 0;
+  GR.forEach(function(g){
+    var n = have[g] + (g === grp ? 1 : 0), need = Math.max(0, (mn[g]||0) - n);
+    gapBefore += Math.max(0, (mn[g]||0) - have[g]);
+    if (need && supply[g]){ gap[g] = need; short += need; }
+  });
+  var gapAfter = GR.reduce(function(s, g){ return s + Math.max(0, (mn[g]||0) - have[g] - (g === grp ? 1 : 0)); }, 0);
+  if (gapAfter < gapBefore) return null;
+  var open = max - counted.length - 1;
+  var unused = CG.draftPicksCur().filter(function(p){ return p.ownerCode === club && !p.used; }).length;
+  /* shortcut: counts the fills still on the roster, where the database counts every fill from roster history
+     (_unused_pick_fills, so a fill later waived still counts); the two differ only after the draft, when no pick dialog is
+     open. Revisit if this is ever asked after the draft. The pool here is the site's draft pool (eligible by CG.eligOf);
+     the database's _undrafted_left also leaves out suspended and banned players, and it is the gate. */
+  var placed = counted.filter(function(p){ return p.origin === "postdraft_random"; }).length;
+  var left = Math.min(open, Math.max(0, unused - placed - 1));
+  if (short <= left) return null;
+  return "needs " + GR.filter(function(g){ return gap[g]; }).map(function(g){ return gap[g]+" "+g; }).join(", ") + " first";
+};
+/* v4.58: the minimums in words for captions, from CG.ROSTER_MIN (never a second list) */
+CG.rosterMinWords = function(){
+  var mn = CG.ROSTER_MIN || {}, w = function(n, one, many){ return n+" "+(n === 1 ? one : many); };
+  return w(mn.F||0, "forward", "forwards")+", "+w(mn.D||0, "defenseman", "defensemen")+" and "+w(mn.G||0, "goaltender", "goaltenders");
+};
 CG.rosterRoomFor = function(club){
   var q = CG.ROSTER_QUOTA || CG.fmt("quota") || {}, max = CG.ROSTER_MAX || CG.fmt("roster_max");
   var counted = (CG.lg.byTeam[club]||[]).filter(function(p){ return (p.status||"active")==="active" && (p.squad||"pro")!=="tc" && ["preseason_random","latecomer_random"].indexOf(p.origin) < 0; });
@@ -6559,12 +6674,24 @@ CG.rosterRoomFor = function(club){
   var mgmt = counted.filter(function(p){ return p.mgmt; }).length;
   var camp = (CG.lg.byTeam[club]||[]).filter(function(p){ return (p.status||"active")==="active" && CG.isCamp(p); }).length;
   var open = Math.max(0, max - counted.length);
-  return { max:max, used:counted.length, open:open, mgmt:mgmt, camp:camp, groups:["F","D","G"].map(function(g){
-    var cap = q[g]||0; return { g:g, used:by[g], mgmt:byMgmt[g], cap:cap, room:Math.min(open, Math.max(0, cap-by[g])) }; }) };
+  var mn = CG.ROSTER_MIN;   /* v4.58: a market season shows what each group still needs, not a cap */
+  return { max:max, used:counted.length, open:open, mgmt:mgmt, camp:camp, min:!!mn, groups:["F","D","G"].map(function(g){
+    var cap = q[g]||0; return { g:g, used:by[g], mgmt:byMgmt[g], cap:cap, room:Math.min(open, Math.max(0, cap-by[g])),
+      atLeast: mn ? (mn[g]||0) : null, need: mn ? Math.max(0, (mn[g]||0) - by[g]) : null }; }) };
 };
 CG.rosterRoomCard = function(club, opts){
   opts = opts || {};
   var r = CG.rosterRoomFor(club), word = { F:"forwards", D:"defensemen", G:"goaltenders" };
+  if (r.min){
+    var mTiles = r.groups.map(function(x){
+      return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:22px">'+x.used+'</b>'+
+        '<span>'+word[x.g]+' · at least '+x.atLeast+(x.mgmt?' · '+x.mgmt+' management':'')+' · '+(x.need ? x.need+' still needed' : 'minimum met')+'</span></div>';
+    }).join("");
+    return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+(opts.title||"Roster spots remaining")+'</h3>'+
+      '<span class="chip'+(r.open===0?' chip-loss':'')+'">'+r.open+' of '+r.max+' open · '+r.used+' filled, '+r.mgmt+' by management</span></div>'+
+      '<div class="card-b"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">'+mTiles+'</div>'+
+      '<p class="caption" style="margin-top:10px">There are no position maximums. Your Owner and General Manager hold roster spots in their own position groups and count toward the minimums. After each pick your club must still be able to reach at least '+CG.rosterMinWords()+' with the spots and picks it has left (Rule S2.4); the pool greys out a player who would make that impossible.</p></div></div>';
+  }
   var tiles = r.groups.map(function(x){
     var full = x.room === 0;
     return '<div class="kpi" style="cursor:default'+(full?';opacity:.6':'')+'"><b class="num" style="font-size:22px">'+x.room+'</b>'+
@@ -6596,14 +6723,16 @@ CG.draftPickModalLive = function(pickId, forCode){
       return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line-soft);flex-wrap:wrap">'+
         '<span style="min-width:0"><b style="font-size:14px">'+esc(p.tag)+'</b><small class="caption" style="display:block">'+esc(p.pos||"?")+' · EA ID '+(p.eaId?'<span class="mono">'+esc(p.eaId)+'</span>':'<span style="color:var(--amber-ink)">not set</span>')+'</small></span>'+
         CG.eligChipD(p.profileId)+
-        (noFit?'<span class="chip" style="font-size:9px" title="Rule 2.1: the active roster is capped as a whole and per position group, management included">'+esc(noFit)+'</span>':"")+
+        (noFit?'<span class="chip" style="font-size:9px" title="'+(CG.ROSTER_MIN ? 'Rule S2.4: after this pick the club must still be able to reach at least '+esc(CG.rosterMinWords())+' with the spots and picks it has left' : 'Rule 2.1: the active roster is capped as a whole and per position group, management included')+'">'+esc(noFit)+'</span>':"")+
         '<button class="btn btn-chrome btn-sm" style="margin-left:auto" data-modpick="'+p.profileId+'" data-name="'+esc(p.tag)+'"'+(noFit?' disabled':'')+'>Draft</button></div>';
     }).join("") + pager;
   }
   CG.modal("Draft a player"+(forCode?" — "+esc(forCode):""),
     '<label class="fld"><span>Search the pool</span><input id="modPickQ" placeholder="Start typing a gamertag…"></label>'+
     '<div id="modPickList" style="max-height:320px;overflow:auto">'+rows("")+'</div>'+
-    '<p class="caption" style="margin-top:10px">'+(CG.isBasic()
+    '<p class="caption" style="margin-top:10px">'+(CG.ROSTER_MIN
+      ? 'No position maximums: after each pick your club must still be able to reach at least '+CG.rosterMinWords()+' within its '+(CG.ROSTER_MAX||CG.fmt("roster_max"))+', your Owner and General Manager included (Rule S2.4). A player who would make that impossible is greyed out.'
+      : CG.isBasic()
       ? 'Draft to the shape: at most '+(CG.ROSTER_QUOTA||CG.fmt("quota")).F+' forwards, '+(CG.ROSTER_QUOTA||CG.fmt("quota")).D+' defensemen and '+(CG.ROSTER_QUOTA||CG.fmt("quota")).G+' goaltenders, '+(CG.ROSTER_MAX||CG.fmt("roster_max"))+' in all with your management (Rule 2.1). A player who would not fit is greyed out.'
       : 'A randomly assigned player needs three pre-season appearances to be draft-eligible; returning players are exempt (Rule 2.8).')+'</p>',
     '<button class="btn btn-ghost" data-close>Cancel</button>');
@@ -6666,13 +6795,14 @@ CG.hubDraftLive = function(){
     ? 'Fewer names than picks: later in the night you will be picking from the pool by hand on the clock. Rank more players, and remember an expired clock is <b>skipped</b>.'
     : cov.level==="thin"
     ? 'Enough for your picks with nothing to spare — other clubs draft your targets too. A few extra names is cheap insurance.'
+    : CG.marketOn() ? 'On your clock, one click drafts the best player still available <b>from this list</b>. Nobody drafts for you: a clock that runs out is skipped, and once the draft is over the club receives a random player who keeps it able to reach the roster minimums, if one can be found then (Rule S2.3).'
     : 'On your clock, one click drafts the best player still available <b>from this list</b>. Nobody drafts for you: a clock that runs out is skipped and a random player is placed on the club after the draft.';
   covNote += covIneli;
   var draftAt = CG.SEASON && CG.SEASON.draft_at ? Date.parse(CG.SEASON.draft_at) : null;
 
   var h = '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · the war room</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Draft desk</h1>'+
-    '<p class="lede" style="margin-top:8px">Build your board before the night so your pick is one click on the clock. Nobody drafts for you: a clock that runs out is <b>skipped</b>, and a club with a pick it never used receives one random player after the draft (Rule 2.8).</p></div>';
+    '<p class="lede" style="margin-top:8px">Build your board before the night so your pick is one click on the clock. Nobody drafts for you: a clock that runs out is <b>skipped</b>, and '+(CG.marketOn() ? 'a club with a pick it never used receives one random player once the draft is over, at $750,000, from the players who keep it able to reach the roster minimums; a pick that cannot be filled then lapses, and the club fills the spot by a waiver claim or in Saturday bidding (Rule S2.3).' : 'a club with a pick it never used receives one random player after the draft (Rule 2.8).')+'</p></div>';
   h += '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Board coverage</h3>'+covChip+'</div>'+
     '<div class="card-b"><p class="caption">'+covNote+'</p></div></div>';
   /* v2.66: how much roster room the club has left, by position group — the shape a pick must fit */
@@ -6811,11 +6941,14 @@ CG.hubDraftLive = function(){
   h += '<div class="card"><div class="card-h"><h3>How draft night runs</h3></div><div class="card-b"><div class="grid g2" style="gap:14px">'+
     [["The clock","Each club gets "+((st&&st.pick_seconds)||120)+" seconds on the clock. Miss it and the pick is skipped: nobody drafts for you, and the pick goes empty (Rule 2.8)."],
      ["Your board is private","Only your club’s management sees it. It updates live: drafted players get struck through the moment they’re taken."],
-     ["A skipped pick goes empty","It can’t be made up later in the draft. Once the draft is over, you receive one player at random for each pick you missed, at the league minimum, from the players still without a club."],
+     ["A skipped pick goes empty", CG.marketOn()
+       ? "It can’t be made up later in the draft. Once the draft is over, you receive one player at random for each pick you missed, at $750,000, from the players not selected who keep you able to reach the roster minimums. A pick that cannot be filled then lapses: you fill the spot by a waiver claim or in Saturday bidding (Rule S2.3)."
+       : "It can’t be made up later in the draft. Once the draft is over, you receive one player at random for each pick you missed, at the league minimum, from the players still without a club."],
      /* v4.24 (commissioner, 2026-10-20): "Yes say 'the day before the draft.'" The basic format has no pre-season,
         so its card no longer names an appearance test (Rule 2.8: registration by the cutoff is the sole test). */
      ["Eligibility", CG.fmt("preseason")
        ? "Registered by 11:59 PM ET the day before the draft and, for randomly assigned first-years, at least 3 pre-season appearances (Rule 2.8). Returning players are exempt; anyone short of three still plays, placed on a club under Rule 2.2."
+       : CG.marketOn() ? "Registered by 11:59 PM ET the day before the draft. That is the only test (Rule 2.8): anyone who registers later still plays, from the league-wide training camp pool (Rule S2.5)."
        : "Registered by 11:59 PM ET the day before the draft. That is the only test (Rule 2.8): anyone who registers later still plays, placed on a club as depth after the draft."]
     ].map(function(kv){ return '<div><b style="font-family:var(--f-disp);display:block;margin-bottom:4px">'+kv[0]+'</b><p class="small" style="color:var(--steel);line-height:1.6">'+kv[1]+'</p></div>'; }).join("")+
     '</div></div></div>';
@@ -7017,7 +7150,7 @@ CG.admDraftLive = function(){
       (running&&cur?'<div class="card-b" style="border-top:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:var(--chrome-tint)">'+
         '<b style="font-family:var(--f-disp)">'+esc(CG.TEAM[cur.ownerCode]?CG.TEAM[cur.ownerCode].name:cur.ownerCode)+' are on the clock</b><span class="caption">R'+cur.round+' · #'+cur.overall+' overall</span>'+
         '<button class="btn btn-chrome btn-sm" style="margin-left:auto" data-openpick="'+cur.id+'">Pick on their behalf</button></div>':"")+
-      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">If a clock expires the pick is skipped and goes empty: nothing is drafted for the club and no one, the office included, makes it later (Rule 2.8). The draft concludes itself when no pick is left on the clock. Ten minutes later each club receives one random player per pick it missed, then everyone still without a club is placed as depth. A club without cap room for the league minimum is never drawn.</span></div></div>';
+      '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">If a clock expires the pick is skipped and goes empty: nothing is drafted for the club and no one, the office included, makes it later (Rule 2.8). The draft concludes itself when no pick is left on the clock. '+(CG.marketOn() ? 'Ten minutes later each club receives one random player per pick it missed, chosen from the players who keep it able to reach the roster minimums; a pick that cannot be filled then lapses and the commissioners are told. Nobody else is placed: the players not selected join the training camp pool (Rule S2.3).' : 'Ten minutes later each club receives one random player per pick it missed, then everyone still without a club is placed as depth. A club without cap room for the league minimum is never drawn.')+'</span></div></div>';
   }
 
   /* FULL BOARD */
@@ -7906,8 +8039,12 @@ CG.poolState = function(pid){
   /* v2.35: a sign-up filed after the deadline can never reach the draft however many games he
      plays — "Needs pre-season games" would be a door that never opens. Say what actually happens. */
   var _dl = sR.signup_deadline_at || sR.registration_deadline || null;
+  /* v4.58: Season 2 places nobody as depth; a late sign-up and an undrafted player are in the training camp pool (Rule S2.5).
+     The keys stay, so every reader of the state keeps working; only the words change. */
+  var _mkPool = !!(CG.marketOn && CG.marketOn());
   if (!draftDone && _dl && reg.created_at && Date.parse(reg.created_at) > Date.parse(_dl))
-    return { key:"late", label:"Late sign-up — placed after the draft", chip:"chip-warn" };
+    return _mkPool ? { key:"late", label:"Late sign-up: training camp pool", chip:"chip-warn" }
+      : { key:"late", label:"Late sign-up — placed after the draft", chip:"chip-warn" };
   if (!draftDone && _preOpen && !CG.isDraftEligible(pid))
     return { key:"needs_preseason", label:"Needs pre-season games", chip:"chip-warn" };
   if (!draftDone) return { key:"signup", label:"Signed up", chip:"chip" };
@@ -7926,7 +8063,8 @@ CG.poolState = function(pid){
      Checked before isReturning on purpose: being waived is a fact about right now and outranks
      whether he happens to have been drafted before. */
   if (reg.waived_at) return { key:"free_agent", label:"Waived", chip:"chip-warn" };
-  if (lg.isReturning && lg.isReturning(pid)) return { key:"free_agent", label:"Free agent", chip:"chip-warn" };
+  if (lg.isReturning && lg.isReturning(pid)) return { key:"free_agent", label:_mkPool ? "Training camp pool" : "Free agent", chip:"chip-warn" };
+  if (_mkPool) return { key:"undrafted_fa", label:"Training camp pool", chip:"chip-warn" };
   return { key:"undrafted_fa", label:"Awaiting placement", chip:"chip-warn" };   /* v2.33: placed automatically ten minutes after the draft (Rule 2.8) */
 };
 /* how many off-seasons of service a player must accrue before his rights stop being held.
@@ -7998,7 +8136,8 @@ CG.admPreseason = function(qs){
     (anyPhase?'<div class="card-b"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px">'+
       phases.map(function(p){ return '<div class="kpi" style="cursor:default"><b class="num" style="font-size:14px">'+(p[1]?CG.fmtFull(Date.parse(p[1])):"—")+'</b><span>'+p[0]+'</span></div>'; }).join("")+'</div>'+
       '<p class="caption" style="margin-top:12px">'+(basicS
-        ? 'The sign-up cutoff is a draft-eligibility cutoff, not a hard close — registration stays open and late sign-ups are placed on clubs as depth until the movement deadline, after which new arrivals wait for the next season. Everyone registered by the cutoff is in the draft (Rule 2.8). Ten minutes after the draft concludes, everyone still without a club is placed on one at the league minimum — no club chooses. There is no free-agency week: puck drop is the Wednesday after the draft, and waived players can be signed from the moment the draft concludes until the movement deadline (Rule 2.2).'
+        ? CG.marketOn() ? 'The sign-up cutoff is a draft-eligibility cutoff, not a hard close: registration stays open, and late sign-ups join the league-wide training camp pool; nobody is placed on a club as depth. Everyone registered by the cutoff is in the draft (Rule 2.8). Once the draft concludes, each club receives one random player per pick it missed, from the players who keep it able to reach the roster minimums; a pick that cannot be filled then lapses. There is no free agency: a waived player may be claimed for 24 hours and then joins the training camp pool (Rules S2.3 and S2.5).'
+        : 'The sign-up cutoff is a draft-eligibility cutoff, not a hard close: registration stays open and late sign-ups are placed on clubs as depth until the movement deadline, after which new arrivals wait for the next season. Everyone registered by the cutoff is in the draft (Rule 2.8). Ten minutes after the draft concludes, everyone still without a club is placed on one at the league minimum; no club chooses. There is no free-agency week: puck drop is the Wednesday after the draft, and waived players can be signed from the moment the draft concludes until the movement deadline (Rule 2.2).'
         : 'The sign-up deadline is a draft-eligibility cutoff, not a hard close — registration stays open and late sign-ups are randomly assigned to clubs until the movement deadline, after which new arrivals wait for the next season. When the final pre-season game goes final, randomly assigned players are released back to the draft pool automatically. A randomly assigned player needs three pre-season appearances to be draft-eligible; returning players are exempt (Rule 2.8). Ten minutes after the draft concludes, everyone still without a club is placed on one at the league minimum — no club chooses. Free agency runs a full week for players whose contracts have ended; puck drop waits for it to close.')+'</p></div>'
     :'<div class="card-b"><p class="caption">No dates yet. Open <a href="#/admin/seasons" style="font-weight:700;border-bottom:2px solid var(--chrome)">Seasons</a>, set “Off-season begins”, and hit Auto-space — the dark weeks, sign-up deadline, pre-season, draft, free agency, puck drop, and playoffs all space themselves from that one date.</p></div>')+'</div>';
 
@@ -8140,10 +8279,10 @@ CG.admPreseason = function(qs){
           }).join("") : '<span class="caption">No players yet.</span>')+
         '</div></details>';
     }).join("")+'</div>'+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Every club and its current roster. Remove waives a player to the free-agent pool; a manager keeps their Owner/GM/AGM seat — those are set under Teams.</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">Every club and its current roster. '+(CG.marketOn() ? 'Remove takes a player off the roster and into the training camp pool; a club it leaves below a roster minimum is owed a random draw (Rule S2.4)' : 'Remove waives a player to the free-agent pool')+'; a manager keeps their Owner/GM/AGM seat: those are set under Teams.</span></div></div>';
   h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Owner applications</h3><span class="chip '+(pendingApps?"chip-warn":"chip-win")+'">'+(pendingApps?pendingApps+" pending":"none pending")+'</span></div>';
   if (apps.length){
-    h+=apps.map(function(a){ var prof=a.profiles||{}, sc=a.status==="approved"?"chip-win":a.status==="denied"?"chip-loss":a.status==="withdrawn"?"":a.status==="waitlisted"?"chip-chrome":"chip-warn";
+    h+=apps.map(function(a){ var prof=a.profiles||{}, sc=a.status==="approved"?"chip-win":a.status==="denied"?"chip-loss":a.status==="withdrawn"?"":"chip-warn";
       return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+
         '<b style="font-family:var(--f-disp)">'+esc(prof.gamertag||"Applicant")+'</b><span class="chip '+sc+'">'+esc((a.status||"pending").toUpperCase())+'</span></div>'+
         '<div class="caption" style="display:flex;gap:14px;flex-wrap:wrap">'+CG.franchisePicksLine(a)+(a.ea_id?'<span>EA '+esc(a.ea_id)+'</span>':"")+'</div>'+
@@ -8156,7 +8295,7 @@ CG.admPreseason = function(qs){
   var pendSApps=sapps.filter(function(a){ return a.status==="pending"; }).length;
   h+='<div class="card" style="margin-top:18px"><div class="card-h"><h3>Staff applications</h3><span class="chip '+(pendSApps?"chip-warn":"chip-win")+'">'+(pendSApps?pendSApps+" pending":"none pending")+'</span></div>';
   if (sapps.length){
-    h+=sapps.map(function(a){ var prof=a.profiles||{}, sc=a.status==="approved"?"chip-win":a.status==="denied"?"chip-loss":a.status==="withdrawn"?"":a.status==="waitlisted"?"chip-chrome":"chip-warn";
+    h+=sapps.map(function(a){ var prof=a.profiles||{}, sc=a.status==="approved"?"chip-win":a.status==="denied"?"chip-loss":a.status==="withdrawn"?"":"chip-warn";
       return '<div class="card-b" style="border-top:1px solid var(--line-soft)"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+
         '<b style="font-family:var(--f-disp)">'+esc(prof.gamertag||"Applicant")+'</b><span class="chip '+sc+'">'+esc((a.status||"pending").toUpperCase())+'</span></div>'+
         ((a.departments&&a.departments.length)?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">'+a.departments.map(function(k){ return '<span class="chip chip-chrome" style="font-size:9px">'+esc(CG.staffDeptLabel(k))+'</span>'; }).join("")+'</div>':"")+
@@ -8486,6 +8625,18 @@ CG.distributeRookies = function(){
       true;   /* v2.33: everyone still without a club, drafted-around or short of five games alike */
   });
   if (!rookies.length){ CG.toast("Everyone registered is already on a club","err"); return; }
+  /* v4.58: in Season 2 the same routine fills only the picks clubs never used, and places nobody as depth (Rule S2.3) */
+  if (CG.marketOn()){
+    CG.confirm("Fill the unused picks now?",
+      "In Season 2 this fills only the picks clubs never used: one random player per pick, from the players not selected who keep the club able to reach the roster minimums, at $750,000. A pick it cannot fill lapses and the commissioners are told. Nobody else is placed; players without a club stay in the training camp pool (Rule S2.3). This runs on its own after the draft concludes; the button forces it now.",
+      "Fill the picks", function(){
+      CG.sb.rpc("distribute_unproven_rookies",{ p_force:true }).then(function(r){
+        if (r.error){ CG.toast("Couldn’t fill: "+r.error.message,"err"); return; }
+        CG.toast((r.data||0)+" player"+((r.data||0)===1?"":"s")+" placed for unused picks","ok"); CG.reloadLeague();
+      });
+    });
+    return;
+  }
   CG.confirm("Place "+rookies.length+" unplaced player"+(rookies.length===1?"":"s")+" now?",
     "Every registered player still without a club goes to a club with room at his position, at the league minimum, in random order — no club chooses (Rule 2.8). "+
     "This runs on its own ten minutes after the draft concludes; the button forces it now. Anyone who cannot be seated is reported to the office.",
@@ -8541,6 +8692,8 @@ CG.loadRaRotation = function(el){
 /* Late sign-ups (registered after the draft-eligibility cutoff) + anyone who joins mid-season are
    randomly assigned to a club with an open spot. Runs on its own every 5 min; this forces it. */
 CG.assignLatecomers = function(){
+  /* v4.58: Season 2 places no late sign-up (auto_assign_latecomers places nobody in a market season) */
+  if (CG.marketOn()){ CG.toast("Season 2 places no late sign-ups: they join the training camp pool (Rule S2.5)","err"); return; }
   CG.confirm("Assign late sign-ups now?",
     "Everyone who registered after the sign-up deadline (or joined mid-season) and isn’t on a club yet "+
     "is placed as depth in the rotation: drawn at random from the clubs with the fewest late sign-ups this season that have camp room (Rule 2.8). This also runs automatically every few minutes; "+
@@ -8606,18 +8759,17 @@ CG.admUsersLive = function(){
   var h='<div style="margin-bottom:16px"><h2 class="h-sec">Users & roles</h2><p class="lede" style="margin-top:6px">Everyone with a Chel Gaming account. Assign league roles and club management, or ban a member — all live.</p></div>';
   /* Role separation: commissioners/staff can't hold a club seat. Surface anyone who currently does
      (the grandfathered set) so the office knows the rule is in force and who's exempt for Season 1. */
-  /* Media-only staff are expressly allowed a club seat (Rule 2.7), so they aren't a conflict */
+  /* Until v4.58, Media-only staff were expressly allowed a club seat (Rule 2.7) and were left off this list. v4.58 (review):
+     Rule 2.7 now has no exception, as Season 2 has no Media role (commissioner, 2026-10-22: "we will not have that role
+     next season"), so every staffer or commissioner holding a seat is listed, and Season 1's grandfathering is over. */
   var conflicts = profs.filter(function(pr){
-    return (pr.role==="staff"||pr.role==="commissioner") && mgmtBy[pr.id] && !CG.isMediaOnly(pr);
+    return (pr.role==="staff"||pr.role==="commissioner") && mgmtBy[pr.id];
   });
-  var mediaSeated = profs.filter(function(pr){ return CG.isMediaOnly(pr) && mgmtBy[pr.id]; });
   h+='<div class="note '+(conflicts.length?"":"grn")+'" style="margin-bottom:16px"><b style="font-family:var(--f-disp)">Role separation.</b> '+
-    'By league policy, commissioners and staff don’t own or manage a club — it keeps votes on club management and staff impartial (they can still play as rostered members). '+
-    '<b>Media is the exception</b> (Rule 2.7): staff whose only department is Media may run a club, because Media rules on nothing. A commissioner can override the rest when there’s a reason to. '+
-    'Club seats — Owner, GM and AGM — are assigned on each club’s edit page under <b>Teams</b>.'+
-    (mediaSeated.length?' <span style="display:block;margin-top:8px">Media staff running a club (allowed): '+
-      mediaSeated.map(function(pr){ var mg=mgmtBy[pr.id]; return '<b>'+esc(pr.gamertag||pr.display_name||"—")+'</b> ('+esc(mg.club)+' '+esc((mg.role||"").toUpperCase())+')'; }).join(", ")+'.</span>':'')+
-    (conflicts.length?' <span style="display:block;margin-top:8px">Holding both hats right now (grandfathered for Season 1): '+
+    'Commissioners and staff don’t own or manage a club, and an Owner, GM or AGM doesn’t sit on the staff. There is no exception (Rule 2.7). It keeps decisions about clubs and staff impartial, and the office can still play as rostered members. '+
+    'Staff can’t file an owner application, and an Owner, GM or AGM can’t file a staff application, until they step down from the seat they hold (Rule 2.7). '+
+    'Club seats (Owner, GM and AGM) are assigned on each club’s edit page under <b>Teams</b>.'+
+    (conflicts.length?' <span style="display:block;margin-top:8px">Holding both right now, which Rule 2.7 does not allow: '+
       conflicts.map(function(pr){ var mg=mgmtBy[pr.id]; return '<b>'+esc(pr.gamertag||pr.display_name||"—")+'</b> ('+esc(pr.role)+' · '+esc(mg.club)+' '+esc((mg.role||"").toUpperCase())+')'; }).join(", ")+'.</span>':'')+'</div>';
   h+='<div class="grid g3" style="margin-bottom:18px">'+
     '<div class="kpi" style="cursor:default"><b class="num">'+profs.length+'</b><span>accounts</span></div>'+
@@ -9342,7 +9494,15 @@ if (!CG.fmtAgo) CG.fmtAgo = function(ts){
   return CG.fmtFull ? CG.fmtFull(ts) : new Date(ts).toLocaleString();
 };
 CG.seatLabel = function(seat){ var r = (CG.PREVIEW_SEATS||[]).find(function(x){ return x[0]===seat; }); return r ? r[1] : (seat||""); };
-CG.mgmtPageLabel = function(page){ var r = CG.MGMT_PAGES.find(function(x){ return x[0]===page; }); return r ? r[1] : page; };
+/* v4.58 (commissioner, 2026-11-23: "no free agency in Season 2"): in a market season the freeagents page is the Waivers page,
+   and its permission is the one market_claim reads (mgmt_access 'freeagents'), so the row stays under its key with its
+   Season 2 name; there is no Free agents page in Season 2 */
+CG.mgmtPageRow = function(pg){
+  return (pg[0]==="freeagents" && CG.marketOn && CG.marketOn())
+    ? ["freeagents", "Waivers", "Claims on players other clubs waived. A claim cannot wait for approval, so under “Owner approves” only the Owner claims", true]
+    : pg;
+};
+CG.mgmtPageLabel = function(page){ var r = CG.MGMT_PAGES.find(function(x){ return x[0]===page; }); return r ? CG.mgmtPageRow(r)[1] : page; };
 /* which seat the signed-in member holds on their club: owner | gm | agm | null */
 CG.mySeat = function(){
   /* v2.86: a preview renders AS the mirrored seat, so everything keyed on the seat (the nav, the
@@ -11058,7 +11218,7 @@ CG.staffVotesCard = function(){
         return '<button class="btn '+(v.myChoice===o?"btn-chrome":"btn-ghost")+' btn-sm" data-vote-cast="'+v.id+'" data-choice="'+esc(o)+'">'+esc(o)+'</button>'; }).join("")+'</div>'+
         (v.myChoice?'<p class="caption" style="margin-top:5px">You voted <b>'+esc(v.myChoice)+'</b> — pick another option to change it.</p>':"");
     } else if (isOpen && mediaBlocked){
-      h += '<p class="caption" style="margin-top:8px">Media staff don’t hold a ballot on staff votes (Rule 2.7) — the department reports on the league rather than deciding for it. Every vote is read-only for you.</p>';
+      h += '<p class="caption" style="margin-top:8px">Media staff don’t hold a ballot on staff votes: the department reports on the league rather than deciding for it. Every vote is read-only for you.</p>';
     } else if (isOpen){
       h += '<p class="caption" style="margin-top:8px">This vote is limited to the departments above — you don’t hold one of them.</p>';
     }
@@ -11844,9 +12004,14 @@ CG.mgmtSeatsTable = function(m){
     var hid=owner?m.t.owner:role==="gm"?m.t.gm:m.t.agm, holder=hid?(names[hid]||"Assigned"):null;
     var isMe=hid&&hid===uid;
     var pend=pending.find(function(a){ return a.role===role; });
+    /* v4.58 (commissioner, 2026-11-23): in Season 2 the Assistant GM is nominated only after the draft completes and "must be
+       a player on the current roster. A team cannot nominate a player to be AGM from another roster, or training camp";
+       guard_mgmt_nominee refuses it before then, so the seat offers no Nominate button until the draft is complete */
+    var agmWaits=role==="agm" && CG.marketOn() && !CG.draftComplete();
     var status=pend?'<span class="chip chip-warn chip-xs">Pending reviewer vote</span>'
       :owner?'<span class="chip chip-xs">Club owner</span>'
       :holder?'<span class="chip chip-win chip-xs">Confirmed</span>'
+      :agmWaits?'<span class="chip chip-xs">Opens after the draft</span>'
       :required?'<span class="chip chip-xs" style="color:var(--amber-ink);border-color:var(--amber-ink)">Vacant — required</span>'
       :'<span class="chip chip-xs">Vacant</span>';
     /* A filled seat cannot be nominated over: the approval is refused (Rule 2.6). Offering
@@ -11858,6 +12023,7 @@ CG.mgmtSeatsTable = function(m){
       :pend?'<span class="caption">'+esc((pend.nominee&&pend.nominee.gamertag)||"nominee")+'</span>'
       :holder?(m.isOwner?'<button class="btn btn-ghost btn-sm" data-remove-role="'+role+'" data-remove-name="'+esc(holder)+'">Remove</button>'
                         :'<span class="caption">Only the Owner changes this seat</span>')
+      :agmWaits?'<span class="caption">Named after the draft, from your roster</span>'
       :m.isOwner?'<button class="btn '+(required?"btn-chrome":"btn-ghost")+' btn-sm" data-nominate-role="'+role+'">Nominate</button>'
       :'<span class="caption">Only the Owner nominates</span>';
     return '<tr>'+
@@ -11907,7 +12073,8 @@ CG.mgmtPermissionsCard = function(m){
   var seats=[["gm","General Manager",m.t.gm],["agm","Assistant GM",m.t.agm]];
   var head='<div class="card-h"><h3>Management permissions</h3>'+(m.isOffice?'<span class="chip chip-xs">League office, acting for the Owner</span>':m.isOwner?'<span class="chip chip-xs">Only you can change these</span>':'<span class="chip chip-xs">Set by the Owner</span>')+'</div>';
   var intro='<div class="card-b" style="padding-bottom:6px"><p class="caption" style="margin:0;max-width:78ch">For every Team HQ page, each seat gets <b>full access</b>, <b>Owner approves</b> (they see the page, but every move on it waits for your approval), or <b>hidden</b> (the page is withheld and its moves refused). Everything starts at full access except this Management page, which only you see unless you open it. When the Owner seat changes hands, these settings return to the defaults and any move still waiting for approval is withdrawn (Rule 2.6). Your own seat is never limited, and the league office keeps its powers either way (Rule 2.6).</p></div>';
-  var rows=CG.MGMT_PAGES.map(function(pg){
+  var rows=CG.MGMT_PAGES.map(function(pg0){
+    var pg=CG.mgmtPageRow(pg0);
     var cells=seats.map(function(sd){
       var mode=((pol[sd[0]]||{})[pg[0]])||CG.mgmtDefaultMode(pg[0]);
       if (!pg[3] && mode==="approve") mode="full";
@@ -11930,11 +12097,14 @@ CG.hubManagement = function(){
   var m=CG.clubMgmt(); if(!m) return CG.unauthorized("This account doesn’t run a club.");
   var lg=CG.lg||{}, pending=(lg._mgmtApps||[]).filter(function(a){ return a.team_id===m.teamId && a.status==="pending"; });
   var needsGm=!m.t.gm && !pending.find(function(a){ return a.role==="gm"; });
-  var needsAgm=!m.t.agm && !pending.find(function(a){ return a.role==="agm"; });
+  /* v4.58: in Season 2 the Assistant GM seat opens only when the draft is complete (Rule S2.3) */
+  var mk=CG.marketOn(), agmOpen=!mk || CG.draftComplete();
+  var needsAgm=agmOpen && !m.t.agm && !pending.find(function(a){ return a.role==="agm"; });
   var h='<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(m.t.name)+' · front office</span>'+
     '<h1 class="h-sec" style="margin-top:8px">Management</h1>'+
     '<p class="lede" style="margin-top:8px">Your club’s Owner, General Manager and Assistant GM — and where the Owner nominates management for the league office to approve, or removes a sitting GM or AGM.</p></div>';
-  if ((needsGm || needsAgm) && m.isOwner) h+='<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">'+(needsGm && needsAgm ? "A General Manager and an Assistant GM are open" : needsGm ? "A General Manager is required" : "The Assistant GM seat is open")+'</b>'+(needsGm ? "Every club must hold its Owner and General Manager seats before the entry draft begins (Rule 2.8); the Assistant GM seat may be filled later. " : "The draft can start without an Assistant GM (Rule 2.8), but a full front office shares the work. ")+'Nominate below; the league office’s reviewers approve it.</div>';
+  if ((needsGm || needsAgm) && m.isOwner) h+='<div class="note" style="margin-bottom:18px"><b style="font-family:var(--f-disp);display:block;margin-bottom:3px">'+(needsGm && needsAgm ? "A General Manager and an Assistant GM are open" : needsGm ? "A General Manager is required" : "The Assistant GM seat is open")+'</b>'+(needsGm ? (mk ? "Every club must hold its Owner and General Manager seats before the draft begins (Rules 2.8 and S2.3). The Assistant GM is named only after the draft is complete, from the players then on your roster. " : "Every club must hold its Owner and General Manager seats before the entry draft begins (Rule 2.8); the Assistant GM seat may be filled later. ")
+      : mk ? "Name your Assistant GM from the players on your club's active roster, never from another club or the training camp pool (Rule S2.3). " : "The draft can start without an Assistant GM (Rule 2.8), but a full front office shares the work. ")+'Nominate below; the league office’s reviewers approve it.</div>';
   h+=CG.mgmtApprovalsCard(m);
   h+=CG.mgmtSeatsTable(m);
   h+=CG.mgmtPermissionsCard(m);
@@ -11946,7 +12116,10 @@ CG.hubManagement = function(){
     h+=CG.appChatSection("management", a.id, {office:false, status:a.status, mine:true});
   });
   h+='<div class="note" style="margin-top:6px"><b style="font-family:var(--f-disp)">How appointments work.</b> '+
-    (m.isOwner ? (CG.seasonUnderway()
+    (m.isOwner && mk ? (CG.seasonUnderway()
+                   ? "In Season 2, once the draft starts, you nominate a General Manager only from your club's own active roster, and the Assistant GM only after the draft is complete, from the same roster: never a player on another club or in the training camp pool, and never a member of league staff (Rules 2.6 and S2.3). "
+                   : "Before the draft you must name your General Manager: anyone signed up for Season 2 who isn't on league staff, on your club or not. The Assistant GM is named only after the draft is complete, from the players then on your roster (Rules 2.6 and S2.3). ")
+     : m.isOwner ? (CG.seasonUnderway()
                    ? "During the season you nominate from your own club: a player on your active roster or in your training camp, who isn’t on league staff (Rule 2.6). Between the end of the playoffs and the next draft you may nominate anyone signed up for the coming season. "
                    : "It is the off-season, so you may nominate anyone signed up for the coming season who isn’t on league staff, on your club or not. Once the next draft starts, nominees come from your own roster (Rule 2.6). ")
                : "Only the club’s Owner nominates or removes a GM or AGM (Rule 2.6). ")+
@@ -11960,7 +12133,8 @@ CG.hubManagement = function(){
        v4.53 (commissioner, 2026-11-20) supersedes it: "As soon as that specific team's season is over ... that management and
        roster should have their team roles removed since they no longer play any games. Give it 24 hours" */
     "Every seat, the Owner’s included, ends 24 hours after the club’s season ends (out of the playoffs, eliminated, or the final played), and the club role comes off the roster then too (Rule 2.6). "+
-    "Every club must hold its Owner and General Manager seats before the entry draft begins; the Assistant GM seat may stay open (Rule 2.8).</div>";
+    (mk ? "Every club must hold its Owner and General Manager seats before the draft begins; the Assistant GM seat is filled only after the draft (Rule S2.3).</div>"
+        : "Every club must hold its Owner and General Manager seats before the entry draft begins; the Assistant GM seat may stay open (Rule 2.8).</div>");
   return h;
 };
 CG.AFTER._management = function(){
@@ -12068,16 +12242,24 @@ CG.seasonUnderway = function(){
 CG.nominateManagerModal = function(role){
   var m = CG.clubMgmt(); if(!m || !m.isOwner) return;
   var label = role==="gm"?"General Manager":"Assistant GM";
+  /* v4.58 (commissioner, 2026-11-23): in Season 2 the Assistant GM comes only after the draft, from the club's own roster,
+     and a General Manager named once the draft starts comes only from the own roster too ("Correct"); the database refuses
+     anything else (guard_mgmt_nominee), and neither seat is filled from the training camp pool */
+  var mk = CG.marketOn();
+  if (mk && role==="agm" && !CG.draftComplete()){ CG.toast("An Assistant GM is named only after the draft is complete, from your own roster (Rule S2.3)","err"); return; }
   var inSeason = CG.seasonUnderway();
   /* v3.79: the league office's appointment takes effect at once (notify_mgmt_application); an Owner's goes to the vote */
   var voteLine = m.isOffice ? "As the league office, your appointment takes effect at once." : "The league office’s reviewers vote to approve the appointment.";
   var body;
   if (inSeason){
     var pool = ((CG.lg && CG.lg.byTeam && CG.lg.byTeam[m.club]) || []).filter(function(x){
-      return x.spotId && !x.mgmt && !(CG.isWaived && CG.isWaived(x.id));
+      return x.spotId && !x.mgmt && !(CG.isWaived && CG.isWaived(x.id)) && !(mk && x.squad==="tc");
     }).sort(function(a,b){ return (a.squad==="tc")-(b.squad==="tc") || String(a.tag).localeCompare(String(b.tag)); });
     if (!pool.length){ CG.toast("Nobody on your roster can take the seat right now","err"); return; }
-    body = '<p class="caption" style="margin-bottom:12px">During the season you name your '+label+' from your own club: a player on your active roster or in your training camp (Rule 2.6). '+
+    body = mk ? '<p class="caption" style="margin-bottom:12px">In Season 2 you name your '+label+' from the players on your club’s active roster, never from another club or the training camp pool (Rules 2.6 and S2.3). '+voteLine+'</p>'+
+      '<label class="fld"><span>Player</span><select id="mgNomineeSel"><option value="">Pick a player on your roster…</option>'+
+      pool.map(function(x){ return '<option value="'+esc(x.id)+'">'+esc(x.tag)+' · '+esc(x.pos)+'</option>'; }).join("")+'</select></label>'
+      : '<p class="caption" style="margin-bottom:12px">During the season you name your '+label+' from your own club: a player on your active roster or in your training camp (Rule 2.6). '+
       'A manager plays on the active roster, so a camp player you name comes up with the seat, and your active roster needs room for him in his position group. '+
       'Between the end of the playoffs and the next draft you may name anyone signed up for the coming season. '+voteLine+'</p>'+
       '<label class="fld"><span>Player</span><select id="mgNomineeSel"><option value="">Pick a player on your club…</option>'+
@@ -12085,7 +12267,10 @@ CG.nominateManagerModal = function(role){
         return '<option value="'+esc(x.id)+'">'+esc(x.tag)+' · '+esc(x.pos)+(x.squad==="tc"?" · training camp":"")+'</option>';
       }).join("")+'</select></label>';
   } else {
-    body = '<p class="caption" style="margin-bottom:12px">It is the off-season, so you may name anyone signed up for the coming season, on your club or not (Rule 2.6). '+
+    body = mk ? '<p class="caption" style="margin-bottom:12px">Before the draft you name your General Manager from anyone signed up for Season 2, on your club or not (Rule 2.6). '+
+      'Every club must hold its Owner and General Manager seats before the draft begins; the Assistant GM is named only after the draft is complete, from your own roster (Rule S2.3). '+voteLine+'</p>'+
+      CG.memberPickerField("mgNominee","Player","Anyone signed up for the coming season. Start typing a gamertag")
+      : '<p class="caption" style="margin-bottom:12px">It is the off-season, so you may name anyone signed up for the coming season, on your club or not (Rule 2.6). '+
       'Once the next entry draft starts, a '+label+' is named from your own roster. '+voteLine+
       ' Every club must hold its Owner and General Manager seats before the entry draft begins; the Assistant GM seat may stay open (Rule 2.8).</p>'+
       CG.memberPickerField("mgNominee","Player","Anyone signed up for the coming season. Start typing a gamertag");
@@ -12242,8 +12427,6 @@ CG.appBallotSection = function(type, a, decided){
      count, exactly as resolve_application_if_ready counts them; older ones stay on the record */
   var counting = CG.appCountingBallots(type, a), earlier = CG.appBallotsFor(type, a.id).length - counting.length;
   var voteBy = {}; counting.forEach(function(v){ voteBy[v.voter_id] = v; });
-  /* v4.22: a waitlisted application is not before the vote; the reviewers admit or remove it from the Staff Desk */
-  var waitlisted = a.status === "waitlisted";
   var cast = reviewers.filter(function(r){ return voteBy[r.id]; }).length;
   var yes = reviewers.filter(function(r){ return voteBy[r.id] && voteBy[r.id].vote==="approve"; }).length;
   var no  = reviewers.filter(function(r){ return voteBy[r.id] && voteBy[r.id].vote==="deny"; }).length;
@@ -12251,13 +12434,12 @@ CG.appBallotSection = function(type, a, decided){
 
   var head = decided
     ? '<span class="chip '+(a.status==="approved"?"chip-win":a.status==="withdrawn"?"":"chip-loss")+'">'+esc((a.status||"").charAt(0).toUpperCase()+(a.status||"").slice(1))+'</span>'
-    : waitlisted ? '<span class="chip chip-chrome chip-xs">On the waitlist</span>'
     : '<span class="chip chip-xs">'+cast+' of '+N+' voted</span>';
   var h = '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Reviewer vote</h3>'+head+'</div><div class="card-b">';
 
   h += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+
     '<span class="chip chip-win chip-xs">'+yes+' approve</span><span class="chip chip-loss chip-xs">'+no+' deny</span>'+
-    (N && !waitlisted ?'<span class="caption">'+need+' of '+N+' needed to pass</span>':"")+'</div>';   /* v4.22: a waitlisted one is not voted on */
+    (N ?'<span class="caption">'+need+' of '+N+' needed to pass</span>':"")+'</div>';
 
   if (N){
     h += '<div class="stack" style="gap:9px;margin-bottom:14px">'+reviewers.slice().sort(function(x,y){ return (x.gamertag||"").localeCompare(y.gamertag||""); }).map(function(r){
@@ -12268,11 +12450,11 @@ CG.appBallotSection = function(type, a, decided){
         '<b style="font-family:var(--f-disp);font-size:13px">'+esc(r.gamertag||"An official")+(r.id===uid?" · you":"")+'</b>'+
         (v&&v.note?'<span class="small" style="color:var(--steel);flex:1;min-width:150px">“'+esc(v.note)+'”</span>':"")+'</div>';
     }).join("")+'</div>';
-  } else if (!decided && !waitlisted){
+  } else if (!decided){
     h += '<p class="caption" style="margin-bottom:12px;color:var(--amber-ink)">No application reviewers are assigned yet. A commissioner needs to add staff to the <b>Applications review</b> department — or decide this directly below.</p>';
   }
 
-  if (!decided && !waitlisted && isReviewer){
+  if (!decided && isReviewer){
     h += '<div style="border-top:1px solid var(--line-soft);padding-top:12px">'+
       '<span class="caption" style="display:block;margin-bottom:8px">'+(mine?"Your vote. Change it any time until the application is decided, the moment "+need+" of "+N+" reviewers agree":"Cast your vote: "+need+" of "+N+" reviewers decide it")+'</span>'+
       '<textarea id="appVoteNote" class="grow" rows="1" placeholder="Add a reason (optional)" aria-label="Reason for your vote" style="width:100%;margin-bottom:8px">'+esc((mine&&mine.note)||"")+'</textarea>'+
@@ -12281,21 +12463,18 @@ CG.appBallotSection = function(type, a, decided){
         '<button class="btn '+(mine&&mine.vote==="deny"?"btn-ink":"btn-ghost")+' btn-sm" data-vote-cast="deny" aria-pressed="'+!!(mine&&mine.vote==="deny")+'" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Deny</button>'+
         (mine?'<button class="btn btn-ghost btn-sm" data-vote-retract="1" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'" style="margin-left:auto">Retract</button>':"")+'</div></div>';
   }
-  if (!decided && !waitlisted && isCommish){
+  if (!decided && isCommish){
     h += '<div style="border-top:1px solid var(--line-soft);padding-top:12px;margin-top:12px">'+
       '<span class="caption" style="display:block;margin-bottom:8px">Commissioner override — decide now without waiting for the vote</span>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
         '<button class="btn btn-chrome btn-sm" data-app-override="approve" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Approve now</button>'+
         '<button class="btn btn-ghost btn-sm" data-app-override="deny" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'">Deny now</button>'+
-        '<button class="btn btn-ghost btn-sm" data-app-waitlist="1" data-vt="'+esc(type)+'" data-vid="'+esc(a.id)+'" title="No open spot right now: queue them. Nobody is admitted automatically; the reviewers admit from the Staff Desk.">Waitlist</button>'+
         '</div></div>';
   }
 
   h += '<p class="caption" style="margin-top:12px">'+(a.status === "withdrawn"
     /* v4.21: an applicant may withdraw; that is not a decision, and nobody was told an outcome */
     ? "Withdrawn by the applicant, so it was not decided. The votes cast before the withdrawal stay on the record."
-    : waitlisted
-    ? "On the waitlist, so the reviewers’ votes do not decide it. Nobody is admitted automatically: the reviewers admit it or take it off the waitlist from the Waitlist card on the Staff Desk, in any order they choose."
     : decided
     ? "Decided by the reviewer vote (or a commissioner override). The applicant was notified of the outcome."
     : N===0
@@ -12305,7 +12484,7 @@ CG.appBallotSection = function(type, a, decided){
       : "The decision is automatic: it is approved once more than half of all "+N+" reviewer"+(N===1?"":"s")+" approve it, and denied once that can no longer happen. "+
         (type==="owner" ? "An owner application approved for a club the league does not field yet then waits on a commissioner’s go-ahead. " : "")+
         "Votes are visible only to the league office.")+'</p>';
-  if (earlier && !decided && !waitlisted) h += '<p class="caption" style="margin-top:6px">'+earlier+' earlier vote'+(earlier===1?"":"s")+', cast before it was last filed, '+(earlier===1?"stays":"stay")+' on the record but '+(earlier===1?"does":"do")+' not count (a refiled application is voted afresh).</p>';
+  if (earlier && !decided) h += '<p class="caption" style="margin-top:6px">'+earlier+' earlier vote'+(earlier===1?"":"s")+', cast before it was last filed, '+(earlier===1?"stays":"stay")+' on the record but '+(earlier===1?"does":"do")+' not count (a refiled application is voted afresh).</p>';
   return h + '</div></div>';
 };
 /* ---- Seat conflicts on a GM/AGM nomination (Rule 2.6) ------------------------------------
@@ -12423,7 +12602,6 @@ CG.hubApplicationDetail = function(id, type){
   var statusChip = a.status==="approved" ? '<span class="chip chip-win">Approved</span>'
     : a.status==="denied" ? '<span class="chip chip-loss">Denied</span>'
     : a.status==="withdrawn" ? '<span class="chip">Withdrawn</span>'
-    : a.status==="waitlisted" ? '<span class="chip chip-chrome">Waitlisted</span>'
     : '<span class="chip chip-warn">Pending</span>';
 
   var h = '<div style="margin-bottom:18px">'+back+
@@ -12518,22 +12696,10 @@ CG.AFTER._applicationDetail = function(){
       CG.reloadLeague();   /* a placement changes the club list, not just this row */
     });
   }); });
-  /* waitlist: no spot now. Until 2026-09-07 a waitlisted application was appointed automatically when a seat opened,
-     in waitlist order; that was retired ("The waitlist should not automatically accept someone when a position opens
-     up") and restated 2026-10-19 in v4.22 ("Waitlist applications should not fill automatically"). The reviewers
-     admit from the Staff Desk. */
-  document.querySelectorAll("[data-app-waitlist]").forEach(function(b){ b.addEventListener("click", function(){
-    var t = this.getAttribute("data-vt"), id = this.getAttribute("data-vid");
-    CG.confirm("Put this application on the waitlist?",
-      "It leaves the vote and waits for a seat. Nobody is admitted automatically: when a "+(t==="owner"?"club owner seat":"staff seat")+" opens, the reviewers admit from the Waitlist card on the Staff Desk, in any order they choose. The applicant keeps their place if they edit the application and gives it up if they withdraw it.",
-      "Waitlist", function(){
-      CG.sb.rpc("waitlist_application", { p_type:t, p_id:id }).then(function(r){
-        if (r.error){ CG.toast("Couldn’t waitlist: "+r.error.message,"err"); return; }
-        CG.toast("Waitlisted. The reviewers admit from the Staff Desk when a spot opens.","ok");
-        CG.reloadLeague();
-      });
-    });
-  }); });
+  /* v4.58 (commissioner, 2026-11-23: "remove the waitlist entirely from the website and rulebook"): the Waitlist button is
+     gone. Until 2026-09-07 a waitlisted application was appointed automatically when a seat opened, in waitlist order;
+     that was retired ("The waitlist should not automatically accept someone when a position opens up") and restated
+     2026-10-19 in v4.22 ("Waitlist applications should not fill automatically"). */
   /* commissioner override — decide immediately, bypassing the reviewer vote */
   document.querySelectorAll("[data-app-override]").forEach(function(b){ b.addEventListener("click", function(){
     var approve = this.getAttribute("data-app-override")==="approve";
@@ -12584,7 +12750,7 @@ CG.allTickets = function(){
       isOpen: !closed, at: a.created_at?Date.parse(a.created_at):0,
       route: "#/hub/complaint?id="+a.id, replies: ((lg._actionMsgs||{})[a.id]||[]).length });
   });
-  function appResult(s){ return s==="approved"?"Approved":s==="denied"?"Denied":s==="withdrawn"?"Withdrawn":s==="waitlisted"?"Waitlisted":"Pending"; }
+  function appResult(s){ return s==="approved"?"Approved":s==="denied"?"Denied":s==="withdrawn"?"Withdrawn":"Pending"; }
   (lg._staffApps||[]).forEach(function(a){
     var closed = a.status!=="pending";
     out.push({ group:"staff", typeLabel:"Staff application", icon:"users",
@@ -12840,7 +13006,7 @@ CG.hubStaffDesk = function(){
         : mediaNoBallot
           /* Rule 2.7 — an MVP vote is the purest form of voting for your own club, and Media is the
              one department that may run one. Tally stays visible; the picker doesn't. */
-          ? '<span class="caption" style="flex:1">Media staff don’t hold a ballot (Rule 2.7).</span>'+
+          ? '<span class="caption" style="flex:1">Media staff don’t hold a ballot.</span>'+
             '<span class="caption" data-ballot-tally="'+cat[0]+'">counting…</span>'
           : '<select data-ballot-cat="'+cat[0]+'" style="padding:6px;max-width:220px" aria-label="Vote for '+cat[1]+'">'+opts+'</select>'+
             '<button class="btn btn-ghost btn-sm" data-ballot-save="'+cat[0]+'">Save vote</button>'+
@@ -12850,8 +13016,8 @@ CG.hubStaffDesk = function(){
   }).join("");
   h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+
     (mediaNoBallot
-      ? 'Media staff read the tallies but don’t vote on awards (Rule 2.7) — the department covers the league rather than deciding it.'
-      : 'Every rostered player, and every staff member and commissioner, gets one vote per award, for a player on another club; players vote from the Awards page (v3.60). Media staff who are not rostered hold no ballot (Rule 2.7). Finalizing counts the votes for playoff-eligible players only and publishes the winner; a commissioner picks only to break a tie. The statistical titles are filed from the record when the regular season ends.')+
+      ? 'Media staff read the tallies but don’t vote on awards: the department covers the league rather than deciding it.'
+      : 'Every rostered player, and every staff member and commissioner, gets one vote per award, for a player on another club; players vote from the Awards page (v3.60). Media staff who are not rostered hold no ballot. Finalizing counts the votes for playoff-eligible players only and publishes the winner; a commissioner picks only to break a tie. The statistical titles are filed from the record when the regular season ends.')+
     '</span></div></div>';
   return h;
 };
@@ -12980,26 +13146,30 @@ CG.overviewCharts = function(){
      per club); the exact-position split rides in the note, since it is balance, not a rule */
   var GRPS = ["F","D","G"], POSN = ["LW","C","RW","LD","RD","G"];
   var clubs = (CG.TEAMS||[]).length || 10;
-  var spotsAt = function(g){ return (CG.ROSTER_QUOTA[g]||0) * clubs; };
+  /* v4.58: a market season has no group ceilings (its quota is the whole roster in every group), so each group is read
+     against its minimum (CG.ROSTER_MIN) times the clubs, and the total is the roster limit times the clubs */
+  var mkMin = CG.marketOn() ? CG.ROSTER_MIN : null;
+  var spotsAt = function(g){ return ((mkMin ? mkMin[g] : CG.ROSTER_QUOTA[g])||0) * clubs; };
   /* v2.51: in the basic format the group figures are ceilings that overlap (9 F / 7 D / 5 G on a
      15-man roster — two full lines plus three of any position), so the league's TOTAL spots are
      roster_max × clubs, not the sum of the ceilings; the full format's 9/6/2 still sums exactly. */
   var perClub = CG.ROSTER_MAX || CG.fmt("roster_max");
   var quotaSum = GRPS.reduce(function(s,g){ return s + (CG.ROSTER_QUOTA[g]||0); }, 0);
-  var overlapping = quotaSum > perClub;
+  var overlapping = !!mkMin || quotaSum > perClub;
   var byPos = {}, byGrp = {};
   regs.forEach(function(r){ if (r.position){ byPos[r.position] = (byPos[r.position]||0) + 1; var g = CG.posGroup(r.position); byGrp[g] = (byGrp[g]||0) + 1; } });
   if (Object.keys(byPos).length){
     var totalSpots = overlapping ? perClub * clubs : GRPS.reduce(function(s,g){ return s + spotsAt(g); }, 0);
-    var covered = Math.min(totalSpots, GRPS.reduce(function(s,g){ return s + Math.min(byGrp[g]||0, spotsAt(g)); }, 0));
+    var covered = Math.min(totalSpots, GRPS.reduce(function(s,g){ return s + (mkMin ? (byGrp[g]||0) : Math.min(byGrp[g]||0, spotsAt(g))); }, 0));
     /* the thinnest group by coverage share is the one the commissioner recruits for */
     var thin = GRPS.reduce(function(b,g){
       return ((byGrp[g]||0)/spotsAt(g)) < ((byGrp[b]||0)/spotsAt(b)) ? g : b; }, GRPS[0]);
-    var over = GRPS.filter(function(g){ return (byGrp[g]||0) > spotsAt(g); })
+    var over = GRPS.filter(function(g){ return !mkMin && (byGrp[g]||0) > spotsAt(g); })
       .map(function(g){ return CG.GROUP_NAME[g].toLowerCase()+" are over ("+byGrp[g]+" for "+spotsAt(g)+")"; });
     var split = POSN.filter(function(p){ return byPos[p]; }).map(function(p){ return byPos[p]+" "+(CG.POS_NAME[p]||p).toLowerCase(); }).join(", ");
     out.push(CG.viz.card({ title:"Sign-ups against the league's roster spots",
-      sub: overlapping
+      sub: mkMin ? clubs+" clubs × "+perClub+" spots, each club with at least "+CG.rosterMinWords()+" and no position maximums (Rule S2.4); each bar reads against the minimums"
+        : overlapping
         ? clubs+" clubs × "+perClub+" spots — at most "+CG.ROSTER_QUOTA.F+" forwards, "+CG.ROSTER_QUOTA.D+" defensemen, "+CG.ROSTER_QUOTA.G+" goaltenders each (Rule 2.1)"
         : clubs+" clubs × "+CG.ROSTER_QUOTA.F+" forwards, "+CG.ROSTER_QUOTA.D+" defensemen, "+CG.ROSTER_QUOTA.G+" goaltenders (Rule 2.1)",
       value: regs.length+" / "+totalSpots,
@@ -14049,8 +14219,10 @@ CG.roadAheadCard = function(s, opts){
      free-agency date; a freshly created one may lack a playoff date) — the filter has to wrap
      the conditional, or the basic list reaches fmtFull with a null and the dashboard errors out */
   var steps = (CG.isBasic(s) ? [
-    [s.registration_deadline, "Sign-up cutoff", "Register by now to enter the draft — everyone who has is in it. Miss it and you still play: you’re placed on a club as depth after the draft, up until the movement deadline."],
-    [s.draft_at, "Draft night", CG.fmt("draft_rounds")+" rounds, live on the site, in a snake order — even rounds run in reverse. Everyone registered by the cutoff is in the pool; anyone undrafted is placed on a club ten minutes after it concludes (Rule 2.8)."],
+    [s.registration_deadline, "Sign-up cutoff", CG.marketOn() ? "Register by now to enter the draft: everyone who has is in it. Miss it and you still play, from the league-wide training camp pool (Rule S2.5)."
+      : "Register by now to enter the draft: everyone who has is in it. Miss it and you still play: you’re placed on a club as depth after the draft, up until the movement deadline."],
+    [s.draft_at, "Draft night", CG.marketOn() ? CG.fmt("draft_rounds")+" rounds, live on the site, in a snake order: even rounds run in reverse. Everyone registered by the cutoff is in the pool; anyone not selected joins the training camp pool (Rule S2.3)."
+      : CG.fmt("draft_rounds")+" rounds, live on the site, in a snake order: even rounds run in reverse. Everyone registered by the cutoff is in the pool; anyone undrafted is placed on a club ten minutes after it concludes (Rule 2.8)."],
     [s.starts_at, "Puck drop", "The regular season opens the Wednesday after the draft — "+perClub+" games over "+(CG.seasonShape?CG.seasonShape(s).weeks:6)+" weeks, every stat imported automatically from EA."],
     [s.playoffs_start_at, "Playoffs", "Six of the eight clubs make it: the division winners rest through the opening round while the second and third seeds play, then the division finals, then the final — every round a best-of-seven. "+(CG.playoffMinGp(s) ? "You need "+CG.playoffMinGp(s)+" regular-season games to dress in it (Rule 8.3)." : "Every rostered player is eligible to dress in it (Rule 8.3).")]
   ] : [
@@ -14862,6 +15034,30 @@ CG.statsPartialNote = function(){
     'Every figure on this page is incomplete \u2014 treat it as unavailable, not as zero. '+
     '<button class="btn btn-ghost btn-sm" style="margin-left:6px" onclick="CG.reloadLeague()">Retry</button></span></div>';
 };
+/* v4.58 (review, fail loud): a failed read of the season's rules leaves Season 1's figures in place (CG.marketOn() is false),
+   so the limits on Team HQ, the draft desk and the draft room may be wrong. They say so in red, the way box scores do above.
+   Retry re-reads the rules first, so a read that fails again says so at once; a good read rebuilds through the
+   single-flight full reload, which repaints with CG.quietRepaint (scroll kept, nothing typed lost). */
+CG.seasonRulesNote = function(){
+  if (!(CG.LIVE && CG.LIVE.partial && CG.LIVE.partial.season_rules)) return "";
+  return '<div class="note red" style="margin-bottom:16px;display:flex;gap:10px;align-items:flex-start">'+
+    (CG.ic?CG.ic("flag",16):"")+'<span><b style="font-family:var(--f-disp)">'+esc(CG.SEASON_RULES_FAIL)+'</b>'+
+    '<button type="button" class="btn btn-ghost btn-sm" style="margin-left:6px" onclick="CG.retrySeasonRules(this)">Retry</button></span></div>';
+};
+CG.retrySeasonRules = function(btn){
+  var id = CG.SEASON && CG.SEASON.id;
+  if (btn){ btn.disabled = true; btn.textContent = "Retrying…"; }
+  return CG.seasonRulesLoad(id, true).then(function(r){
+    if (!r) throw new Error("no season on screen to read");
+    /* shortcut: a full rebuild that throws after this good read is dropped by CG.liveReload's catch (it retries only
+       pulse slots), so the button stays on Retrying; revisit if liveReload learns to report a failed full rebuild */
+    CG.liveReload();
+  }).catch(function(e){
+    if (id) delete CG._rulesLoads[id];
+    if (btn){ btn.disabled = false; btn.textContent = "Retry"; }
+    CG.toast("The season’s rules still did not load: "+((e && e.message) || e)+". Refresh the page.", "err");
+  });
+};
 CG.safeCount = function(resp){
   if (!resp || resp.error || typeof resp.count !== "number") return null;
   return resp.count;
@@ -15490,7 +15686,7 @@ CG.ROUTES.hub = function(param, qs){
   }
   if (param==="freeagents"){
     return CG.can("roster.manage") ? CG.hubShell("freeagents", CG.hubFreeAgents())
-      : CG.unauthorized("The free-agent board is a team-management tool.");
+      : CG.unauthorized(CG.marketOn() ? "Waiver claims are a team-management tool." : "The free-agent board is a team-management tool.");
   }
   if (param==="application"){
     if ((CG.role()!=="staff" && CG.role()!=="commish") || CG.mediaOnlyStaff()) return CG.unauthorized("Applications are reviewed by league staff.");
@@ -15528,7 +15724,7 @@ CG.AFTER.hub = function(param, qs){
   /* v3.76: the Player requests page rendered every case button and wired none of them, for every seat */
   if (param==="clubrequests"){ if (CG.AFTER._complaintsLive) CG.AFTER._complaintsLive(); return; }
   if (param==="draft"){ CG.AFTER._hubDraft(); return; }
-  if (param==="freeagents"){ CG.AFTER._hubFreeAgents(); return; }
+  if (param==="freeagents"){ if (CG.marketOn()) CG.mkWaiversRepaint(); else CG.AFTER._hubFreeAgents(); return; }   /* v4.58: Season 2's Waivers page */
   if (param==="application"){ CG.AFTER._applicationDetail(); return; }
   if (param==="archive"){ CG.AFTER._ticketArchive(); return; }
   if (param==="statsmgr"){ CG.AFTER._statsMgr(qs); return; }
@@ -15837,6 +16033,14 @@ CG.hubFreeAgents = function(){
      seat lookup and therefore ignored the preview every other tab honors */
   var t=CG.myManagedTeam();
   if (!t) return '<div class="note">This account doesn’t run a club — the free-agent board belongs to club management.</div>';
+  /* v4.58 (commissioner, 2026-11-23): "no free agency in Season 2". public.fa_open is false in a market season, so
+     sign_free_agent, offer_free_agent and respond_offer all refuse; this page is the club's Waivers page instead, its
+     claim door (CG.mkWaiversCard), under the same page key the database gates claims on (mgmt_access 'freeagents') */
+  if (CG.marketOn()) return '<div style="margin-bottom:20px"><span class="eyebrow chr">'+esc(t.name)+' · player acquisition</span>'+
+    '<h1 class="h-sec" style="margin-top:8px">Waivers</h1>'+
+    '<p class="lede" style="margin-top:8px">Players other clubs placed on waivers. For '+(((CG.SEASON_RULES.mk||{}).waiver_hours)||24)+' hours any club but the one that waived them may claim them at their salary, if it has an open roster spot and room under the salary cap; the first valid claim wins at once (Rule S2.5).</p></div>'+
+    CG.mkWaiversCard(t)+
+    '<div class="note">Season 2 has no free agency and no signings. A player nobody claims joins the training camp pool. Players without a club, including anyone not selected in the draft and anyone who signs up after the cutoff, are in the training camp pool, and clubs add them in Saturday bidding (Rule S2.6).</div>';
   var faO = s.free_agency_opens_at ? Date.parse(s.free_agency_opens_at) : null;
   var faC = s.free_agency_closes_at ? Date.parse(s.free_agency_closes_at) : null;
   var nowMs = Date.now();
@@ -15930,6 +16134,76 @@ CG.hubFreeAgents = function(){
       : '<div class="card-b"><div class="empty" style="padding:50px 20px"><div class="e-art">'+CG.ic("search",22)+'</div><b>No free agents right now</b><p>Free agency is for players whose contracts have ended. Undrafted players are placed on clubs automatically, so in a first season this board stays empty until deals expire.</p></div></div>'))+'</div>';
 
   return h;
+};
+/* v4.58 (commissioner, 2026-11-02 and 2026-11-23; contracts/waivers-rpc.md): Season 2's waiver claim door on the classic
+   Team HQ, for the weeks before the switch. The open waivers with time left, read from market_waivers (its public columns)
+   when the page opens and after every claim; Claim calls market_claim directly, since a claim never waits in the Owner's
+   queue (the first valid claim wins), and shows the database's refusal as it is returned. The database is the gate for
+   every rule (the club's spot and cap room, the minimums, no claim back, claims opening after the post-draft fill).
+   shortcut: the list is read on open and after a claim, not live (market is not a pulse domain on this site); add it to
+   CG.LIVE_DOMAINS if the classic site outlives the switch. */
+CG._mkWaivers = null;
+CG.mkWaiversLoad = function(){
+  var sid = (CG.SEASON || {}).id;
+  if (!CG.sb || !sid){ CG._mkWaivers = { season:sid, rows:null, err:"no season is loaded" }; return Promise.resolve(); }
+  return CG.sb.from("market_waivers").select("id,profile_id,from_team_id,position,salary,waived_at,expires_at,status")
+    .eq("season_id", sid).eq("status", "open").order("expires_at", { ascending:true })
+    .then(function(r){
+      if (r.error) throw r.error;
+      CG._mkWaivers = { season:sid, rows:r.data || [], err:null };
+    }).catch(function(e){ CG._mkWaivers = { season:sid, rows:null, err:String((e && e.message) || e) }; });
+};
+CG.mkWaiversCard = function(t){
+  var st = CG._mkWaivers, sid = (CG.SEASON || {}).id;
+  var head = '<div class="card" id="mkWaivers" style="margin-bottom:18px"><div class="card-h"><h3>Open waivers</h3>';
+  if (!st || st.season !== sid) return head+'<span class="chip">reading</span></div><div class="card-b"><p class="caption" style="margin:0">Reading the waivers.</p></div></div>';
+  if (st.err) return head+'<span class="chip chip-loss">not read</span></div><div class="card-b"><p class="caption" style="margin:0;color:var(--red)">Couldn’t read the waivers: '+esc(st.err)+'. Refresh the page to try again.</p></div></div>';
+  var now = CG.now(), rows = st.rows.filter(function(w){ return Date.parse(w.expires_at) > now; });
+  var names = (CG.lg && CG.lg._profName) || {}, codeOf = (CG.lg && CG.lg._idToCode) || {};
+  head += '<span class="chip'+(rows.length ? ' chip-warn' : '')+'">'+(rows.length ? rows.length+' open' : 'none open')+'</span></div>';
+  if (!rows.length) return head+'<div class="card-b"><p class="caption" style="margin:0">No player is on waivers right now.</p></div></div>';
+  return head+rows.map(function(w){
+    var code = codeOf[w.from_team_id], from = (code && CG.TEAM[code] && CG.TEAM[code].name) || "another club";
+    var nm = names[w.profile_id] || "Player", ms = Date.parse(w.expires_at) - now;
+    return '<div class="card-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line-soft)">'+
+      '<b style="font-family:var(--f-disp);flex:1;min-width:140px">'+esc(nm)+' <small class="caption">'+esc(CG.POS_NAME[w.position] || w.position || "")+'</small></b>'+
+      '<span class="caption">from the '+esc(from)+'</span>'+
+      '<span class="num">'+CG.fmtMoney(w.salary)+'</span>'+
+      '<span class="caption" title="Closes '+esc(CG.fmtFull(Date.parse(w.expires_at)))+'">'+Math.floor(ms/3600000)+' h '+Math.floor(ms%3600000/60000)+' min left</span>'+
+      ((t && t.id === w.from_team_id)
+        ? '<span class="caption">your club waived them: no claim back</span>'
+        : '<button class="btn btn-chrome btn-sm" data-mk-claim="'+esc(w.id)+'" data-name="'+esc(nm)+'" data-salary="'+esc(w.salary)+'">Claim</button>')+
+      '</div>';
+  }).join("")+'</div>';
+};
+/* seamless rule: only the card repaints (host.outerHTML = render(); rebind();), never the page */
+CG.mkWaiversRepaint = function(){
+  return CG.mkWaiversLoad().then(function(){
+    var host = document.getElementById("mkWaivers"); if (!host) return;
+    host.outerHTML = CG.mkWaiversCard(CG.myManagedTeam()); CG.mkWaiversWire();
+  });
+};
+CG.mkWaiversWire = function(){
+  document.querySelectorAll("[data-mk-claim]").forEach(function(b){ b.addEventListener("click", function(){
+    var id = this.getAttribute("data-mk-claim"), nm = this.getAttribute("data-name"), sal = +this.getAttribute("data-salary") || 0, btn = this;
+    var t = CG.myManagedTeam && CG.myManagedTeam();
+    if (!t || !t.id){ CG.toast("This account doesn’t run a club, so it cannot claim","err"); return; }
+    CG.confirm("Claim "+nm+"?", "The first valid claim wins at once. "+nm+" joins your roster at "+CG.fmtMoney(sal)+" on a contract to the end of the season, taking a roster spot and that much room under the salary cap (Rule S2.5).", "Claim", function(){
+      btn.disabled = true;
+      CG.sb.rpc("market_claim", { p_waiver:id, p_team:t.id }).then(function(r){
+        var d = r && r.data;
+        /* fail loud: success is the database's confirmed claim (ok and the new roster spot), never the absence of an error */
+        if (r.error || !d || d.ok !== true || !d.spot_id){
+          btn.disabled = false;
+          CG.toast(r.error ? String(r.error.message || "The claim was refused.") : "The league did not confirm the claim. Refresh the page and check your roster.", "err");
+          CG.mkWaiversRepaint();   /* another club may have claimed first: show the list as it is now */
+          return;
+        }
+        CG.toast(nm+" claimed: they join your roster at "+CG.fmtMoney(d.salary)+" (Rule S2.5)", "ok");
+        CG.mkWaiversRepaint();
+      }, function(e){ btn.disabled = false; CG.toast("Couldn’t claim: "+((e && e.message) || e), "err"); });
+    });
+  }); });
 };
 CG.AFTER._hubFreeAgents = function(){
   document.querySelectorAll("[data-fa-dm]").forEach(function(b){ b.addEventListener("click", function(){

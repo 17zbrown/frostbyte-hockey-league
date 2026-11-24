@@ -44,7 +44,10 @@ A("...and the v4.20 record's 'withdrawing ... accepted' is corrected here, not r
 console.log("\n3. The site");
 const live = R("src/live/part_live.js"), desk = R("src/live/part9_staffdesks.js");
 const route = live.slice(live.indexOf("CG.ROUTES.owner = function(){"), live.indexOf("CG.submitOwnerApp = async function"));
-A("a Withdraw button for a pending or waitlisted application, whatever the close says", /var ownWithdrawable = !!\(CG\.auth\.ownerApp && a\.id && \(a\.status === "pending" \|\| a\.status === "waitlisted"\)\);/.test(route) &&
+/* v4.58 re-pin (commissioner, 2026-11-23: "remove the waitlist entirely from the website and rulebook"): the site no longer
+   knows a waitlisted application, so the Withdraw button is for a pending one and the review board names no WAITLISTED;
+   withdraw_owner_application (the database) is unchanged until the waitlist objects are dropped after the switch */
+A("a Withdraw button for a pending application, whatever the close says (v4.58: no waitlisted branch)", /var ownWithdrawable = !!\(CG\.auth\.ownerApp && a\.id && a\.status === "pending"\);/.test(route) && !/waitlisted/.test(route.replace(/\/\*[\s\S]*?\*\//g, "")) &&
   /\(ownWithdrawable \? '<button class="btn btn-ghost btn-sm" id="ow-withdraw" style="color:var\(--red-ink\);margin-left:8px">Withdraw application<\/button>' : ''\)/.test(route));
 A("the closed note's promise is true now, with no dash", /You can still withdraw it below, but a withdrawn application cannot be filed again this season\./.test(route) && !/you can still withdraw it below\./.test(live) && !/stays with the commissioners for review/.test(live));
 A("a withdrawn application says so and whether it can be filed again", /var withdrawnNote = deadlineClosed \? 'You withdrew it, and applications have closed, so it cannot be filed again this season\.'/.test(route) &&
@@ -60,15 +63,17 @@ A("withdrawing a sign-up marks the pending application withdrawn, as the databas
 A("the dead writer that reported success while the guard put the status back is gone", !/CG\.setOwnerAppStatus/.test(live));
 A("the office: a withdrawal is not a decision", /"Withdrawn by the applicant, so it was not decided\. The votes cast before the withdrawal stay on the record\."/.test(live) &&
   /a\.status==="withdrawn"\?"":"chip-loss"/.test(live));
-A("the review board names WITHDRAWN and WAITLISTED, and counts neither as decided-by-withdrawal", /a\.status==="withdrawn" \? \["","WITHDRAWN"\]/.test(desk) && /\["chip-warn","WAITLISTED"\]/.test(desk) &&
+A("the review board names WITHDRAWN, DENIED only for a denial, any other status by its own name (v4.58: no WAITLISTED), and counts no withdrawal as decided", /a\.status==="withdrawn" \? \["","WITHDRAWN"\]/.test(desk) && /a\.status==="denied" \? \["chip-loss","DENIED"\] : \["chip-warn", esc\(String\(a\.status\|\|"pending"\)\.toUpperCase\(\)\)\]/.test(desk) && !/WAITLISTED/.test(desk) &&
   /a\.status!=="pending" && a\.status!=="withdrawn"/.test(desk) && !/\(ok\?"APPROVED":"DENIED"\)/.test(desk));
 A("the hub chip links back to the page, with no dash", /'" href="#\/owner" style="cursor:pointer">Own a club: '\+esc\(oa\.status\)\+'<\/a>'/.test(live) && !/Own a club — /.test(live));
 
 console.log("\n4. Rule 2.6 and the changelog");
 global.window = global; global.CG = {}; eval(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook, sec = [].concat(...rb.chapters.map((c) => c.sections || [])).find((x) => x.id === "2.6") || {}, p3 = (sec.paragraphs || [])[3] || "";
+/* v4.58 re-pin (commissioner, 2026-11-23: "remove the waitlist entirely from the website and rulebook"): Rule 2.6 no longer
+   carries the waitlist, so the rulebook checks here pin the text without it; the database and site checks are unchanged */
 A("Rule 2.6 [4]: withdraw at any time; filed again only while open; an approved one is given up through the office",
-  /An applicant may withdraw a pending or waitlisted owner application at any time, including after applications close; a withdrawn application may be filed again only while applications are open, and an approved application is not withdrawn but given up through the league office\./.test(p3) &&
+  /An applicant may withdraw a pending owner application at any time, including after applications close; a withdrawn application may be filed again only while applications are open, and an approved application is not withdrawn but given up through the league office\./.test(p3) &&
   /withdrawing it is not an edit, and after the one edit only the league office may change it\. An applicant may withdraw/.test(p3));
 const e = rb.changelog.find((c) => c.version === "4.21") || {};
 A("the changelog has its 4.21 entry, right before 4.20", e.version === "4.21" && (rb.changelog[rb.changelog.indexOf(e) + 1] || {}).version === "4.20");
