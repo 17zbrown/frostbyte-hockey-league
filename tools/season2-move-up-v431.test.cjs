@@ -96,7 +96,8 @@ Object.keys(books).forEach((f) => {
   A(f + ": no old Season 2 date is left in Chapter S2", stale.length === 0, stale);
 });
 const s2raw = JSON.stringify(rb.chapters.find((c) => c.num === "S2"));
-A("Chapter S2 still has seven sections, no full texts, no em dash and no gendered pronoun", rb.chapters.find((c) => c.num === "S2").sections.length === 7 && !/"full"/.test(s2raw) && !/[\u2013\u2014]/.test(s2raw) && !/\b(he|his|him|she|her)\b/i.test(s2raw));
+/* v4.59 re-pin: Rule S2.8 (the staff committees, commissioner decision D2) is the eighth section */
+A("Chapter S2 has eight sections, no full texts, no em dash and no gendered pronoun", rb.chapters.find((c) => c.num === "S2").sections.length === 8 && !/"full"/.test(s2raw) && !/[\u2013\u2014]/.test(s2raw) && !/\b(he|his|him|she|her)\b/i.test(s2raw));
 A("the holiday rule itself is unchanged (Rules 0.7 and 3.1 skip a week holding an observed holiday)", /A game-week containing a league-observed holiday is skipped in full/.test(bound(books.basic, "0.7")) && /Game-weeks holding a league-observed holiday are skipped in full/.test(bound(books.basic, "3.1")));
 
 console.log("\n4. The changelog");

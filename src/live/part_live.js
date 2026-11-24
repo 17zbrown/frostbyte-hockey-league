@@ -4835,10 +4835,12 @@ CG.ROUTES.register = function(){
   var statusCard = reg ? '<div class="note grn" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">You’re registered for Season '+(s.number||1)+'.</b> '+(myCt&&onRoster
       ? 'Your contract with <b>'+esc(ctName)+'</b> is active — you’re on the roster through Season '+(myCt.end_season||snumR)+'.'
       : 'Position on file: <b>'+esc(CG.POS_NAME[reg.position]||reg.position||"—")+'</b>. '+
-        /* v3.98: a season with its own chapter (Chapter S2) sends late and undrafted sign-ups to the league-wide training camp pool */
+        /* v3.98: a season with its own chapter (Chapter S2) sends late and undrafted sign-ups to the league-wide training camp pool.
+           v4.59 (commissioner, 2026-11-24: "Can you do the requests per game instead of per night?"): a request is for one
+           game, answered by the player on the site (Rule S2.5), so this no longer says "for a night" */
         (upChR
           ? ((reg.created_at && !isNaN(dlMs) && Date.parse(reg.created_at) > dlMs)
-              ? 'You registered after the sign-up cutoff ('+dlText+'), so you’re not in the draft. You join the league-wide training camp pool, where clubs request you for a night and bid on you after six games (Chapter S2).'
+              ? 'You registered after the sign-up cutoff ('+dlText+'), so you’re not in the draft. You join the league-wide training camp pool, where a club may request you for one of its games, which you accept or decline on the site, and clubs may bid on you once you have played six games (Chapter S2).'
               : 'You’re in the draft pool, and the cutoff is '+dlText+'. If you’re not drafted you join the league-wide training camp pool (Chapter S2). You’ll be notified either way.')
           : (reg.created_at && !isNaN(dlMs) && Date.parse(reg.created_at) > dlMs)
           ? (CG.isBasic(s)

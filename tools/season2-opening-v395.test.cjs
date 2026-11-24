@@ -38,7 +38,8 @@ console.log("— the rulebook and changelog");
 global.CG = {}; vm.runInThisContext(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook;
 const s2 = rb.chapters.find((c) => c.num === "S2");
-A("Chapter S2 exists for Season 2 with seven sections", !!s2 && s2.upcomingSeason === 2 && s2.sections.length === 7 && s2.sections[0].id === "S2.1");
+/* v4.59 re-pin: Rule S2.8 (the staff committees, commissioner decision D2) is the eighth section */
+A("Chapter S2 exists for Season 2 with eight sections", !!s2 && s2.upcomingSeason === 2 && s2.sections.length === 8 && s2.sections[0].id === "S2.1");
 const t = JSON.stringify(s2);
 A("...the calendar rule and its Season 2 dates (v4.31: owner close Nov 28, draft Dec 12)", /close at 11:59 PM Eastern on the Saturday of the following week/.test(t) && /Saturday, November 28, 2026 at 11:59 PM/.test(t) && /Saturday, December 12, 2026 at 9:00 PM/.test(t));
 A("...every club decided again; none decided before the close", /Every club's ownership is decided again for Season 2/.test(t) && /No owner application is decided before applications close\./.test(t));

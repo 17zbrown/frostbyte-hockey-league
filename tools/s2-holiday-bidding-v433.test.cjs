@@ -17,7 +17,9 @@ const s26 = sec("S2.6"), t = (s26.paragraphs || []).join(" ");
 A("the general rule: no event on the Saturday of a holiday week Rule 3.1 skips",
   /No bidding event is held on the Saturday of a week skipped for an observed holiday \(Rule 3\.1\), because no games are played that week;/.test(t));
 A("...naming the two Season 2 Saturdays", /for Season 2, no bidding event is held on Saturday, December 26, 2026 or Saturday, January 2, 2027\./.test(t));
-A("...next to the sentence on which Saturdays are held", /after it, clubs use nightly requests only\. No bidding event is held on the Saturday of a week skipped/.test(s26.paragraphs[1] || ""));
+/* v4.59 re-pin (commissioner, 2026-11-24: "Can you do the requests per game instead of per night?"): after the deadline
+   clubs use requests for single games (Rule S2.5), so the sentence before the holiday rule no longer says "nightly" */
+A("...next to the sentence on which Saturdays are held", /after it, clubs use requests for single games only \(Rule S2\.5\)\. No bidding event is held on the Saturday of a week skipped/.test(s26.paragraphs[1] || ""));
 A("an unbid player carries over to the next event held, not the next Saturday", /stays eligible for the next bidding event without playing six more games\./.test(t) && !/next Saturday's event/.test(t));
 A("the weekly opening is unchanged (the v3.95 pin)", /every Saturday at 9:00 PM Eastern and runs for one hour/.test(t));
 A("both formats: S2.6 has no full text of its own", !s26.full && s26.paragraphs.length === 2);

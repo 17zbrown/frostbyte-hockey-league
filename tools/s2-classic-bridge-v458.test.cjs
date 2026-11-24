@@ -236,8 +236,13 @@ const sec = (id) => (rb.chapters.flatMap((c) => c.sections || []).find((s) => s.
 A("Rule 2.6 carries no waitlist (ruled 2026-11-23), in either format's text", !/waitlist/i.test(sec("2.6")) &&
   !/waitlist/i.test(((rb.chapters.flatMap((c) => c.sections || []).find((s) => s.id === "2.6") || {}).full || []).join(" ")));
 A("Appendix A reprints none of it (the full copies were changed alongside)", !/For Season 2|Rule S2\.|waitlist/.test(shelved));
-A("not yet enforced, so not written: committees, discipline caps, pool-request visibility, back-to-back bids",
-  !/committee/i.test(inForce) && !/fourteen \(14\) days/.test(sec("S2.5") + sec("S2.4")) && !/public from then/.test(inForce) && !/bid twice in a row/.test(inForce));
+/* v4.59 re-pin (commissioner decision D2): the v4.59 records make the database enforce the committees and the back-to-back
+   bid rule, so Rules S2.6 and S2.8 now carry them (tools/s2-market-rulebook-v459.test.cjs pins the text); the discipline
+   caps and pool-request visibility are still not enforced on the current site, so they stay unwritten */
+/* v4.59 re-pin: pool-request visibility is enforced from v4.59 (market_pool_requests RLS) and written in S2.5, pinned by
+   tools/s2-market-rulebook-v459.test.cjs; the discipline caps still wait for the switch */
+A("not yet enforced, so not written: discipline caps",
+  !/fourteen \(14\) days/.test(sec("S2.5") + sec("S2.4")));
 A("Chapter S2 and the touched sections: no dashes, no gendered pronouns",
   ["S2.3", "S2.4", "S2.5", "0.2", "0.3", "0.5", "0.6", "1.1", "2.1", "2.2", "2.5", "2.6", "2.7", "2.8", "9.2"].every((id) => !DASHES.test(sec(id)) && !/\b(he|his|him|she|her)\b/.test(sec(id))));
 
