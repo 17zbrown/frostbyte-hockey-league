@@ -13,6 +13,7 @@
 #   bot/club-notices.mjs and bot/handlers.mjs, which jobs/discord-sync.js bundles.
 # jobs/ and edge/ always build (v4.06): discord-ops bundles jobs/, and version.json carries every Edge job's expected build
 # id, so a change there must reach version.json or the database would page that a correct deploy is out of date.
+# v4.62: tools/site-build.cjs is the Netlify build command (it decides what _site/ publishes), so it always builds.
 # A skipped commit still reaches GitHub and the VM, and ships with the next build, which always builds HEAD.
 # A build started by the build hook ignores this command (Netlify docs), so the hook stays a manual tool.
 
@@ -39,6 +40,8 @@ for f in $files; do
   case "$f" in
     bot/club-notices.mjs|bot/handlers.mjs)
       IFS=$old_ifs; echo "netlify-ignore: $f is bundled into discord-sync, building"; exit 1 ;;
+    tools/site-build.cjs)
+      IFS=$old_ifs; echo "netlify-ignore: $f is the build itself, building"; exit 1 ;;
     sql/*|tools/*|docs/*|.github/*|.claude/*|bot/*|supabase/*|src/live/preview_layer.js|README*|CLAUDE*|jsconfig.json)
       ;;
     *)

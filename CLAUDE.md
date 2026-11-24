@@ -65,8 +65,9 @@ The GitHub repo is public: nothing secret belongs in it.
   `TABS=40 node tools/loadtest.mjs herd`.
 - Edge jobs (Supabase does not deploy on push):
   `node tools/edge/build.mjs && npx supabase@2.118.0 functions deploy discord-sync twitch-live-sync lfg-timers discord-scheduler discord-welcome --project-ref bzbuyclwdhmhdzujxeqd --use-api`
-- Deploy: push `main`; Netlify builds `index.html` in about 20 s. `tools/netlify-ignore.sh` skips the build when only
-  sql/, tools/, docs/, .github/, .claude/, bot/ (except the two files discord-sync bundles), README, CLAUDE or
+- Deploy: push `main`; Netlify runs `node tools/site-build.cjs` (about 20 s), which builds `index.html` into `_site/` and
+  publishes only that folder (v4.62). `tools/netlify-ignore.sh` skips the build when only sql/, tools/ (except
+  tools/site-build.cjs), docs/, .github/, .claude/, bot/ (except the two files discord-sync bundles), README, CLAUDE or
   jsconfig files change.
 
 ## Database change protocol
@@ -145,8 +146,10 @@ The GitHub repo is public: nothing secret belongs in it.
   re-enable its crons or config key. If it ever ships it needs a new version number.
 - Netlify usage is metered: nothing new polls Netlify, and no new Netlify function or schedule when pg_cron, pg_net, an
   Edge Function or Realtime can do the job. Never make every open tab reload the page at once.
-- `publish = "."` serves the repo root: a new root file or folder that must stay private needs an exact-path 404
-  redirect with `force = true` in netlify.toml (`*` only works as a trailing splat). Everything in `src/live/*.js`
+- Since v4.62 Netlify publishes only `_site/`: a file is public only if the built page, the manifest or robots.txt
+  references it by absolute path, or netlify.toml names it, and the build fails on anything private or off that list. A
+  new asset the page builds by string concatenation must join the SEEDS list in tools/site-build.cjs. The forced 404 rules
+  in netlify.toml stay as a second wall. Everything in `src/live/*.js`
   ships to every visitor: never a secret, service-role key, webhook URL, bot token or ops key there or in any served
   file (the Supabase anon key is public by design). User text passes through `esc()` before it reaches HTML.
 - Secrets are the user's to add and rotate: never print, paste, log or commit tokens, keys or webhook URLs.

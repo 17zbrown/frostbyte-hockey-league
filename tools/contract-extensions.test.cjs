@@ -197,7 +197,7 @@ console.log("— the rulebook says the same thing");
     /* v2.48: Season 1 runs the basic format — the current briefing says every deal is one season; the
        full-format edition that explains re-signing is shelved beside it, not deleted */
     A(`${f}: tells owners every contract runs one season (basic)`, /Every contract runs one season/.test(b) && /no extensions, no re-signings, no held rights/.test(b));
-    A(`${f}: ...while the shelved edition still tells owners how re-signing works`, (function(){ const s = R(f.replace(/\.md$/, "-FULL-FORMAT.md").replace(/-DISCORD\.txt$/, "-DISCORD-FULL-FORMAT.txt")); return /Re-signing your own players/.test(s) && /Cap outlook/.test(s) && /you still hold his rights until then/.test(s); })());
+    A(`${f}: ...while the shelved edition still tells owners how re-signing works`, (function(){ const s = R("docs/" + f.replace(/\.md$/, "-FULL-FORMAT.md").replace(/-DISCORD\.txt$/, "-DISCORD-FULL-FORMAT.txt")); return /Re-signing your own players/.test(s) && /Cap outlook/.test(s) && /you still hold his rights until then/.test(s); })());
   }
   /* BASIC format is now the live standard: one-season deals, no extensions, no held rights */
   A("[basic] Rule 2.5 says no extensions, no re-signings and no held rights", /The basic format provides for no contract extension, no re-signing and no retained player rights/.test(sec("2.5")));

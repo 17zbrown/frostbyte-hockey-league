@@ -94,6 +94,6 @@ for (const f of ["CGHL-Season1-Owners-Briefing.md", "CGHL-Season1-Owners-Briefin
   A(`${f}: says ten clubs, not twelve`, !/twelve clubs/.test(b));
   A(`${f}: front office must be complete`, /Your front office must be complete/.test(b));
   A(`${f}: the cap consequence is spelled out`, /\$27\.5M of the \$50M cap/.test(b));
-  A(`${f}: the full-format edition is shelved beside it, not deleted`, /\$39\.25M of a \$40M cap/.test(R(f.replace(/\.md$/, "-FULL-FORMAT.md").replace(/-DISCORD\.txt$/, "-DISCORD-FULL-FORMAT.txt"))));
+  A(`${f}: the full-format edition is shelved beside it, not deleted`, /\$39\.25M of a \$40M cap/.test(R("docs/" + f.replace(/\.md$/, "-FULL-FORMAT.md").replace(/-DISCORD\.txt$/, "-DISCORD-FULL-FORMAT.txt"))));
 }
 console.log(ok ? "\nPASS" : "\nFAIL"); process.exit(ok ? 0 : 1);

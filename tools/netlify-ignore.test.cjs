@@ -38,19 +38,24 @@ const cEdge = commit(["edge/serve-job.mjs"]);
 A("edge/ -> build (version.json carries the expected Edge build ids)", run(cJobs, cEdge).status === 1);
 const cSupa = commit(["supabase/config.toml", "tools/edge/build.mjs"]);
 A("only the Supabase CLI settings and tools -> skip", run(cEdge, cSupa).status === 0);
+/* v4.62: the Netlify build command lives in tools/, so a change to it alone must still build */
+const cBuilder = commit(["tools/site-build.cjs", "tools/y.test.cjs"]);
+A("tools/site-build.cjs is the build itself -> build", run(cSupa, cBuilder).status === 1);
 A("no earlier deploy -> build", run("", cOther).status === 1);
 A("the same commit -> build", run(cOther, cOther).status === 1);
 A("an unknown base commit -> build", run("0123456789abcdef0123456789abcdef01234567", cOther).status === 1);
 const toml = fs.readFileSync(path.join(__dirname, "..", "netlify.toml"), "utf8");
 A("netlify.toml runs it as the ignore command", /^\s*ignore = "sh tools\/netlify-ignore\.sh"$/m.test(toml));
-A("the preview copy is no longer built on Netlify", /^\s*command = "node src\/live\/build\.cjs index\.html"$/m.test(toml) && !/^\s*command = .*preview/m.test(toml));
+/* v4.62: the command became tools/site-build.cjs, which builds src/live/build.cjs with no preview layer */
+A("the preview copy is no longer built on Netlify", /^\s*command = "node tools\/site-build\.cjs"$/m.test(toml) && !/^\s*command = .*preview/m.test(toml) &&
+  !/preview/.test(fs.readFileSync(path.join(__dirname, "site-build.cjs"), "utf8").match(/execFileSync\([^;]*;/)[0]));
 A("the dead functions and their routes are gone", ["discord-join", "nhl-stats", "parse-screenshots"].every((f) => !fs.existsSync(path.join(__dirname, "..", "netlify/functions", f + ".js"))) &&
   !/api\/parse-screenshots|api\/discord-join/.test(toml));
 /* 2026-10-15 (plugin setup): CLAUDE.md and jsconfig.json are agent and editor files, never served or bundled, so a push that
    only touches them skips the build; and the audit that found /sql/*.sql and /netlify/functions/*.js answering 200 on the
    live site added forced 404s for the source paths (functions are served from /.netlify/functions and /api/*, never /netlify/) */
 const cAgent = commit(["jsconfig.json", "CLAUDE.md"]);
-A("jsconfig.json and CLAUDE.md -> skip", run(cSupa, cAgent).status === 0, run(cSupa, cAgent).stdout);
+A("jsconfig.json and CLAUDE.md -> skip", run(cBuilder, cAgent).status === 0, run(cBuilder, cAgent).stdout);
 for (const p of ["/sql/*", "/netlify/*", "/jsconfig.json", "/CLAUDE*", "/src/*", "/tools/*", "/shared/*"]) {
   const rx = new RegExp('from = "' + p.replace(/[*.]/g, (c) => "\\" + c) + '"\\s+to = "/"\\s+status = 404\\s+force = true');
   A("netlify.toml blocks " + p + " with a forced 404", rx.test(toml));

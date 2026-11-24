@@ -128,7 +128,7 @@ console.log("\n— the owners' briefings tell the same story");
   for (const f of ["CGHL-Season1-Owners-Briefing.md", "CGHL-Season1-Owners-Briefing-DISCORD.txt"]) {
     const b = R(f);
     A(`${f}: a random snake (v2.64: 12 published rounds)`, /12 rounds in a snake order/.test(b) && /reverses for round two/.test(b) && !/linear, like the NHL — no snake/.test(b));
-    A(`${f}: ...and the shelved full-format edition keeps the linear order`, /same club order every round \(linear, like the NHL — no snake\)/.test(R(f.replace(/\.md$/, "-FULL-FORMAT.md").replace(/-DISCORD\.txt$/, "-DISCORD-FULL-FORMAT.txt"))));
+    A(`${f}: ...and the shelved full-format edition keeps the linear order`, /same club order every round \(linear, like the NHL — no snake\)/.test(R("docs/" + f.replace(/\.md$/, "-FULL-FORMAT.md").replace(/-DISCORD\.txt$/, "-DISCORD-FULL-FORMAT.txt"))));
   }
 }
 

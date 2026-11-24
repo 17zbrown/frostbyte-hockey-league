@@ -7,8 +7,12 @@
   # v4.04: preview.html (the local design preview) is no longer built here; it was blocked at the edge anyway, and building
   # and uploading a second 2.6 MB copy of the app on every deploy cost Netlify usage for nothing. Build it locally with
   # node src/live/build.cjs preview.html preview_layer.js.
-  command = "node src/live/build.cjs index.html"
-  publish = "."
+  # v4.62: the build writes _site/ and only that folder is published. tools/site-build.cjs runs src/live/build.cjs into
+  # _site/index.html (the same bytes and build id as before) and copies only what the page, the manifest and robots.txt
+  # reference, plus the paths named below; it fails the deploy if _site/ holds anything else or anything private.
+  # `publish = "."` served the whole repo, and three Season 1 briefing files with no rule here answered 200 (found 2026-11-24).
+  command = "node tools/site-build.cjs"
+  publish = "_site"
   functions = "netlify/functions"
   # v4.04 (commissioner: "maximize the efficiency of this project so I dont use up all of our netlify usage"): skip the
   # deploy when a push changes only database records, tools, docs or the VM bot's own files. Fail-safe: anything it
@@ -28,6 +32,9 @@
   https_proxy = ""
   http_proxy = ""
 
+# v4.62: publish is now "_site" (above), so nothing in the repo is served unless the build copies it. The rules below stay:
+# they cost nothing, and a revert past the publish change makes them matter again.
+#
 # `publish = "."` serves the WHOLE repo root, which quietly made three things public that were
 # never meant to be: preview.html (a full second copy of the live app, rebuilt every deploy and
 # reachable by anyone who guesses the name), the internal owners' briefing with its paste
