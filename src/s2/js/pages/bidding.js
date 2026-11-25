@@ -137,7 +137,7 @@
     if (R.skipped) return n.why.replace(/[^.]$/, "$&.") + (nx ? " The next bid night is " + nx.label + "." : "");
     if (!r) { var st = K.status(); if (st.error) return "The league did not answer just now (" + st.error + "). Reload the page to try again."; if (!st.loaded) return "One moment while the league's market is read.";
       if (noNights()) return "Saturday bidding runs from 9 to 10 PM ET on the Saturday of every game week after the draft and before the movement deadline. The nights show here once the Season 2 schedule is set (Rule S2.6)."; }
-    if (!r) return "Saturday bidding runs only before the movement deadline. After it, clubs use nightly requests from the training camp pool (Rule S2.5).";
+    if (!r) return "Saturday bidding runs only before the movement deadline. After it, clubs use single-game requests from the training camp pool (Rule S2.5).";
     var nb = K.nextBidNight(), bp = pausedRoom(R);
     if (bp) return bp.by + " paused the room at " + M.etTime(new Date(bp.at).toISOString()) + " ET. No bid is taken and every countdown waits where it stopped until the bidding resumes; waivers and the rest of the market carry on (Rules S2.6 and S2.8).";
     if (r.state === "before") return "Bidding opens at 9:00 PM ET on " + n.label + " and runs one hour. Every pool player with six games is open at once, in rating order" +

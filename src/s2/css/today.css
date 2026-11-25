@@ -54,10 +54,12 @@
    theme's raised gray, Vancouver's navy and Dallas's green star almost vanished. The code tile a club with no logo gets
    keeps the light theme's fill and ink on the plate, or the dark theme's light gray would sit on white */
 .td-pin-disc { position: absolute; inset: 0; display: grid; place-items: center; border-radius: 50%; background: #fff; --fill: rgba(120, 120, 128, .12); --ink-2: #424245;
-  box-shadow: 0 0 0 1px var(--hairline), 0 6px 18px -8px rgba(0, 0, 0, .28); transition: transform 160ms var(--ease-out); }
+  box-shadow: 0 0 0 1px var(--hairline), 0 6px 18px -8px rgba(0, 0, 0, .28); transition: transform 160ms var(--ease-out), scale 160ms var(--ease-out); }
 .td-pin .crest { width: 74%; height: 74%; }
 .td-pin-code { position: absolute; left: 50%; top: 100%; transform: translateX(-50%); margin-top: 4px; font: 700 .6875rem/1 var(--font); letter-spacing: .02em; color: var(--muted); }
-.td-pin:active .td-pin-disc { transform: scale(.93); }
+/* every press on this page is the independent scale property, never transform (QA round 2, 2026-11-25, as ui.css's
+   .btn): the kit's one reduce-motion rule (scale: none) removes them all, and no lift or positioning transform is touched */
+.td-pin:active .td-pin-disc { scale: .93; }
 .td-pin.up .td-pin-code { top: auto; bottom: 100%; margin: 0 0 4px; }
 .td-pin.up .td-pin-tip { bottom: calc(100% + 22px); }
 .td-pin-tip { position: absolute; bottom: calc(100% + 10px); left: 50%; z-index: 3; display: grid; gap: 3px; padding: 9px 12px; border-radius: var(--r-xs); white-space: nowrap;
@@ -74,8 +76,9 @@
   .td-pin:hover { z-index: 5; }
   .td-pin:hover .td-pin-disc { transform: translateY(-2px); }
   /* QA motion 11: the hover lift has the press's specificity and comes later, and a mouse always hovers what it presses,
-     so the press is restated here or it never shows on a desktop */
-  .td-pin:hover:active .td-pin-disc { transform: scale(.93); }
+     so the press was restated here or it never showed on a desktop. Now the press is the scale property and cannot be
+     overridden by the lift; a pressed pin still sets the lift down, as it did */
+  .td-pin:hover:active .td-pin-disc { transform: none; }
   .td-pin:hover .td-pin-tip { opacity: 1; transform: translate(-50%, 0); }
   .td-pin.left:hover .td-pin-tip, .td-pin.right:hover .td-pin-tip { transform: none; }
 }
@@ -86,8 +89,8 @@
 
 /* ---- match tiles (results rail, game-night band, "Also that night"): solid, small radius, big condensed scores ---- */
 .td-tile { position: relative; min-width: 0; display: grid; align-content: start; gap: 12px; padding: 16px 16px 18px; border-radius: var(--r-sm); background: var(--surface); color: var(--ink);
-  transition: transform var(--t-press) var(--ease-out), background-color 160ms ease; }
-.td-tile:has(.td-tile-link:active) { transform: scale(.98); }
+  transition: scale var(--t-press) var(--ease-out), background-color 160ms ease; }
+.td-tile:has(.td-tile-link:active) { scale: .98; }
 @media (hover: hover) and (pointer: fine) { .td-tile:has(.td-tile-link:hover) { background: color-mix(in srgb, var(--ink) 7%, var(--surface)); } }
 .td-tile-link { position: absolute; inset: 0; z-index: 2; border-radius: inherit; }
 .td-tile-link:focus-visible { outline-offset: 2px; }
@@ -111,9 +114,9 @@
 /* ---- the rail (Juventus news rail): swipe on a phone, arrows anywhere ---- */
 .td-rail-ctl { display: flex; gap: 8px; }
 .td-rail-b { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 50%; color: var(--ink);
-  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, currentColor 40%, transparent); transition: opacity 160ms ease, transform var(--t-press) var(--ease-out), box-shadow 160ms ease; }
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, currentColor 40%, transparent); transition: opacity 160ms ease, scale var(--t-press) var(--ease-out), box-shadow 160ms ease; }
 .td-rail-b svg { width: 18px; height: 18px; }
-.td-rail-b:active { transform: scale(.94); }
+.td-rail-b:active { scale: .94; }
 /* the open concept: an arrow is never disabled. At an end it dims and still answers (it wraps the rail round); a rail
    that fits shows no arrows (today.js bindRail) */
 .td-rail-b.at-end { opacity: .45; }
@@ -140,8 +143,8 @@
 .td-date { display: inline-grid; justify-items: center; align-content: center; width: 108px; padding: 16px 0 14px; border-radius: var(--r-xs); background: var(--accent-fill); color: var(--accent-on); }
 .td-date .wd, .td-date .mo { font: 700 .75rem/1 var(--font); letter-spacing: .02em; text-transform: uppercase; }
 .td-date .dd { font-size: 4rem; margin: 8px 0 6px; }
-.td-nx-mu { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; width: 100%; color: var(--ink); transition: transform var(--t-press) var(--ease-out); }
-.td-nx-mu:active { transform: scale(.985); }
+.td-nx-mu { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; width: 100%; color: var(--ink); transition: scale var(--t-press) var(--ease-out); }
+.td-nx-mu:active { scale: .985; }
 .td-nx-mu .at { font: 600 .8125rem/1 var(--font); letter-spacing: -0.006em; color: var(--muted); }
 .td-nx-side { display: grid; justify-items: center; gap: 6px; text-align: center; min-width: 0; }
 .td-nx-side .crest { width: clamp(76px, 22vw, 124px); height: clamp(76px, 22vw, 124px); margin-bottom: 6px; }
@@ -218,16 +221,20 @@
 
 /* ---- title leaders: one statement per leader on the light band (the name large, one row of condensed numerals) ---- */
 .td-lead { display: grid; gap: clamp(24px, 4vw, 40px); padding-top: clamp(24px, 3vw, 36px); border-top: 2px solid var(--ink); }
+/* QA round 2: under a failed title race read's plain sentence, the league's own words on their own line.
+   shortcut: News draws the same line (.of-why, office.css); one class in ui.css with S2.empty when core next opens */
+.td-why { display: block; margin-top: 6px; overflow-wrap: anywhere; }
 /* (the more rows flow by column, so a leader of two races gets two value columns before the chevron, not a wrapped row) */
 /* side by side only from 1180 px: the numeral row is about 470 px wide, and below that the name ran into it (review
    2026-10-20: SCOREZOV5.167 at 900 to 1100 px). Narrower, the numerals sit under the name. */
 @media (min-width: 1180px) { .td-lead { grid-template-columns: minmax(0, 1fr) auto; align-items: end; column-gap: 56px; } }
-.td-lead-who { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: clamp(14px, 2.4vw, 24px); color: var(--ink); transition: transform var(--t-press) var(--ease-out); }
-.td-lead-who:active { transform: scale(.985); }
+.td-lead-who { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: clamp(14px, 2.4vw, 24px); color: var(--ink); transition: scale var(--t-press) var(--ease-out); }
+.td-lead-who:active { scale: .985; }
 .td-lead-who .crest { width: clamp(56px, 9vw, 96px); height: clamp(56px, 9vw, 96px); }
 .td-lead-who > span { display: grid; gap: 12px; min-width: 0; }
 .td-lead-who .kicker { color: var(--muted); }
-.td-lead-who b { overflow-wrap: break-word; }
+/* the name wraps by the kit's one default (ui.css: .d-1 is overflow-wrap: anywhere). QA round 2 (2026-11-25): a
+   break-word here outranked it and leaves a long name's min-content whole, so Today scrolled sideways at 390 px */
 .td-lead-who b.long { font-size: clamp(2rem, 5.4vw, 3.75rem); } .td-lead-who b.xlong { font-size: clamp(1.625rem, 4.2vw, 3rem); }
 @media (hover: hover) and (pointer: fine) { .td-lead-who:hover b { color: var(--accent-ink); } .td-lead-who b { transition: color 160ms ease; } }
 .td-lead-n { display: flex; margin: 0; }
@@ -263,8 +270,8 @@
 /* ---- Players of the Week, set large ---- */
 .td-potw-l { list-style: none; margin: 0; padding: 0; display: grid; border-top: 2px solid var(--ink); }
 @media (min-width: 900px) { .td-potw-l { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-.td-potw-l a { display: grid; justify-items: start; align-content: start; gap: 14px; padding: 28px 0 32px; border-bottom: 1px solid var(--separator); color: var(--ink); transition: transform var(--t-press) var(--ease-out); }
-.td-potw-l a:active { transform: scale(.985); }
+.td-potw-l a { display: grid; justify-items: start; align-content: start; gap: 14px; padding: 28px 0 32px; border-bottom: 1px solid var(--separator); color: var(--ink); transition: scale var(--t-press) var(--ease-out); }
+.td-potw-l a:active { scale: .985; }
 @media (min-width: 900px) {
   .td-potw-l a { padding: 32px 28px 8px 0; border-bottom: 0; height: 100%; }
   .td-potw-l li + li a { padding-left: 28px; border-left: 1px solid var(--separator); }
@@ -285,8 +292,8 @@
 .td-s2-copy { display: grid; gap: 20px; align-content: start; }
 .td-doors { list-style: none; margin: 0; padding: 0; border-top: 2px solid currentColor; }
 .td-doors a { display: grid; grid-template-columns: 72px minmax(0, 1fr) 18px; align-items: center; gap: 18px; padding: 20px 0; color: inherit;
-  border-bottom: 1px solid color-mix(in srgb, currentColor 35%, transparent); transition: transform var(--t-press) var(--ease-out); }
-.td-doors a:active { transform: scale(.985); }
+  border-bottom: 1px solid color-mix(in srgb, currentColor 35%, transparent); transition: scale var(--t-press) var(--ease-out); }
+.td-doors a:active { scale: .985; }
 .td-doors a > svg { width: 18px; height: 18px; transition: transform 200ms var(--ease-out); }
 @media (hover: hover) and (pointer: fine) { .td-doors a:hover > svg { transform: translateX(4px); } }
 .td-door-d { display: grid; justify-items: start; gap: 4px; }
@@ -391,8 +398,8 @@
 .td-room-ph .kicker { justify-content: center; line-height: 1.5; }
 .td-room-main { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 18px clamp(6px, 3vw, 48px); margin-top: clamp(24px, 4vw, 44px); }
 /* the side is a size container, so the nickname sizes to its own column (review 2026-10-19: MAMMOT/H at 320) */
-.td-room-side { container-type: inline-size; display: grid; justify-items: center; gap: 8px; min-width: 0; text-align: center; color: var(--ink); transition: transform var(--t-press) var(--ease-out); }
-.td-room-side:active { transform: scale(.98); }
+.td-room-side { container-type: inline-size; display: grid; justify-items: center; gap: 8px; min-width: 0; text-align: center; color: var(--ink); transition: scale var(--t-press) var(--ease-out); }
+.td-room-side:active { scale: .98; }
 .td-room-side .crest { width: clamp(68px, 19vw, 176px); height: clamp(68px, 19vw, 176px); margin-bottom: 6px; }
 .td-room-side > * { max-width: 100%; }
 .td-room-side .c { font: 600 .8125rem/1.25 var(--font); letter-spacing: -0.006em; color: var(--muted); text-wrap: balance; overflow-wrap: anywhere; }   /* wraps, never cut ("PITTSBU…" at 375, audit 2026-11-09) */
@@ -427,8 +434,8 @@
 .td-stars3 { list-style: none; margin: 0; padding: 0; display: grid; border-top: 2px solid var(--ink); }
 @media (min-width: 900px) { .td-stars3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .td-stars3 a { display: grid; align-content: start; grid-template-columns: auto 56px minmax(0, 1fr); grid-template-areas: "n c t" "n c l" "n c k"; align-items: center; column-gap: 16px; row-gap: 4px;
-  padding: 22px 0; border-bottom: 1px solid var(--separator); color: var(--ink); transition: transform var(--t-press) var(--ease-out); }
-.td-stars3 a:active { transform: scale(.985); }
+  padding: 22px 0; border-bottom: 1px solid var(--separator); color: var(--ink); transition: scale var(--t-press) var(--ease-out); }
+.td-stars3 a:active { scale: .985; }
 .td-stars3 .n { grid-area: n; font-size: 4.5rem; color: var(--accent-ink); min-width: .6em; }
 .td-stars3 .crest { grid-area: c; width: 56px; height: 56px; }
 .td-stars3 .tag { grid-area: t; max-width: 100%; font: 850 clamp(1.625rem, 2.6vw, 2.125rem)/.95 var(--font-brand); font-stretch: 75%; font-variation-settings: "wdth" 75; text-transform: uppercase; overflow-wrap: anywhere; }
@@ -600,5 +607,4 @@
   .td-pin { animation: none; }
   .td-swap { animation-name: td-fade; animation-duration: 200ms !important; animation-timing-function: ease; }
   .td-doors a > svg, .td-dd { transition: none; }
-  .td-lead-who:active { transform: none; }
 }

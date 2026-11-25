@@ -99,3 +99,4 @@ begin
 end $chk$;
 
 -- Rehearsal results (main session): not rehearsed yet.
+-- Applied as migration v463g_market_owner_words on 2026-11-25 (re-rehearsed on production that morning, rolled back, then applied after the v4.63 deploy); tools/sql/grant-audit.sql returned zero rows.

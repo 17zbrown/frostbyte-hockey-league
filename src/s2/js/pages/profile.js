@@ -34,20 +34,10 @@
   function word(n) { return n >= 0 && n <= 10 ? WORDS[n] : S2.fmt(n); }
   function cap(s) { s = String(s || ""); return s.charAt(0).toUpperCase() + s.slice(1); }
   function lcFirst(s) { s = String(s || ""); return s.charAt(0).toLowerCase() + s.slice(1); }   /* "Tied for 2nd of 18" inside a sentence */
-  /* club colors are data: only a clean 3 or 6 digit hex reaches a style attribute */
-  function hex(c) { var m = /^#([0-9a-f]{3}|[0-9a-f]{6})([0-9a-f]{2})?$/i.exec(String(c || "")); return m ? "#" + m[1] : null; }
-  function lum(h) {
-    h = h.slice(1); if (h.length === 3) h = h.replace(/./g, function (c) { return c + c; });
-    var c = [0, 2, 4].map(function (i) { var v = parseInt(h.substr(i, 2), 16) / 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
-    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-  }
-  /* the club band: the club's own color, and whichever of black or white reads better on it (WCAG contrast, measured).
-     Every text on the band uses the full ink, never a faded one: a 78% white on Detroit red measured 3.8:1 */
-  function clubVars(t) {
-    var c1 = hex(t && t.color); if (!c1) return "";
-    var L = lum(c1), ink = 1.05 / (L + 0.05) >= (L + 0.05) / 0.05 ? "var(--on-dark)" : "var(--on-light)";
-    return "--club:" + c1 + ";--club-ink:" + ink + ";";
-  }
+  /* the club band: the club's own color, and whichever of black or white reads better on it (WCAG contrast, measured),
+     or the ink band for a club with no readable color: core's one S2.clubBand (QA round 2, 2026-11-25: this page kept its
+     own hex, lum and clubVars). Every text on the band uses the full ink, never a faded one: a 78% white on Detroit red
+     measured 3.8:1. The heroes below (#pfHero, #pfcHero) wear it */
   /* the kit's charts scale their viewBox to the space they get, so this is only a first guess at the width */
   function chartW(frac) {
     var w = window.innerWidth || 1024, content = Math.min(w, 1180) - (w >= 900 ? 56 : 32);
@@ -153,11 +143,12 @@
     S2.charts.hydrate(el); wire(el, ctx);
     var rv = S2.$$(".reveal", el).concat(el.classList.contains("reveal") ? [el] : []);
     if (enter) { rv.forEach(function (x) { x.classList.add("in"); }); grow(el); }
-    else { rv.forEach(function (x) { x.classList.remove("reveal"); }); settle(el); }
+    else { rv.forEach(function (x) { x.classList.remove("reveal"); }); S2.settle(el); }
     if (fade && !reduced()) el.animate([{ opacity: 0.35 }, { opacity: 1 }], { duration: 200, easing: "ease-out" });
     return el;
   }
-  function settle(el) { if (el && el.getAnimations) el.getAnimations({ subtree: true }).forEach(function (a) { if (a.effect && a.effect.getComputedTiming().endTime !== Infinity) a.finish(); }); }   /* an endless one (a live dot) cannot be finished: finish() throws (QA 2026-11-25) */
+  /* QA round 2 (2026-11-25): this page's own settle() is core's S2.settle now, which keeps its trap: an endless animation
+     (a live dot) cannot be finished, finish() throws (QA 2026-11-25), so it is left running */
   function wire(root, ctx) {
     var list = S2.$$("[data-seg]", root); if (root.matches && root.matches("[data-seg]")) list.unshift(root);
     list.forEach(function (el) {
@@ -165,12 +156,15 @@
       el._seg = S2.segmented(el, function (v) { ctx.onSeg(el.dataset.seg, v); });   /* kept so a link elsewhere can move the underline (club: All results) */
     });
   }
-  /* rank and comparison bars grow from their baseline once, on transform only */
+  /* rank and comparison bars grow from their baseline once, on transform only. QA round 2 (2026-11-25): inside the half
+     second a page's entrance takes (S2.countUp is 500 ms), so 480 ms, and the stagger stops at the eighth bar (8 x 24 ms);
+     at 720 ms and 14 x 28 ms a long rank list kept growing for 1.1 s after the page had landed */
+  var GROW_MS = 480, GROW_STEP = 24, GROW_STEPS = 8;
   function grow(root) {
     if (reduced()) return;
     S2.$$("[data-grow]", root).forEach(function (b, i) {
       var to = b.style.transform || "scaleX(1)";
-      b.animate([{ transform: "scaleX(0.02)" }, { transform: to }], { duration: 720, delay: Math.min(i, 14) * 28, easing: EASE, fill: "backwards" });
+      b.animate([{ transform: "scaleX(0.02)" }, { transform: to }], { duration: GROW_MS, delay: Math.min(i, GROW_STEPS) * GROW_STEP, easing: EASE, fill: "backwards" });
     });
   }
   function pressFeedback(root) {   /* Apple: answer on pointer-down, not on release */
@@ -184,6 +178,47 @@
 
   /* one market subscription for the page on screen (js/market.js S2.market.on: a read landed, a claim or a board edit):
      the next render replaces it, and it ends itself once its root is gone */
+  /* QA round 2 (A7, 2026-11-25): the title race is the model's one read (M.readTitles, shared with Stats and Today);
+     s2_league carries none, so live a player's race places and a club's were simply missing. A page that shows race
+     places asks for it after it draws; when the read lands and the places this page shows have changed (they move with
+     every final), paint repaints them in place. A failed read leaves the places out (the model says why in the console;
+     Stats > Leaders, which names the race, says it with Try again).
+     QA round 2 review (2026-11-25): the race is told only while the season on screen races. Before its first final there is
+     none, and once its titles are filed they replace it (the season sentence, Honors and the about all hide it), so such a
+     page neither reads the board nor repaints: on the complete Season 1 the places changed from none to rows behind a
+     hidden race, and the whole body was swapped for nothing. A read that lands while the page is still entering (an
+     answer takes 150 to 300 ms, the reveals and the bars about 700) waits for the entrance to end (whenStill), and paint
+     repaints only what tells the race: swapping the whole body settled it, so a race holder's page snapped to its end
+     state partway in and keyboard focus inside it was lost */
+  function raceIn(root, places, paint) {
+    if (!M.view.finals || M.filedTitles(M.view.season).length || !M.titlesNeeded()) return;
+    var before = places();
+    M.readTitles().then(function (e) { if (e || !root.isConnected || places() === before) return; whenStill(root, paint); });
+  }
+  /* a link that held focus in a region the race repaints gets it back by its address and which of that address it was
+     (a race row can add the column's own links above it, so a plain index would land on another link) */
+  function focusKey(host) {
+    var f = document.activeElement, h = host && f && host.contains(f) && f.getAttribute("href");
+    return h ? { href: h, i: S2.$$("a[href]", host).filter(function (a) { return a.getAttribute("href") === h; }).indexOf(f) } : null;
+  }
+  function focusBack(host, k) {
+    var a = host && k ? S2.$$("a[href]", host).filter(function (x) { return x.getAttribute("href") === k.href; })[k.i] : null;
+    if (a) a.focus({ preventScroll: true });
+  }
+  /* fn once root's entrance is over: every reveal has its class (S2.reveal adds it two frames after the page's after(),
+     which is where raceIn asks) and every finite animation under root has finished. An endless one (a live dot) is not
+     waited on, and one canceled meanwhile (its node was repainted, so a.finished rejects) counts as over. frames bounds
+     the wait for the reveals' class (about a second), so a reveal nobody shows cannot hold the repaint back for good */
+  function whenStill(root, fn, frames) {
+    requestAnimationFrame(function () {
+      if (!root.isConnected) return;
+      var left = frames == null ? 60 : frames;
+      if (left > 0 && S2.$(".reveal:not(.in)", root)) { whenStill(root, fn, left - 1); return; }
+      var run = root.getAnimations ? root.getAnimations({ subtree: true }).filter(function (a) { var t = a.effect && a.effect.getComputedTiming(); return a.playState === "running" && t && isFinite(t.endTime); }) : [];
+      if (!run.length) { fn(); return; }
+      Promise.all(run.map(function (a) { return a.finished.then(null, function () { return null; }); })).then(function () { whenStill(root, fn, 0); });
+    });
+  }
   var offMk = null;
   function follow(fn, root) {
     if (offMk) offMk();
@@ -267,16 +302,31 @@
   /* a day of a season's calendar, "Oct 31", through Today's one lookup of a season's dates (S2.seasonDate, today.js); a
      season's name is S2.seasonName (review 2026-11-24: this file kept a second lookup of each, one of another shape) */
   function seasonDay(n, key) { var c = S2.seasonDate(n, key); return c && c.at ? M.etMonthDay(c.at) : null; }
+  /* a member's games in the seasons other than the one on screen (M.careerEarlier, every season's games less this one's),
+     and where they are: each other season that has had games (not an upcoming one), as a link to this player's page on it
+     (S2.seasonHref: the current season is the bare address, an archive ?season=n). where names the one season when there
+     is one, else "earlier seasons" (or "other seasons" from an archive, when a later one counts too). null when none */
+  function elsewhere(p) {
+    var n = M.careerEarlier(p.id); if (!n) return null;
+    var cur = S2.currentSeason(), rows = M.control.seasons.filter(function (s) { return s.number !== M.view.season && s.status !== "upcoming"; });
+    if (!rows.length) { console.error("profile: " + n + " career games outside " + M.view.name + ", and no other season in the league read"); return null; }
+    var earlier = rows.every(function (s) { return s.number < M.view.season; });
+    return { n: n, where: rows.length === 1 ? S2.seasonName(rows[0].number) : earlier ? "earlier seasons" : "other seasons",
+      links: rows.map(function (s) { return [S2.seasonHref(cur && cur.number === s.number ? null : s.number, "#/player/" + p.id), S2.seasonName(s.number) + " career"]; }) };
+  }
   function heroLine(p) {
     var L = p.mainRole ? p.lines[p.mainRole] : null;
     /* QA worst 2 (2026-11-25): the copy agrees with the rating ring beside it. The ring is right (v3.74: a provisional
        headline rating at the signed-up position even at 0 games, now 85 on the v4.48 scale), so only the words change: a
        carried-over rating is said as one, a 0-game rating as provisional, and a completed season promises no box score */
     if (!L) {
-      if (p.former) return "No longer on a roster, and no " + M.view.name + " games on record.";
-      if (M.view.status === "complete") return "No " + M.view.name + " games on record.";
+      /* QA round 2 (2026-11-25): a veteran's games in another season are said beside it (Season 2 read "No Season 2 games
+         yet" over a rating earned in 14 Season 1 games); the career section below links them */
+      var aw = elsewhere(p), also = aw ? ", " + plural(aw.n, "game") + " in " + aw.where : "";
+      if (p.former) return "No longer on a roster, and no " + M.view.name + " games on record" + also + ".";
+      if (M.view.status === "complete") return "No " + M.view.name + " games on record" + also + ".";
       var hr = M.ratings(p.id)[0];
-      return "No " + M.view.name + " games yet." + (!hr ? " A rating and stats appear after the first box score." : hr.gp > 0 ? " The rating carries over from earlier games until the first box score." :
+      return "No " + M.view.name + " games yet" + also + "." + (!hr ? " A rating and stats appear after the first box score." : hr.gp > 0 ? " The rating carries over from earlier games until the first box score." :
         " The rating is provisional until " + word(M.SETTLE_GP) + " games at the position.");
     }
     var s;
@@ -356,7 +406,7 @@
     /* the jersey number is the player's own numeral, set huge in the club ink behind the hero (Juventus player pages). It is
        decoration: the kicker says "#3" in full ink for every reader */
     var jersey = p.num != null && p.rostered ? '<span class="pfx-jersey d-num" aria-hidden="true">' + esc(p.num) + "</span>" : "";
-    return '<header class="band club hero pfx-hero reveal" id="pfHero" style="' + clubVars(t) + '">' + crumb(crumbs, p.tag) +
+    return '<header class="band club hero pfx-hero reveal" id="pfHero" style="' + S2.clubBand(t) + '">' + crumb(crumbs, p.tag) +
       '<div class="pfx-hero-g">' + jersey +
         '<div class="pfx-hero-id">' + (kick ? '<span class="kicker">' + esc(kick) + "</span>" : "") +
           '<h1 class="d-hero pfx-name">' + esc(p.tag) + "</h1>" +
@@ -377,7 +427,8 @@
     if (num(o.psa)) bits.push(num(o.psv) + " of " + plural(num(o.psa), "penalty shot") + " stopped");
     return bits;
   }
-  function seasonSec(p, L, role) {
+  /* copyOnly: the head's copy alone (#pfSeasonHd), which the title race repaints when its places land (raceIn) */
+  function seasonSec(p, L, role, copyOnly) {
     var cg = clubGp(), rings, h, sent;
     if (role === "G") {
       var mw = leagueMax("w", "G"), ms = leagueMax("sv", "G"), svr = M.rank(L, "sv_pct");
@@ -402,13 +453,15 @@
         (num(L.sog) ? " and " + esc(M.display("shot_pct", L.shot_pct)) + " shooting on " + plural(num(L.sog), "shot") : "") + "." +
         (num(L.fot) && !M.rank(L, "fo_pct") ? " At center, " + num(L.fow) + " of " + plural(num(L.fot), "faceoff") + " won (" + esc(M.display("fo_pct", L.fo_pct)) + ") in " + plural(num(L.fo_games), "game") + "." : "");
     }
+    var hd = { copyId: "pfSeasonHd", kicker: M.view.name + THRU_T, id: "pfSeasonH", h: h, p: sent + " A full ring is the league's best total.",
+      side: arrow(role === "G" ? "#/stats?tab=goalies" : "#/stats?tab=skaters", role === "G" ? "All goaltenders" : "All skaters") };
+    if (copyOnly) return headCopy(hd);
     var ringSvg = S2.charts.rings({ size: 220, stroke: 18, label: rings.map(function (r) { return r.label + " " + r.v; }).join(", "),
       rings: rings.map(function (r) { return { value: r.max ? r.v / r.max : 0, color: r.color, label: r.label, text: S2.fmt(r.v) }; }) });
     var bigs = rings.map(function (r) {
       return '<li><i class="pf-dot" style="background:' + r.color + '"></i><span class="pfx-big d-num">' + S2.fmt(r.v) + '</span><span class="pfx-big-l"><b>' + esc(r.label) + "</b><span>" + esc(r.note) + "</span></span></li>";
     }).join("");
-    return sec("pfSeasonH", head({ kicker: M.view.name + THRU_T, id: "pfSeasonH", h: h, p: sent + " A full ring is the league's best total.",
-        side: arrow(role === "G" ? "#/stats?tab=goalies" : "#/stats?tab=skaters", role === "G" ? "All goaltenders" : "All skaters") }) +
+    return sec("pfSeasonH", head(hd) +
       '<div class="pfx-season"><div class="pfx-rings">' + ringSvg + '</div><ul class="pfx-bigs">' + bigs + "</ul></div>");
   }
 
@@ -634,17 +687,25 @@
     var rows = M.career(p.id);
     var seasons = {}, games = 0, clubs = [];
     rows.forEach(function (r) { seasons[r.season] = 1; games += num(r.line.gp); r.clubs.forEach(function (c) { if (clubs.indexOf(c) < 0) clubs.push(c); }); });
-    var nS = Object.keys(seasons).length, one = clubs.length === 1 ? M.team(clubs[0]) : null;
-    var h = rows.length ? cap(word(nS)) + " season" + (nS === 1 ? "" : "s") + ", " + plural(games, "game") +
-      (one ? " for " + one.city : clubs.length > 1 ? " for " + word(clubs.length) + " clubs" : "") + "." : "No league games yet.";
+    var nS = Object.keys(seasons).length, one = clubs.length === 1 ? M.team(clubs[0]) : null, where = one ? " for " + one.city : clubs.length > 1 ? " for " + word(clubs.length) + " clubs" : "";
+    /* QA round 2 (2026-11-25): the rows are the season on screen's (s2_league reads one season); a member's games in any
+       other season are counted beside them (M.careerEarlier) and linked to their page on that season, never "No league
+       games yet" for a veteran */
+    var aw = elsewhere(p), away = aw ? plural(aw.n, "game") + " in " + aw.where : "";
+    var h = rows.length && aw ? cap(plural(games, "game")) + " in " + M.view.name + where + ", " + away + "."
+      : rows.length ? cap(word(nS)) + " season" + (nS === 1 ? "" : "s") + ", " + plural(games, "game") + where + "."
+      : aw ? cap(away) + ", none in " + M.view.name + (M.view.status === "complete" ? "." : " yet.") : "No league games yet.";
     var roles = rows.map(function (r) { return r.role; }).filter(function (r, i, a) { return a.indexOf(r) === i; })
       .sort(function (a, b) { return a === p.mainRole ? -1 : b === p.mainRole ? 1 : 0; });
     var body = roles.map(function (role) {
       return (roles.length > 1 ? '<h3 class="pf-car-role">' + (role === "G" ? "In goal" : "As a skater") + "</h3>" : "") +
         careerTable(role, rows.filter(function (r) { return r.role === role; }));
     }).join("");
-    return sec("pfCarH", head({ kicker: "Career", id: "pfCarH", h: h,
-      p: rows.length ? "Every league game, every season, on any club, whether or not they are on a roster now. Playoffs and pre-season get rows of their own." : "Every season they play will be listed here." }) + body);
+    var p0 = aw ? (rows.length ? "Every " + esc(M.view.name) + " game on any club, whether or not they are on a roster now. Playoffs and pre-season get rows of their own. " : "") +
+        "The games in " + esc(aw.where) + " are on " + (aw.links.length === 1 ? "that season's" : "each season's") + " page."
+      : rows.length ? "Every league game, every season, on any club, whether or not they are on a roster now. Playoffs and pre-season get rows of their own." : "Every season they play will be listed here.";
+    return sec("pfCarH", head({ kicker: "Career", id: "pfCarH", h: h, p: p0,
+      side: aw ? aw.links.map(function (l) { return arrow(esc(l[0]), l[1]); }).join("") : "" }) + body);
   }
 
   /* ---- the clubs a training camp player filled in for (per-game requests they accepted, PROPOSED 2026-11-24). Every
@@ -705,7 +766,7 @@
       return '<li><span class="pfx-hon-n d-num">W' + esc(x.week) + '</span><span class="grow"><b>Player of the Week, Week ' + esc(x.week) + "</b><span>" + esc(x.label.replace(/^Player of the Week \((.*)\), Week \d+$/, "$1")) + ", " + esc(x.line) + "</span></span></li>";
     }).join("") + races.map(function (x) {
       return '<li><span class="pfx-hon-n d-num">' + esc(ord(x.place)) + '</span><span class="grow"><b>' + esc(x.label.split(":")[0]) + " race</b><span>" +
-        esc(x.category === "goaltending_title" ? S2.fmt(x.perGame, 2) + " goals against a game" : S2.fmt(x.perGame, 3) + " a game") + " over " + plural(x.gp, "game") + "</span></span></li>";
+        esc(S2.fmt(x.perGame, 2) + (x.category === "goaltending_title" ? " goals against a game" : " a game")) + " over " + plural(x.gp, "game") + "</span></span></li>";
     }).join("");
     return '<div class="pfx-col">' + head({ kicker: "Honors", id: "pfHonH", h: h, p: esc(sent.trim()), side: arrow("#/stats?tab=awards", "All awards") }) + '<ul class="pfx-rows pfx-hon">' + items + "</ul></div>";
   }
@@ -872,7 +933,7 @@
         ["pf-bf-va", "pf-bf-vb"].forEach(function (c) { var o = S2.$("." + c, cur), n = S2.$("." + c, nr); o.innerHTML = n.innerHTML; o.className = n.className; });   /* innerHTML keeps the screen-reader name */
       });
       var r = S2.$("#pfCmpR", body);
-      if (r) { r.outerHTML = cmpRadar(A, B); r = S2.$("#pfCmpR", body); S2.charts.hydrate(r); settle(r); if (!reduced()) r.animate([{ opacity: 0.35 }, { opacity: 1 }], { duration: 200, easing: "ease-out" }); }   /* a new pick cross-fades; the radar does not breathe out again */
+      if (r) { r.outerHTML = cmpRadar(A, B); r = S2.$("#pfCmpR", body); S2.charts.hydrate(r); S2.settle(r); if (!reduced()) r.animate([{ opacity: 0.35 }, { opacity: 1 }], { duration: 200, easing: "ease-out" }); }   /* a new pick cross-fades; the radar does not breathe out again */
     }
     var inp = S2.$("#pfCmpQ", body);
     inp.addEventListener("input", function () { st.q = inp.value; list(); });
@@ -940,6 +1001,16 @@
       /* the market's reads (on waivers, in the pool, on the board) repaint the hero in place. Only a player with no roster
          spot can be on waivers or in the pool, so only their page asks for the market (a rostered player's never pays for it) */
       follow(function (e) { if (e.type === "load") heroAgain(); }, root);
+      /* the race places: the season sentence's copy, Honors (#pfTail) and the about's race rule, each repainted in place;
+         the control that held focus in Honors or the about gets it back */
+      raceIn(root, function () { return JSON.stringify((M.player(p.id) || p).honors.filter(function (h) { return h.kind === "title_race"; }).map(function (h) { return [h.category, h.place, h.perGame, h.gp]; })); }, function () {
+        var now = M.player(p.id) || p, L = st.role ? now.lines[st.role] : null, fa = document.activeElement;
+        if (L) swap("pfSeasonHd", seasonSec(now, L, st.role, true), root, ctx);
+        var k = focusKey(S2.$("#pfTail", root));
+        focusBack(swap("pfTail", tailSec(now, L ? st.role : null), root, ctx), k);
+        var ab = S2.$$(":scope > details.about", root).pop(), open = ab && ab.open, abF = !!ab && ab.contains(fa);
+        if (ab) { ab.outerHTML = aboutP(now); ab = S2.$$(":scope > details.about", root).pop(); if (ab) { ab.classList.remove("reveal"); ab.open = !!open; if (abF) S2.$("summary", ab).focus({ preventScroll: true }); } }
+      });
       if (!p.rostered && S2.market && S2.market.ensure) S2.market.ensure();
       root.addEventListener("keydown", function (e) {   /* roving focus across the heat strip: one tab stop, arrows walk the games */
         var c = e.target.closest(".pf-hc"); if (!c) return;
@@ -1012,11 +1083,16 @@
   }
   /* a club's place on a measure, best first: clubs level at the precision shown (one decimal) share it, as M.rank's players
      do, so two clubs on a 25.0% power play are each "tied for 3rd" (the first cut gave them 3rd and 4th) */
+  /* QA round 2 (2026-11-25): a club with no value (a power play or penalty kill percentage before its first chance is
+     null) is not ranked, and is not a 0% in anyone's rank or the average: the pool is the clubs with a value, n of them,
+     and a club with none gets null. leagueAvg is null while no club has one */
   function rankIn(code, k) {
-    var L = league(), key = function (r) { return Math.round(num(r[k]) * 10); }, mine = key(standRow(code) || {});
-    return { rank: 1 + L.filter(function (r) { return key(r) > mine; }).length, tied: L.filter(function (r) { return key(r) === mine; }).length };
+    var L = league().filter(function (r) { return r[k] != null; }), key = function (r) { return Math.round(num(r[k]) * 10); }, me = standRow(code);
+    if (!me || me[k] == null) return null;
+    var mine = key(me);
+    return { rank: 1 + L.filter(function (r) { return key(r) > mine; }).length, tied: L.filter(function (r) { return key(r) === mine; }).length, n: L.length };
   }
-  function leagueAvg(k) { var L = league(); return L.reduce(function (a, r) { return a + num(r[k]); }, 0) / Math.max(1, L.length); }   /* plain mean of the clubs */
+  function leagueAvg(k) { var L = league().filter(function (r) { return r[k] != null; }); return L.length ? L.reduce(function (a, r) { return a + num(r[k]); }, 0) / L.length : null; }   /* plain mean of the clubs with one */
   function ppCounts(code, d) {   /* power-play goals and chances, summed from each final's "goals/chances" strings */
     var o = { g: 0, n: 0, ag: 0, an: 0, unknown: 0 };
     d.res.forEach(function (x) {
@@ -1058,7 +1134,7 @@
       (!fin && row && row.mark ? '<span class="pfx-flag">' + esc(row.mark === "e" ? "Eliminated" : "Clinched") + "</span>" : "");
     var nums = fin ? [["Record", fin.w + "-" + fin.l + "-" + fin.otl, null], [t.division, ord(fin.divRank), null], ["Points", S2.fmt(fin.pts), fin.pts], ["Goal difference", signed(fin.gf - fin.ga), null]]
       : row && !level ? [["Record", row.w + "-" + row.l + "-" + row.otl, null], [t.division, ord(row.rank), null], ["Points", S2.fmt(row.pts), row.pts], ["Goal difference", signed(row.diff), null]] : [];
-    return '<header class="band club hero pfx-hero pfc-hero reveal" id="pfcHero" style="' + clubVars(t) + '">' + crumb([["#/clubs", "Clubs"]], t.full) +
+    return '<header class="band club hero pfx-hero pfc-hero reveal" id="pfcHero" style="' + S2.clubBand(t) + '">' + crumb([["#/clubs", "Clubs"]], t.full) +
       '<div class="pfc-hero-g">' + plate(t.code, "lg") +
         '<div class="pfc-hero-id"><span class="kicker">' + esc(t.division) + " Division" + (t.founded ? ", since Season " + esc(t.founded) : "") + "</span>" + (flag ? '<div class="pfx-flags">' + flag + "</div>" : "") +
           '<h1 class="d-hero pfc-name"><span>' + esc(t.city) + "</span> <span>" + esc(t.name) + "</span></h1>" + (lede ? '<p class="pfx-lede">' + esc(lede) + "</p>" : "") +
@@ -1171,10 +1247,19 @@
     var rows = statsRows(t, s);
     return '<div id="pfcStatsB">' + (rows.length ? table("pfcT" + s.stats, statsCols(s.stats), rows, s.stats === "G" ? { k: "gp", dir: "desc" } : { k: "p", dir: "desc" }, t.full + (s.stats === "G" ? " goaltenders" : " skaters")) : "") + "</div>";
   }
-  function meter(label, v, avg, rank, note) {
-    return '<div class="pfc-meter"><div class="pf-pb-h"><span class="pf-pb-l">' + esc(label) + '</span><span class="pf-pb-v"><b class="d-num">' + S2.fmt(v, 1) + '%</b><span class="pf-pb-p">' + cap(place(rank)) + " of " + league().length + "</span></span></div>" +
-      '<div class="pf-pb-t" role="img" aria-label="' + esc(label + " " + S2.fmt(v, 1) + " percent, league average " + S2.fmt(avg, 1) + " percent") + '"><i data-grow style="transform:scaleX(' + Math.max(0, Math.min(1, v / 100)).toFixed(3) + ')"></i><span class="pf-pb-m" style="left:' + Math.max(0, Math.min(100, avg)).toFixed(1) + '%"></span></div>' +
-      '<span class="pf-pb-n">League average ' + S2.fmt(avg, 1) + "% (the tick). " + esc(note) + "</span></div>";
+  /* one special-teams meter. QA round 2 (2026-11-25): a club with no chance of this kind yet (v and rank null) reads none
+     ("No power plays yet"), with no rank and an empty bar; while no club has had one (avg null) there is no league average
+     and no tick. Before, it read "–%, tied for 1st of 8" over a league average that counted the clubs with none as 0%.
+     QA round 2 review: the note under a meter with none says only the league average (the value above already says none,
+     and so does the lede), and every note ends in a period, so the two meters read alike */
+  function meter(label, v, avg, rank, note, none) {
+    var has = v != null && rank, said = has ? S2.fmt(v, 1) + " percent" : none, avgSaid = avg == null ? "" : ", league average " + S2.fmt(avg, 1) + " percent";
+    var foot = [avg == null ? "" : "League average " + S2.fmt(avg, 1) + "% (the tick)", has ? note : ""].filter(Boolean).join(". ");
+    return '<div class="pfc-meter"><div class="pf-pb-h"><span class="pf-pb-l">' + esc(label) + '</span><span class="pf-pb-v">' +
+        (has ? '<b class="d-num">' + S2.fmt(v, 1) + '%</b><span class="pf-pb-p">' + cap(place(rank)) + " of " + rank.n + "</span>" : '<span class="pf-pb-p">' + esc(none) + "</span>") + "</span></div>" +
+      '<div class="pf-pb-t" role="img" aria-label="' + esc(label + " " + said + avgSaid) + '">' + (has ? '<i data-grow style="transform:scaleX(' + Math.max(0, Math.min(1, v / 100)).toFixed(3) + ')"></i>' : "") +
+        (avg == null ? "" : '<span class="pf-pb-m" style="left:' + Math.max(0, Math.min(100, avg)).toFixed(1) + '%"></span>') + "</div>" +
+      (foot ? '<span class="pf-pb-n">' + esc(foot) + ".</span>" : "") + "</div>";
   }
   /* the club as a whole, in the player page's ranked bars (pbar). Commissioner, 2026-11-04: "Team: Time on Attack, passing
      percentage, hits, blocks, takeaways, giveaways, interceptions, PIM, face off percentage." */
@@ -1198,10 +1283,15 @@
     var c = ppCounts(t.code, d);
     if (!row || (c.n === 0 && c.an === 0)) return lines + ts;
     var ppR = rankIn(t.code, "pp_pct"), pkR = rankIn(t.code, "pk_pct");
-    var st = sec("pfcSpH", head({ kicker: "Special teams", id: "pfcSpH", h: "Power play " + S2.fmt(row.pp_pct, 1) + "%, " + place(ppR) + " of " + league().length + ".",
-        p: plural(c.g, "goal") + " on " + plural(c.n, "power play", "power plays") + "; the penalty kill stopped " + (c.an - c.ag) + " of " + c.an + " (" + place(pkR) + " in the league)." }) +
-      '<div class="pfc-meters">' + meter("Power play", row.pp_pct, leagueAvg("pp_pct"), ppR, plural(c.g, "goal") + " on " + plural(c.n, "chance")) +
-      meter("Penalty kill", row.pk_pct, leagueAvg("pk_pct"), pkR, plural(c.an - c.ag, "kill") + " in " + plural(c.an, "time") + " shorthanded") + "</div>");
+    if (!ppR && !pkR) return lines + ts;   /* the table's percentages are the ranked ones: neither, then nothing to rank */
+    /* the headline leads with the power play, or with the penalty kill while the club has had no power play */
+    var ppS = ppR ? plural(c.g, "goal") + " on " + plural(c.n, "power play", "power plays") : "No power plays yet",
+      pkS = pkR ? "the penalty kill stopped " + (c.an - c.ag) + " of " + c.an + " (" + place(pkR) + " in the league)" : "no penalty kills yet";
+    var st = sec("pfcSpH", head({ kicker: "Special teams", id: "pfcSpH",
+        h: ppR ? "Power play " + S2.fmt(row.pp_pct, 1) + "%, " + place(ppR) + " of " + ppR.n + "." : "Penalty kill " + S2.fmt(row.pk_pct, 1) + "%, " + place(pkR) + " of " + pkR.n + ".",
+        p: ppS + "; " + pkS + "." }) +
+      '<div class="pfc-meters">' + meter("Power play", row.pp_pct, leagueAvg("pp_pct"), ppR, plural(c.g, "goal") + " on " + plural(c.n, "chance"), "No power plays yet") +
+      meter("Penalty kill", row.pk_pct, leagueAvg("pk_pct"), pkR, plural(c.an - c.ag, "kill") + " in " + plural(c.an, "time") + " shorthanded", "No penalty kills yet") + "</div>");
     return lines + ts + st;
   }
   /* the next game as the ink match-center band (Juventus): a date block, both crests, the time, one outline button. It sits
@@ -1268,6 +1358,33 @@
         side: tabs("moves", [["all", 'All <span class="num">' + d.moves.length + "</span>"], ["in", 'Arrivals <span class="num">' + nin + "</span>"], ["out", 'Departures <span class="num">' + nout + "</span>"]], s.moves, "Which moves", "sm") }) +
       movesBody(t, s));
   }
+  /* the History panel's Honors column, its own function so the title race repaints it alone (raceIn) */
+  function clubHonors(t) {
+    /* Honors (commissioner, 2026-11-21: team awards for the Presidents' Trophy, the Stanley Cup and the rest): the club's
+       own trophies first, as rows like By season beside it, then its players' trophies and titles, then Players of the
+       Week. Once the season's titles are filed the races are over, so the filed titles replace the race places. The season
+       is the one the page tells (toldN: the season on screen, or the newest closed one while it has no games) */
+    var hn = toldN(), hName = S2.seasonName(hn);
+    var wonT = M.trophies(hn).filter(function (x) { return x.club === t.code; }), teamT = wonT.filter(function (x) { return x.team; }), playerT = wonT.filter(function (x) { return !x.team; });
+    var filed = M.filedTitles(hn), titles = filed.length ? [] : M.titles().filter(function (x) { return x.club === t.code; });
+    var mineF = filed.filter(function (x) { return x.club === t.code; });
+    var potw = (filed.length ? M.honors.potwSeason(hn) : M.honors.potw).filter(function (h) { return h.club === t.code; }).sort(function (a, b) { return b.week - a.week; });   /* newest first, as M.honorRank */
+    var nAw = playerT.length + mineF.length;
+    var awRow = function (x, name) { var a = awardParts(x); return '<li><a class="pf-rec pf-press" href="' + esc(x.href || "#/stats?tab=awards") + '"><span class="pfx-hon-n d-num">S' + esc(hn) + '</span><span class="grow"><b>' + esc(x.tag) + "</b><span>" + esc(name + ", " + lcFirst(a[0]) + ": " + a[1] + ".") + "</span></span>" + S2.chev() + "</a></li>"; };
+    var honH = teamT.length ? (teamT[0].key === "stanley_cup" ? "Stanley Cup champions." : teamT.map(function (x) { return x.short; }).join(" and ") + ".") :
+      nAw === 1 ? (playerT[0] ? playerT[0].short + " for " + playerT[0].tag : mineF[0].label + " for " + mineF[0].tag) + "." : nAw ? cap(word(nAw)) + " awards for its players." :
+      potw.length ? cap(word(potw.length)) + (potw.length === 1 ? " Player of the Week." : " Players of the Week.") : titles.length ? plural(titles.length, "place") + " in the title races." : filed.length ? "No " + hName + " honors." : "No honors yet.";
+    return '<div class="pfx-col" id="pfcHon">' + head({ kicker: "Honors", id: "pfcHonH", h: honH,
+        p: teamT.length || nAw ? hName + "'s trophies and titles, then Players of the Week, for this club and its players." :
+          filed.length ? (potw.length ? "Players of the Week for this club's players. " + hName + "'s trophies and titles went to other clubs." : hName + "'s trophies, titles and Players of the Week went to other clubs.") :
+          "Players of the Week and the statistical title races, for players on this club. Titles are decided when the regular season ends.", side: arrow("#/stats?tab=awards", "All awards") }) +
+      (teamT.length || nAw || potw.length || titles.length ? '<ul class="pfx-rows pfx-hon">' +
+        teamT.map(function (x) { return '<li class="pfx-hon-aw"><span class="pfx-hon-n d-num">S' + esc(hn) + '</span><span class="grow"><b>' + esc(x.name) + "</b><span>" + esc(awardLine(x)) + "</span></span></li>"; }).join("") +
+        playerT.map(function (x) { return awRow(x, x.short); }).join("") +
+        mineF.map(function (x) { return awRow(x, x.label); }).join("") +
+        potw.map(function (h) { return '<li><a class="pf-rec pf-press" href="' + h.href + '"><span class="pfx-hon-n d-num">W' + esc(h.week) + '</span><span class="grow"><b>' + esc(h.tag) + "</b><span>" + esc(h.label) + ", Week " + esc(h.week) + ". " + esc(h.line) + "</span></span>" + S2.chev() + "</a></li>"; }).join("") +
+        titles.map(function (x) { return '<li><a class="pf-rec pf-press" href="' + x.href + '"><span class="pfx-hon-n d-num">' + esc(ord(x.rank)) + '</span><span class="grow"><b>' + esc(x.tag) + "</b><span>" + esc(x.label + " race, " + x.display) + "</span></span>" + S2.chev() + "</a></li>"; }).join("") + "</ul>" : "") + "</div>";
+  }
   function historyPanel(t, row) {
     var d = clubData(t.code), weeks = {}, all = {};
     M.games.forEach(function (g) {   /* points per club per week: win 2, overtime loss 1 (a forfeit never gives the OT point), as in the standings */
@@ -1293,30 +1410,7 @@
         rec("First win", d.firstWin, d.firstWin ? d.firstWin.gf + "-" + d.firstWin.ga : "", d.firstWin ? vs(d.firstWin) : "") +
         (row && row.forfeits_taken ? '<li><span class="pfc-game"><span class="pfc-rec-n d-num">' + row.forfeits_taken + '</span><span class="grow"><b>Forfeits taken</b><span>' + plural(row.forfeits_taken, "game") + " lost by forfeit</span></span></span></li>" : "") +
       "</ul>", "tint");
-    /* Honors (commissioner, 2026-11-21: team awards for the Presidents' Trophy, the Stanley Cup and the rest): the club's
-       own trophies first, as rows like By season beside it, then its players' trophies and titles, then Players of the
-       Week. Once the season's titles are filed the races are over, so the filed titles replace the race places. The season
-       is the one the page tells (toldN: the season on screen, or the newest closed one while it has no games) */
-    var hn = toldN(), hName = S2.seasonName(hn);
-    var wonT = M.trophies(hn).filter(function (x) { return x.club === t.code; }), teamT = wonT.filter(function (x) { return x.team; }), playerT = wonT.filter(function (x) { return !x.team; });
-    var filed = M.filedTitles(hn), titles = filed.length ? [] : M.titles().filter(function (x) { return x.club === t.code; });
-    var mineF = filed.filter(function (x) { return x.club === t.code; });
-    var potw = (filed.length ? M.honors.potwSeason(hn) : M.honors.potw).filter(function (h) { return h.club === t.code; }).sort(function (a, b) { return b.week - a.week; });   /* newest first, as M.honorRank */
-    var nAw = playerT.length + mineF.length;
-    var awRow = function (x, name) { var a = awardParts(x); return '<li><a class="pf-rec pf-press" href="' + esc(x.href || "#/stats?tab=awards") + '"><span class="pfx-hon-n d-num">S' + esc(hn) + '</span><span class="grow"><b>' + esc(x.tag) + "</b><span>" + esc(name + ", " + lcFirst(a[0]) + ": " + a[1] + ".") + "</span></span>" + S2.chev() + "</a></li>"; };
-    var honH = teamT.length ? (teamT[0].key === "stanley_cup" ? "Stanley Cup champions." : teamT.map(function (x) { return x.short; }).join(" and ") + ".") :
-      nAw === 1 ? (playerT[0] ? playerT[0].short + " for " + playerT[0].tag : mineF[0].label + " for " + mineF[0].tag) + "." : nAw ? cap(word(nAw)) + " awards for its players." :
-      potw.length ? cap(word(potw.length)) + (potw.length === 1 ? " Player of the Week." : " Players of the Week.") : titles.length ? plural(titles.length, "place") + " in the title races." : filed.length ? "No " + hName + " honors." : "No honors yet.";
-    var honors = '<div class="pfx-col">' + head({ kicker: "Honors", id: "pfcHonH", h: honH,
-        p: teamT.length || nAw ? hName + "'s trophies and titles, then Players of the Week, for this club and its players." :
-          filed.length ? (potw.length ? "Players of the Week for this club's players. " + hName + "'s trophies and titles went to other clubs." : hName + "'s trophies, titles and Players of the Week went to other clubs.") :
-          "Players of the Week and the statistical title races, for players on this club. Titles are decided when the regular season ends.", side: arrow("#/stats?tab=awards", "All awards") }) +
-      (teamT.length || nAw || potw.length || titles.length ? '<ul class="pfx-rows pfx-hon">' +
-        teamT.map(function (x) { return '<li class="pfx-hon-aw"><span class="pfx-hon-n d-num">S' + esc(hn) + '</span><span class="grow"><b>' + esc(x.name) + "</b><span>" + esc(awardLine(x)) + "</span></span></li>"; }).join("") +
-        playerT.map(function (x) { return awRow(x, x.short); }).join("") +
-        mineF.map(function (x) { return awRow(x, x.label); }).join("") +
-        potw.map(function (h) { return '<li><a class="pf-rec pf-press" href="' + h.href + '"><span class="pfx-hon-n d-num">W' + esc(h.week) + '</span><span class="grow"><b>' + esc(h.tag) + "</b><span>" + esc(h.label) + ", Week " + esc(h.week) + ". " + esc(h.line) + "</span></span>" + S2.chev() + "</a></li>"; }).join("") +
-        titles.map(function (x) { return '<li><a class="pf-rec pf-press" href="' + x.href + '"><span class="pfx-hon-n d-num">' + esc(ord(x.rank)) + '</span><span class="grow"><b>' + esc(x.tag) + "</b><span>" + esc(x.label + " race, " + x.display) + "</span></span>" + S2.chev() + "</a></li>"; }).join("") + "</ul>" : "") + "</div>";
+    var honors = clubHonors(t);
     /* By season: every season row (M.control.seasons, the seasons table) as it stands: closed ones as they finished
        (M.seasonClose), the season on screen in progress with its row, an upcoming one with its calendar */
     var byRow = function (n, title, text) { return '<li><span class="pfc-game"><span class="pfc-rec-n d-num">S' + esc(n) + '</span><span class="grow"><b>' + esc(title) + "</b><span>" + esc(text) + "</span></span></span></li>"; };
@@ -1403,6 +1497,13 @@
       wire(root, ctx); grow(root);
       /* the market's reads change the acting club's Season 2 figures (S2.market.clubState): the open panel repaints in place */
       follow(function (e) { if (e.type === "load") swap("pfcPanel", panel(t, row, s), root, ctx); }, root);
+      /* the race places of this club's players (History's Honors column, #pfcHon), repainted alone when History is open
+         (QA round 2 review: the whole panel was swapped, which settled its entrance and dropped focus) */
+      raceIn(root, function () { return JSON.stringify(M.titles().filter(function (x) { return x.club === t.code; }).map(function (x) { return [x.category, x.rank, x.id, x.value]; })); },
+        function () {   /* only the Honors column, when History is the panel open; a row that held focus keeps it */
+          var k = focusKey(S2.$("#pfcHon", root));
+          focusBack(swap("pfcHon", clubHonors(t), root, ctx), k);
+        });
       root.addEventListener("click", function (e) {
         var hq = e.target.closest("[data-hq]");
         if (hq) { e.preventDefault(); if (S2.has("commish") && S2.market && S2.market.setClub) S2.market.setClub(hq.dataset.hq); S2.go("#/hq"); return; }

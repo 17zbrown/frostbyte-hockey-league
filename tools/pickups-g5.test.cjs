@@ -23,7 +23,10 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 /* ---------- load the page file with the smallest S2 it needs ---------- */
 const pages = {};
-const S2 = { esc: (s) => String(s == null ? "" : s), page: (k, d) => { pages[k] = d; }, session: { user: null }, holds: [] };
+/* rd: js/live.js's S2.rd, the one read door the page reads through since QA round 2, as it answers with no read client
+   here (a refusal, never an empty answer) */
+const S2 = { esc: (s) => String(s == null ? "" : s), page: (k, d) => { pages[k] = d; }, session: { user: null }, holds: [],
+  rd: () => Promise.reject(new Error("Not connected to the league, so this can't be read here. Reload the page and try again.")) };
 vm.runInContext(SRC, vm.createContext({ window: { S2 }, document: { addEventListener: () => {} }, Intl, Date, JSON, Math, Object, String, Array, Number, isNaN, parseInt, Promise, console }), { filename: "pickups.js" });
 const P = S2._pickups && S2._pickups.pure;
 A("the page registers #/pickups and exports the importer and the ported helpers", !!pages.pickups && !!P && typeof S2.pickups.importHtml === "function" && typeof S2.pickups.bindImport === "function");

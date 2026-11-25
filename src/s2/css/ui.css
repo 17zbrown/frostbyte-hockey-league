@@ -399,6 +399,49 @@ button.toast { font: inherit; text-align: left; border: 0; cursor: pointer; }
 .reveal.in { opacity: 1; transform: none; transition: opacity 240ms var(--ease-out), transform 280ms var(--ease-out); transition-delay: calc(var(--i, 0) * 30ms); }
 .skeleton { background: linear-gradient(90deg, var(--fill-2), var(--fill), var(--fill-2)); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; border-radius: 8px; }
 @keyframes shimmer { to { background-position: -200% 0; } }
+/* ---- the activity wheel (S2.spinner, js/load.js; loader 2026-11-25, commissioner: "a nice looking loading wheel instead
+   of the page just saying Loading the League"). Apple's activity indicator at its large size: eight round-capped spokes in
+   the muted gray (5.0:1 on white, 4.6:1 on the app gray, 8:1 on black), the brightest one leading a clockwise turn with a fading trail
+   behind it, 800ms a turn (a faster wheel makes the same load feel faster). It fades in after 200ms, so a quick load
+   never flashes it. Reduce Motion stops the trail and breathes the wheel instead, 2.2s a cycle, clear of the slow 0.2 Hz
+   loops Apple warns against.
+   The turn is eight linear opacity animations, one per spoke (HTML elements, never SVG children, which Chromium keeps on
+   the main thread), each 100ms behind the one before: the compositor runs them in Chromium and in WebKit, so the wheel
+   keeps turning while the main thread parses the 2.8 MB bundle and builds the league, the moment it exists for. Never a
+   rotation in steps() (review 2026-11-25; the first cut was one): Core Animation has no stepped timing, so WebKit, the
+   engine of every browser on an iPhone, runs a steps() animation on the main thread and the wheel froze during that work
+   (GraphicsLayerCA animationHasStepsTimingFunction, WebKit r260360). The sitebuild suite proves the Chromium half with
+   the main thread held busy (there, headless Chromium 155 composited even the stepped turn; WebKit cannot) */
+.spin { display: grid; justify-items: center; gap: 14px; animation: spin-in var(--t-ui) var(--ease-out) 200ms both; }
+.spin-w { position: relative; width: 32px; height: 32px; color: var(--muted); }
+/* spoke k (style --k, 0 to 7) stands at k x 45 degrees, 9px by 3.4px round-capped, and starts its fade k x 100ms after
+   spoke 0, so the brightest spoke moves one place clockwise every 100ms. Negative delays: every spoke is mid-trail from
+   the first frame */
+.spin-w i { position: absolute; left: 14.3px; top: .5px; width: 3.4px; height: 9px; border-radius: 1.7px; background: currentColor;
+  transform: rotate(calc(var(--k) * 45deg)); transform-origin: 1.7px 15.5px;
+  animation: spin-spoke 800ms linear infinite; animation-delay: calc(var(--k) * 100ms - 800ms); }
+/* the caption is the kit's .t-sub (one caption style, review 2026-11-25) on a whole-pixel line box: .t-sub's 1.45 gave
+   21.75px, so the centered block was 67.75px tall and the wheel sat on a fractional pixel, its spokes softened */
+.spin-t { margin: 0; line-height: 20px; }
+@keyframes spin-in { from { opacity: 0; } }
+@keyframes spin-spoke { from { opacity: 1; } to { opacity: .25; } }
+@keyframes spin-calm { to { opacity: .8; } }
+/* the boot screen: the wheel in the middle of the viewport, clear of a notch and the home indicator */
+.boot { min-height: 100dvh; display: grid; place-items: center;
+  padding: env(safe-area-inset-top) max(var(--gutter), env(safe-area-inset-right)) env(safe-area-inset-bottom) max(var(--gutter), env(safe-area-inset-left)); }
+/* the loader's error (js/load.js show) takes the wheel's place: centered in the same frame, its words and Try again
+   centered under each other, at a readable measure (review 2026-11-25) */
+.boot > .empty-state { max-width: 34rem; padding: 0; text-align: center; }
+.boot > .empty-state .empty-acts { justify-content: center; }
+@media (prefers-reduced-motion: reduce) {
+  /* !important against the kit's rule below, which cuts every animation to one .01ms run: the fade is opacity only, and the
+     still wheel breathes so it never reads as frozen. The trail stops on one frame of the turn: spoke 7 brightest, fading
+     back around the circle. The breath only dips to .8, so the brightest spoke keeps 3:1 or better on every canvas (3.2:1
+     on the app gray; review 2026-11-25: a dip to .45 left it at 1.8:1, the indicator nearly gone for half of each cycle) */
+  .spin { animation-duration: var(--t-ui) !important; }
+  .spin-w { animation: spin-calm 1.1s ease-in-out infinite alternate !important; }
+  .spin-w i { animation: none !important; opacity: calc(.25 + var(--k) * .75 / 7); }
+}
 
 
 @media (prefers-reduced-motion: reduce) {

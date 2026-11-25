@@ -45,8 +45,8 @@
 .pfx-plate.md { --pfx-ps: 60px; }
 
 /* press answers on pointer-down (a class set in JS) and on :active, 120ms, never on release */
-.pf-press, .pfx-tabs button, .pf .arrow, .pfc .arrow, .pf-press { transition: transform var(--t-press) var(--ease-out), background-color 160ms ease, opacity 160ms ease; }
-.pf-press.is-down, .pf-press:active { transform: scale(.97); }
+.pf-press, .pfx-tabs button, .pf .arrow, .pfc .arrow, .pf-press { transition: scale var(--t-press) var(--ease-out), background-color 160ms ease, opacity 160ms ease; }
+.pf-press.is-down, .pf-press:active { scale: .97; }
 .pf-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; }
 
 /* the switch: an uppercase underline row; ONE underline (S2.segmented's thumb) springs between options */
@@ -87,7 +87,7 @@
 .pf-rec .grow, .pfc-game .grow { flex: 1; min-width: 0; display: grid; gap: 3px; }
 .pf-rec b, .pfc-game b { font: 600 1rem/1.3 var(--font); letter-spacing: -0.01em; overflow-wrap: anywhere; }
 .pf-rec .grow > span, .pfc-game .grow > span { font: 400 .875rem/1.4 var(--font); color: var(--muted); }
-a.pf-rec.pf-press:active, a.pf-rec.pf-press.is-down, a.pfc-game.pf-press:active, a.pfc-game.pf-press.is-down { transform: none; background: var(--fill-2); }
+a.pf-rec.pf-press:active, a.pf-rec.pf-press.is-down, a.pfc-game.pf-press:active, a.pfc-game.pf-press.is-down { scale: none; background: var(--fill-2); }
 @media (hover: hover) and (pointer: fine) { a.pf-rec:hover b, a.pfc-game:hover b { color: var(--accent-ink); } }
 .pfx-split.two { display: grid; gap: clamp(56px, 7vw, 88px); }
 @media (min-width: 900px) { .pfx-split.two { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 72px; align-items: start; } }
@@ -200,7 +200,7 @@ a.pf-rec.pf-press:active, a.pf-rec.pf-press.is-down, a.pfc-game.pf-press:active,
 }
 .pf-hc { position: relative; aspect-ratio: 1; min-height: 34px; border-radius: 6px; display: grid; place-items: center; color: var(--ink);
   font: 600 .9375rem/1 var(--font-num); box-shadow: inset 0 0 0 1px var(--hairline);
-  transition: transform var(--t-press) var(--ease-out), box-shadow 160ms ease; }
+  transition: scale var(--t-press) var(--ease-out), box-shadow 160ms ease; }
 .pf-hc[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--pfx-bg), 0 0 0 4px var(--accent); }
 .pf-hc .pf-hc-r { position: absolute; left: 22%; right: 22%; bottom: 4px; }
 .pf-hc-r { display: inline-block; height: 3px; width: 14px; border-radius: 2px; background: var(--faint); vertical-align: middle; margin-right: 6px; }
@@ -402,7 +402,7 @@ a.pf-rec.pf-press:active, a.pf-rec.pf-press.is-down, a.pfc-game.pf-press:active,
 .pfc-pls { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .pfc-pl { display: grid; grid-template-columns: 2.2em minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 64px; padding: 10px 14px; border-radius: var(--r-xs);
   background: var(--surface); color: var(--ink); }
-.pfc-pl.pf-press.is-down, .pfc-pl.pf-press:active { transform: scale(.98); }
+.pfc-pl.pf-press.is-down, .pfc-pl.pf-press:active { scale: .98; }
 .pfc-pl-no { font-size: 1.75rem; color: var(--muted); }
 .pfc-pl-id { display: grid; gap: 3px; min-width: 0; }
 .pfc-pl-id b { font: 600 1rem/1.25 var(--font); letter-spacing: -0.01em; overflow-wrap: anywhere; }
@@ -416,7 +416,13 @@ a.pf-rec.pf-press:active, a.pf-rec.pf-press.is-down, a.pfc-game.pf-press:active,
 
 /* stats: special teams meters */
 .pfc-meters { display: grid; gap: 28px; }
-@media (min-width: 800px) { .pfc-meters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 56px; } }
+/* QA round 2 review: side by side, the two meters share their rows (subgrid), so the bars line up when one has no large
+   numeral ("No power plays yet"); that one's head sits on the row's floor, its label on the other label's line */
+@media (min-width: 800px) {
+  .pfc-meters { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: auto auto auto; gap: 7px 56px; }
+  .pfc-meter { grid-row: span 3; grid-template-rows: subgrid; }
+  .pfc-meter > .pf-pb-h { align-self: end; }
+}
 .pfc-meter .pf-pb-v b { font-size: 2.25rem; }
 .pfc-meter .pf-pb-t { height: 10px; border-radius: 5px; }
 .pfc-meter .pf-pb-m { opacity: .55; }
@@ -471,5 +477,5 @@ a.pf-rec.pf-press:active, a.pf-rec.pf-press.is-down, a.pfc-game.pf-press:active,
 @media (hover: hover) and (pointer: fine) { .pfc-others-l a:hover { background: var(--surface); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .pf-bf-a i, .pf-bf-b i,   .pf-press.is-down, .pf-press:active, .pf-hc, .pfc-pl.pf-press:active, .pfc-pl.pf-press.is-down { transform: none; }
+  .pf-bf-a i, .pf-bf-b i { transform: none; }   /* every press here is the scale property: the kit's one reduce rule removes it (QA round 2) */
 }

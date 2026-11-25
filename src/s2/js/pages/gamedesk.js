@@ -39,18 +39,9 @@
   /* =========================================================================================================== */
   /* DOORS: the league's read client, and the Netlify functions through the bot server's EA relay                 */
   /* =========================================================================================================== */
-  /* a staff read: f's client (js/live.js S2.ensureSb, live mode only). Anything else has no connection and says so,
-     so an empty list here always means the league answered empty, never that nothing was asked */
-  function rd(q) {
-    return Promise.resolve().then(function () {
-      var c = S2.ensureSb ? S2.ensureSb() : null;
-      if (!c) throw new Error("Not connected to the league, so this can't be read here. Reload the page and try again.");
-      return q(c);
-    }).then(function (r) {
-      if (r && r.error) throw new Error(r.error.message || "The league did not answer.");
-      return r ? r.data : null;
-    });
-  }
+  /* a staff read: S2.rd (js/live.js), the one read door (QA round 2, A10). Anything without a read client has no
+     connection and says so, so an empty list here always means the league answered empty, never that nothing was asked */
+  function rd(q) { return S2.rd(q); }
   /* v4.34 (2026-10-29): the site's EA lookups go through the bot's server, the only host EA serves (Akamai refuses Netlify
      and Supabase; CORS refuses a browser). Commissioner: "Also this box in the staff desk never works. Can you make sure you
      check regularly that it works and functions so I can use it so I dont need to ask you each time?" An action with no

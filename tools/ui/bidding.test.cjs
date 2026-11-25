@@ -259,6 +259,18 @@ const A = (name, cond, more) => { console.log((cond ? "PASS " : "FAIL ") + name 
   A("a visitor's Join with Discord in the rail is the website's Discord button, squared like the footer's", r.length === 1 && r[0].site && r[0].rad < 12, r);
   await ctx.close();
 
+  /* QA round 2 (2026-11-25): a club adds a pool player game by game (Rule S2.5: per-game requests since v4.59), so the
+     room never says "nightly requests". Every Saturday left is a holiday week here, so the room has no night to show */
+  console.log("## no bid night to show: the way in after the deadline is the single-game request");
+  W = X.reset(); W.nights = []; W.lots = []; W.bids = [];
+  W.calendar = { season_id: X.S, market: true, deadline: X.iso(Date.now() + 9 * 86400e3), moves_locked: false, draft_done: true, game_nights: [],
+    bid_nights: [{ night: BK, skipped: true, why: "No league games that week, so no bidding.", opens_at: X.iso(Date.now() + 2 * 86400e3), new_until: X.iso(Date.now() + 2 * 86400e3 + 3600e3), id: null, state: "upcoming", paused: false }], next_bid_night: BK };
+  ({ ctx, p } = await open("gm"));
+  r = await p.evaluate(() => ({ room: S2.market.room(), meta: S2.$(".bd-meta").textContent }));
+  A("with no bid night to show, the room points to single-game requests from the training camp pool (Rule S2.5), never nightly ones",
+    !r.room && /clubs use single-game requests from the training camp pool \(Rule S2\.5\)\./.test(r.meta) && !/nightly/i.test(r.meta), r);
+  await ctx.close();
+
   console.log("## phone: the rail is a sticky summary that opens a sheet");
   W = X.reset(); X.crowd(12);
   ({ ctx, p } = await open("gm", { width: 375, ctx: { hasTouch: true } }));

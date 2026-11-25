@@ -19,14 +19,15 @@ const A = (name, cond, more) => { console.log((cond ? "PASS " : "FAIL ") + name 
 (async () => {
   const b = await chromium.launch();
   const errors = [];
-  async function page(hash, width) {
+  /* base: the address before the hash (Season 1, ?season=1, unless given: S2_BASE is the current season) */
+  async function page(hash, width, base) {
     const ctx = await b.newContext(width ? { viewport: { width, height: 812 }, isMobile: true, hasTouch: true } : { viewport: { width: 1280, height: 900 } });
     await ctx.addInitScript(() => { try { localStorage.setItem("s2.introSeen", "true"); localStorage.setItem("s2.survey", JSON.stringify({ done: "2026-11-01" })); } catch (e) { /* storage blocked: the page still renders */ } });
     await mock.install(ctx, Object.assign({ live: true, persona: "anon" }, READS));
     const p = await ctx.newPage();
     p.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
     p.on("pageerror", (e) => errors.push("pageerror: " + e.message));
-    await p.goto(BASE + hash);
+    await p.goto((base || BASE) + hash);
     await p.waitForFunction(() => window.S2 && S2.M && S2.LIVE && S2.auth && S2.auth.sub && document.querySelector("#app section"), null, { timeout: 30000 });
     await p.waitForTimeout(300);
     return p;
@@ -71,8 +72,13 @@ const A = (name, cond, more) => { console.log((cond ? "PASS " : "FAIL ") + name 
     const goalie = M.players.filter((pl) => pl.roles.length === 1 && pl.mainRole === "G").sort((a, b) => b.lines.G.gp - a.lines.G.gp)[0];
     /* ids, never gamertags: a failure line must not print a member's name (the repo is public) */
     return { bad: bad.slice(0, 5), nBad: bad.length, n: M.players.length, two: two.map((x) => x.id).slice(0, 3), none: none.map((x) => x.id).slice(0, 3),
-      moved: moved.map((x) => x.id).slice(0, 3), former: former.map((x) => x.id).slice(0, 3), unknown: M.career("nobody-at-all").length, goalie: goalie && goalie.id, leader: M.examples.pointsLeader, season: M.view.season };
+      moved: moved.map((x) => x.id).slice(0, 3), former: former.map((x) => x.id).slice(0, 3), unknown: M.career("nobody-at-all").length, goalie: goalie && goalie.id, leader: M.examples.pointsLeader, season: M.view.season,
+      /* QA round 2: the recording holds Season 1's games alone, so nobody has a game in another season: M.careerEarlier
+         counts the season's games as career_games_played does (distinct, final, every stage), two-role players included */
+      away: M.players.filter((pl) => M.careerEarlier(pl.id) > 0).map((pl) => [pl.id, pl.roles.join(""), M.careerEarlier(pl.id)]).slice(0, 5),
+      careerN: Object.keys(M.careerGames).length };
   });
+  A("on Season 1 (the recording's only season with games) nobody has games in another season, two-role and playoff players included", r.careerN > 0 && r.away.length === 0, { careerN: r.careerN, away: r.away });
   A("Season 1 is on screen (?season=1, read live)", r.season === 1, r.season);
   A("every player's regular-season career rows are their season lines, playoff rows their playoff lines, clubs in the order first played (" + r.n + " players)", r.nBad === 0, r.bad);
   A("an unknown player has no career, and no error", r.unknown === 0);
@@ -148,13 +154,167 @@ const A = (name, cond, more) => { console.log((cond ? "PASS " : "FAIL ") + name 
   A("a player who played for two clubs: both clubs on the row, in the order first played", r && r.links.length >= 2 && /for two clubs\.$/.test(r.h), r && { h: r.h, links: r.links });
   await done(p);
 
+  /* QA round 2 (2026-11-25, QA functional): on Season 2, before its first game, a Season 1 veteran's page read "No league
+     games yet" beside a rating earned in Season 1. The hero and Career count the Season 1 games (M.careerEarlier) and
+     Career links the player's Season 1 page (S2.seasonHref) */
+  console.log("## a Season 1 veteran on Season 2");
+  p = await page("#/today", null, S2_BASE);
+  const vet = await p.evaluate(() => { const M = S2.M, v = M.players.filter((pl) => !pl.mainRole && M.careerGames[pl.id] > 0)[0];
+    return v ? { id: v.id, n: M.careerGames[v.id], away: M.careerEarlier(v.id), season: M.view.season, name: M.view.name } : { season: M.view.season }; });
+  A("Season 2 is on screen, and a member with no Season 2 games has Season 1 games (all of them in another season)", vet.season === 2 && vet.id && vet.away === vet.n, { season: vet.season, found: !!vet.id, n: vet.n, away: vet.away });
+  await done(p);
+  if (vet.id) {
+    p = await page("#/player/" + encodeURIComponent(vet.id), null, S2_BASE);
+    r = await p.evaluate(read);
+    const hero = await p.evaluate(() => (document.querySelector("#pfHero .pfx-lede") || {}).textContent || "");
+    const side = await p.evaluate(() => [...document.querySelectorAll('[aria-labelledby="pfCarH"] .sec-head > a.arrow')].map((a) => [a.getAttribute("href"), a.textContent.trim()]));
+    const g = vet.n === 1 ? "1 game" : vet.n + " games";
+    A("the hero says the games in Season 1 beside no Season 2 games yet", hero.indexOf("No Season 2 games yet, " + g + " in Season 1.") === 0, hero);
+    A("Career counts them, none in Season 2 yet, never \"No league games yet\"", r && r.h === g + " in Season 1, none in Season 2 yet." && r.tables.length === 0 && /on that season's page\.$/.test(r.p), r && { h: r.h, p: r.p });
+    A("Career links the player's Season 1 page (?season=1, the same player)", side.length === 1 && side[0][0] === "?season=1#/player/" + vet.id && side[0][1] === "Season 1 career", side);
+    await done(p);
+  }
+
   {
     const ctx = await b.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: "reduce" });
     await ctx.addInitScript(() => { try { localStorage.setItem("s2.introSeen", "true"); localStorage.setItem("s2.survey", JSON.stringify({ done: "2026-11-01" })); } catch (e) { /* storage blocked */ } });
     await mock.install(ctx, Object.assign({ live: true, persona: "anon" }, READS));
     const q = await ctx.newPage(); await q.goto(BASE + "#/player"); await q.waitForSelector(".pf-car a.pf-car-club", { timeout: 30000 });
-    r = await q.evaluate(() => { const a = document.querySelector(".pf-car a.pf-car-club"); a.classList.add("is-down"); const t = getComputedStyle(a).transform; a.classList.remove("is-down"); return t; });
-    A("reduced motion: a pressed club does not scale", r === "none", r);
+    /* QA round 2 (2026-11-25): rewritten to read the scale property, where the press is now (it read transform, which a
+       press no longer sets, so it would pass whatever Reduce Motion did) */
+    r = await q.evaluate(() => { const a = document.querySelector(".pf-car a.pf-car-club"); a.classList.add("is-down"); const c = getComputedStyle(a), t = { scale: c.scale, transform: c.transform }; a.classList.remove("is-down"); return t; });
+    A("reduced motion: a pressed club does not scale", r.scale === "none" && r.transform === "none", r);
+    await ctx.close();
+  }
+  /* QA round 2 (A7, 2026-11-25): the profile's race places come from the model's one read of the title race (live they were
+     missing: s2_league carries no race). Season 1 made a season in progress (active, its filed titles taken off), and a
+     board that puts the points leader 2nd in the Scoring Title race: the player page's season sentence and Honors, and the
+     club page's History, show the place once the read lands, in place; one read serves both pages */
+  const S1B = JSON.parse(require("fs").readFileSync(require("path").join(require("os").homedir(), "Developer/cghl-private/fixtures/s2_league-anon-2026-11-24b-season1.json"), "utf8"));
+  const racing = () => { const x = JSON.parse(JSON.stringify(S1B)); x.seasons.forEach((s) => { if (+s.number === 1) s.status = "active"; }); x.honors = x.honors.filter((h) => !/_title$/.test(h.category)); return x; };
+  const board = [{ category: "points_title", place: 1, profile_id: cases.goalie, gamertag: null, gp: 30, total: 75, per_game: 2.5 },
+    { category: "points_title", place: 2, profile_id: cases.leader, gamertag: null, gp: 30, total: 60, per_game: 2 }];
+  console.log("## the title race on the profile and the club page");
+  {
+    const seen = [];
+    const ctx = await b.newContext({ viewport: { width: 1280, height: 900 } });
+    await ctx.addInitScript(() => { try { localStorage.setItem("s2.introSeen", "true"); localStorage.setItem("s2.survey", JSON.stringify({ done: "2026-11-01" })); } catch (e) { /* storage blocked */ } });
+    await mock.install(ctx, { live: true, persona: "anon", tables: READS.tables, rpcs: Object.assign({}, READS.rpcs, { s2_league: (a) => mock.ok(+a.p_season === 1 ? racing() : mock.league(a)),
+      statistical_title_board: (a) => { seen.push(a); return mock.ok(board); } }) });
+    const q = await ctx.newPage();
+    q.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+    await q.goto(S2_BASE + "?season=1#/player/" + cases.leader);
+    /* QA round 2 review: the race now lands after the page's entrance (the section below), so this waits for a race row,
+       not for Honors (the player's other honors draw it at once, and a fixed 300 ms after that pinned the mid-entrance repaint) */
+    await q.waitForFunction(() => [...document.querySelectorAll("#pfTail .pfx-hon b")].some((x) => / race$/.test(x.textContent)), null, { timeout: 30000 }).catch(() => {});
+    await q.waitForTimeout(300);
+    r = await q.evaluate(() => { const rows = [...document.querySelectorAll("#pfTail .pfx-hon li")].map((li) => [li.querySelector(".pfx-hon-n").textContent, li.querySelector("b").textContent]).filter((x) => / race$/.test(x[1]));
+      const sent = (document.querySelector('[aria-labelledby="pfSeasonH"] .copy p') || {}).textContent || "", ab = [...document.querySelectorAll("#pfRoot > details.about")].pop();
+      return { filed: S2.M.filedTitles(1).length, rows, sent: / 2nd in the Scoring Title race,/.test(sent), about: !!ab && /Statistical titles go to the best rate per game/.test(ab.textContent) && !ab.classList.contains("reveal") }; });
+    A("a player's race place lands in place: Honors reads 2nd in the Scoring Title race, the season sentence says it, the about gives the race rule", r.filed === 0 && JSON.stringify(r.rows) === JSON.stringify([["2nd", "Scoring Title race"]]) && r.sent && r.about, r);
+    /* QA round 2 review (nit): every rate to two decimals (audit 2026-11-09), as the club History row and Stats; it read 2.000 */
+    r = await q.evaluate(() => [...document.querySelectorAll("#pfTail .pfx-hon li")].filter((li) => / race$/.test(li.querySelector("b").textContent)).map((li) => li.querySelector(".grow > span").textContent));
+    A("the race row's rate has two decimals: 2.00 a game over 30 games", JSON.stringify(r) === JSON.stringify(["2.00 a game over 30 games"]), r);
+    const club = await q.evaluate((id) => S2.M.player(id).club, cases.leader);
+    await q.evaluate((c) => { location.hash = "#/club/" + c + "?tab=history"; }, club); await q.waitForTimeout(600);
+    r = await q.evaluate((id) => { const col = (document.getElementById("pfcHonH") || { closest: () => null }).closest(".pfx-col");
+      /* the player's Player of the Week rows link the same page, so the race row is the one that names a race */
+      const a = col && [...col.querySelectorAll('a[href="#/player/' + id + '"]')].filter((x) => / race, /.test(x.querySelector(".grow > span").textContent))[0];
+      return { row: !!a && /^Scoring Title race, 2\.00 per game$/.test(a.querySelector(".grow > span").textContent) && a.querySelector(".pfx-hon-n").textContent === "2nd" }; }, cases.leader);
+    A("the club page's History lists its player's race place, and one read of the board served both pages", r.row && seen.length === 1, { row: r.row, reads: seen.length });
+    await ctx.close();
+  }
+
+  /* QA round 2 review (2026-11-25): a race read that lands while the page is still entering (200 ms in; the reveals and
+     the bars run about 700) waits for the entrance to end, and only what tells the race repaints: on the player page the
+     season sentence's copy, Honors (#pfTail) and the about, never #pfBody; on the club page History's Honors column
+     (#pfcHon), never the panel. So no running entrance is cut, and a link focused in Honors keeps focus. A complete season
+     (Season 1 as recorded, its titles filed, the race hidden) reads no board and repaints nothing. Every repaint of those
+     regions is logged with the entrance still under way at that moment: finite animations running, reveals not shown */
+  console.log("## the race repaint waits for the entrance and touches only the race");
+  {
+    const swapLog = () => {
+      const d = Object.getOwnPropertyDescriptor(Element.prototype, "outerHTML"); window.__swaps = [];
+      Object.defineProperty(Element.prototype, "outerHTML", { configurable: true, get: d.get, set: function (v) {
+        const id = this.id || (this.matches && this.matches("#pfRoot > details.about") ? "about" : "");
+        if (/^(pfBody|pfTail|pfSeasonHd|pfcPanel|pfcHon|about)$/.test(id)) {
+          const root = document.getElementById("pfRoot") || document.getElementById("pfcRoot") || document.body;
+          window.__swaps.push({ id, run: root.getAnimations({ subtree: true }).filter((a) => { const t = a.effect && a.effect.getComputedTiming(); return a.playState === "running" && t && isFinite(t.endTime); }).length,
+            unshown: root.querySelectorAll(".reveal:not(.in)").length });
+        }
+        d.set.call(this, v);
+      } });
+    };
+    const open = async (hash, rpcs) => {
+      const ctx = await b.newContext({ viewport: { width: 1280, height: 900 } });
+      await ctx.addInitScript(() => { try { localStorage.setItem("s2.introSeen", "true"); localStorage.setItem("s2.survey", JSON.stringify({ done: "2026-11-01" })); } catch (e) { /* storage blocked */ } });
+      await ctx.addInitScript(swapLog);
+      await mock.install(ctx, { live: true, persona: "anon", tables: READS.tables, rpcs: Object.assign({}, READS.rpcs, rpcs) });
+      const q = await ctx.newPage();
+      q.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+      await q.goto(S2_BASE + "?season=1" + hash);
+      return q;
+    };
+    const later = (ms, v) => new Promise((res) => setTimeout(() => res(v), ms));
+    const racingLeague = (a) => mock.ok(+a.p_season === 1 ? racing() : mock.league(a));
+    let seen = [];
+    /* the player page, the board answering 200 ms after it is asked */
+    let q = await open("#/player/" + cases.leader, { s2_league: racingLeague, statistical_title_board: async (a) => { seen.push(a); return later(200, mock.ok(board)); } });
+    await q.waitForFunction(() => [...document.querySelectorAll("#pfTail .pfx-hon b")].some((x) => / race$/.test(x.textContent)), null, { timeout: 15000 }).catch(() => {});
+    await q.waitForTimeout(200);
+    r = await q.evaluate(() => ({ swaps: window.__swaps, race: [...document.querySelectorAll("#pfTail .pfx-hon b")].some((x) => / race$/.test(x.textContent)) }));
+    A("a race landing 200 ms into the player page repaints after the entrance: no animation running and no reveal unshown at any repaint", seen.length === 1 && r.race && r.swaps.length > 0 && r.swaps.every((x) => x.run === 0 && x.unshown === 0), r);
+    A("the race repaints the season sentence, Honors and the about, never the whole body", r.swaps.some((x) => x.id === "pfTail") && r.swaps.some((x) => x.id === "pfSeasonHd") && r.swaps.some((x) => x.id === "about") && !r.swaps.some((x) => x.id === "pfBody"), r.swaps.map((x) => x.id));
+    const club = await q.evaluate((id) => S2.M.player(id).club, cases.leader);
+    await q.context().close();
+    /* a link focused in Honors or a club stint keeps focus when the race lands: the board waits until the reader has focused it */
+    let release; const gate = new Promise((res) => { release = res; });
+    q = await open("#/player/" + cases.leader, { s2_league: racingLeague, statistical_title_board: async () => { await gate; return mock.ok(board); } });
+    await q.waitForSelector("#pfTail a[href]", { timeout: 30000 }).catch(() => {}); await q.waitForTimeout(900);
+    const href = await q.evaluate(() => { const a = [...document.querySelectorAll("#pfTail a[href]")].pop(); if (!a) return null; a.focus(); return a.getAttribute("href"); });
+    release();
+    await q.waitForFunction(() => window.__swaps.some((x) => x.id === "pfTail"), null, { timeout: 10000 }).catch(() => {});
+    r = await q.evaluate(() => { const f = document.activeElement; return { swapped: window.__swaps.some((x) => x.id === "pfTail"), inTail: !!f.closest("#pfTail"), href: f.getAttribute("href") }; });
+    A("a link focused in Honors or a club stint keeps focus when the race repaints them", !!href && r.swapped && r.inTail && r.href === href, Object.assign(r, { want: href }));
+    await q.context().close();
+    /* the club page with History open, the board 200 ms late */
+    q = await open("#/club/" + club + "?tab=history", { s2_league: racingLeague, statistical_title_board: async () => later(200, mock.ok(board)) });
+    await q.waitForFunction(() => [...document.querySelectorAll("#pfcHon a")].some((x) => / race, /.test(x.textContent)), null, { timeout: 15000 }).catch(() => {});
+    await q.waitForTimeout(200);
+    r = await q.evaluate(() => ({ swaps: window.__swaps, race: [...document.querySelectorAll("#pfcHon a")].some((x) => / race, /.test(x.textContent)) }));
+    A("the club page's History repaints its Honors column alone when the race lands, after the entrance", !!club && r.race && r.swaps.length > 0 && r.swaps.every((x) => x.id === "pfcHon" && x.run === 0 && x.unshown === 0), Object.assign(r, { club }));
+    await q.context().close();
+    /* a complete season: Season 1 as recorded, its titles filed, the race hidden everywhere */
+    seen = [];
+    q = await open("#/player/" + cases.leader, { statistical_title_board: async (a) => { seen.push(a); return later(250, mock.ok(board)); } });
+    await q.waitForSelector("#pfBody", { timeout: 30000 }).catch(() => {}); await q.waitForTimeout(1500);
+    r = await q.evaluate(() => ({ filed: S2.M.filedTitles(1).length, swaps: window.__swaps.map((x) => x.id) }));
+    A("a complete season (its titles filed, the race hidden) reads no board and repaints nothing", r.filed > 0 && r.swaps.length === 0 && seen.length === 0, Object.assign(r, { reads: seen.length }));
+    await q.context().close();
+  }
+
+  /* QA round 2 (2026-11-25): the rank bars grow inside the page's half second (480 ms, the stagger stopping at the eighth
+     bar, 8 x 24 ms), and a repaint (a sort) settles through core's one S2.settle, never a copy of it */
+  console.log("## the bars' entrance and the repaint's settle");
+  {
+    const ctx = await b.newContext({ viewport: { width: 1280, height: 900 } });
+    await ctx.addInitScript(() => {
+      try { localStorage.setItem("s2.introSeen", "true"); localStorage.setItem("s2.survey", JSON.stringify({ done: "2026-11-01" })); } catch (e) { /* storage blocked */ }
+      const orig = Element.prototype.animate; window.__grow = [];
+      Element.prototype.animate = function (k, o) { if (this.hasAttribute && this.hasAttribute("data-grow") && o && typeof o === "object") window.__grow.push({ d: o.duration, delay: o.delay || 0 }); return orig.apply(this, arguments); };
+    });
+    await mock.install(ctx, Object.assign({ live: true, persona: "anon" }, READS));
+    const q = await ctx.newPage();
+    q.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+    await q.goto(BASE + "#/player"); await q.waitForSelector("#pfBody [data-grow]", { timeout: 30000 }); await q.waitForTimeout(300);
+    r = await q.evaluate(() => ({ n: window.__grow.length, d: Math.max.apply(null, window.__grow.map((x) => x.d)), delay: Math.max.apply(null, window.__grow.map((x) => x.delay)) }));
+    A("the rank bars grow in 480 ms, the stagger capped at 8 x 24 ms (" + r.n + " bars)", r.n > 8 && r.d === 480 && r.delay === 192, r);
+    r = await q.evaluate(() => {
+      let n = 0; const s = S2.settle; S2.settle = function () { n++; return s.apply(this, arguments); };
+      /* the Form chart's stat switch: a state change, repainted in place (a quiet swap) */
+      const h = document.querySelector('#pfBody [data-seg="stat"] [aria-pressed="false"]'); if (!h) { S2.settle = s; return "no Form stat switch"; } h.click(); S2.settle = s; return n;
+    });
+    A("a Form stat switch repaints in place through S2.settle (core's one), not a copy of it", r >= 1, r);
     await ctx.close();
   }
   for (const w of [320, 375, 430]) {

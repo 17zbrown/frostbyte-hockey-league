@@ -111,6 +111,137 @@ function serve(dir) {
   }
   A("both redirects were 302, never a cacheable 301", h.redirected.length >= 2 && h.redirected.every((x) => / 302$/.test(x)), h.redirected);
 
+  /* loader (2026-11-25, commissioner: "can you make a nice looking loading wheel instead of the page just saying Loading
+     the League?"): the boot screen of the BUILT page, with the s2_league read held, so the wheel is on screen as long as a
+     slow phone network keeps it there. Light and dark, a stored look over the system's, Reduce Motion, then the page */
+  console.log("## mode s2: the boot screen is the activity wheel while the league is read");
+  {
+    const built = fs.readFileSync(path.join(S, "index.html"), "utf8"), head = built.slice(0, built.indexOf("</head>\n<body>"));   /* a stylesheet comment names <body> too */
+    A("the built page carries the wheel: ui.css's .spin rules inlined, S2.spinner in the inlined loader, the look set in the head",
+      built.indexOf("</head>\n<body>") > 0 && /<style>\/\* css\/ui\.css \*\/[\s\S]*\.spin-w i \{[^}]*animation: spin-spoke[\s\S]*@keyframes spin-spoke[\s\S]*<\/style>/.test(head) &&
+      /<script>\/\* src\/s2\/js\/load\.js \*\/[\s\S]*S2\.spinner = function/.test(built) && /r\.setAttribute\("data-theme"/.test(head));
+    const lum = (c) => { const v = c.match(/[\d.]+/g).slice(0, 3).map((x) => { x = x / 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); }); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
+    const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+    const mix = (c, b, a) => { const y = b.match(/[\d.]+/g); return "rgb(" + c.match(/[\d.]+/g).slice(0, 3).map((x, i) => x * a + y[i] * (1 - a)).join(", ") + ")"; };   /* c at opacity a over b */
+    /* one visit with the read held: what the boot screen is, then the page once the read is let go */
+    async function held(o) {
+      const ctx = await b.newContext(Object.assign({ viewport: o.vp || { width: 1440, height: 900 }, colorScheme: o.scheme }, o.reduce ? { reducedMotion: "reduce" } : {}, o.vp ? { isMobile: true, hasTouch: true } : {}));
+      await mock.install(ctx, { persona: "anon", page: false, routes });
+      await ctx.route(LOGOS, (rt) => rt.fulfill({ status: 200, contentType: "image/png", body: PNG }));
+      await ctx.addInitScript((look) => { try { localStorage.setItem("s2.survey", JSON.stringify({ done: "2026-11-24T00:00:00.000Z", from: "daily" })); if (look) localStorage.setItem("s2.theme", JSON.stringify(look)); } catch (e) { /* storage blocked */ } }, o.look || null);
+      let release; const gate = new Promise((r) => { release = r; });
+      await ctx.route(/\/rest\/v1\/rpc\/s2_league/, async (rt) => { await gate;   /* a later route wins: the mock answers once the gate opens */
+        return o.fail ? rt.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ code: "57014", message: "canceling statement due to statement timeout" }) }) : rt.fallback(); });
+      const pg = await ctx.newPage(), errs = [];
+      pg.on("console", (m) => { if (m.type() === "error") errs.push(m.text()); });
+      pg.on("pageerror", (e) => errs.push("pageerror: " + e.message));
+      await pg.goto(h.origin + "/#/today", { waitUntil: "domcontentloaded" });
+      await pg.waitForSelector(".boot .spin", { state: "attached", timeout: 15000 });
+      const s = await pg.evaluate(() => {
+        const spin = document.querySelector(".boot .spin"), wheel = spin.querySelector(".spin-w"), anims = document.getAnimations().filter((a) => a.effect && spin.contains(a.effect.target));
+        const props = anims.map((a) => a.effect.getKeyframes().map((k) => Object.keys(k).filter((x) => ["offset", "computedOffset", "easing", "composite"].indexOf(x) < 0)).flat());
+        const spokes = Array.from(wheel.querySelectorAll("i")), fade = anims.filter((a) => a.effect.target === spin)[0];
+        const trail = anims.filter((a) => spokes.indexOf(a.effect.target) >= 0).sort((a, b) => spokes.indexOf(a.effect.target) - spokes.indexOf(b.effect.target));
+        let early = null, late = null, delay = null;
+        if (fade) { delay = fade.effect.getTiming().delay; fade.pause(); fade.currentTime = 150; early = getComputedStyle(spin).opacity; fade.finish(); late = getComputedStyle(spin).opacity; }
+        /* Reduce Motion's breath: the brightest spoke's opacity at the bottom of it (the wheel's lowest, sampled over a cycle) */
+        const calm = anims.filter((a) => a.effect.target === wheel)[0]; let trough = null;
+        if (calm) { calm.pause(); const top = Math.max.apply(null, spokes.map((x) => +getComputedStyle(x).opacity)); trough = 1;
+          for (let t = 0; t <= 2 * calm.effect.getTiming().duration; t += 50) { calm.currentTime = t; trough = Math.min(trough, top * getComputedStyle(wheel).opacity); } calm.play(); }
+        const r = wheel.getBoundingClientRect(), sr = spin.getBoundingClientRect(), cap = spin.querySelector(".spin-t");
+        return { theme: document.documentElement.getAttribute("data-theme"), mode: document.documentElement.getAttribute("data-mode"), meta: (document.querySelector('meta[name="theme-color"]') || {}).content,
+          bg: getComputedStyle(document.body).backgroundColor, ink: getComputedStyle(wheel).color,
+          role: spin.getAttribute("role"), live: spin.getAttribute("aria-live"), label: spin.getAttribute("aria-label"), cap: cap && cap.textContent, spokes: spokes.length,
+          hidden: [wheel.getAttribute("aria-hidden"), cap && cap.getAttribute("aria-hidden")],
+          deg: spokes.map((x) => { const m = new DOMMatrix(getComputedStyle(x).transform); return (Math.round(Math.atan2(m.b, m.a) * 180 / Math.PI) + 360) % 360; }),
+          props: Array.from(new Set(props.flat())).sort(), eases: anims.map((a) => a.effect.getKeyframes().map((k) => k.easing).concat(a.effect.getTiming().easing)).flat(),
+          trail: trail.map((a) => ({ ms: a.effect.getTiming().duration, delay: a.effect.getTiming().delay, it: a.effect.getTiming().iterations, run: a.playState, ease: a.effect.getKeyframes().map((k) => k.easing).join() })),
+          name: getComputedStyle(wheel).animationName, trough, delay, early, late, w: Math.round(r.width), top: r.top, h: sr.height, cx: r.left + r.width / 2, cy: sr.top + sr.height / 2, vw: innerWidth, vh: innerHeight, n: anims.length };
+      });
+      s.aria = await pg.locator(".boot .spin").ariaSnapshot();   /* what assistive technology gets: the status and its text */
+      /* the compositor probe (review 2026-11-25: the first wheel, a rotation in steps(), froze while the main thread worked,
+         which is exactly when it is on screen: the bundle parsing, the league building). The page's main thread is held
+         busy for 1.2 s, and the screen must keep changing inside that block. The frames come from CDP's screencast, which
+         copies each frame the compositor draws and needs nothing from the page; a screenshot cannot (Playwright's runs
+         script in the page first, and in headless Chromium Page.captureScreenshot itself waits for the main thread: tried,
+         both waited the block out). The wheel is the only thing on the boot screen that moves, so distinct frames stamped
+         inside the block are the wheel turning without the main thread. Measured while writing it: the spoke trail draws
+         about 48 distinct frames in the block, a spoke animating width (main thread) draws none, and the old stepped turn
+         drew 8, one per step, because headless Chromium 155 composites steps(). WebKit does not (the no-steps check
+         above), so this probe guards the Chromium half: an SVG-child, layout or script-driven wheel fails it */
+      if (o.probe) {
+        const cdp = await ctx.newCDPSession(pg), frames = [], acks = [];
+        cdp.on("Page.screencastFrame", (f) => {
+          frames.push({ at: f.metadata && f.metadata.timestamp ? f.metadata.timestamp * 1000 : Date.now(), png: f.data });
+          cdp.send("Page.screencastFrameAck", { sessionId: f.sessionId }).catch((e) => acks.push(e.message));   /* said in the probe's result */
+        });
+        await cdp.send("Page.startScreencast", { format: "png", maxWidth: 480, maxHeight: 480 });
+        await wait(300);
+        await pg.evaluate(() => { setTimeout(() => { window.__busy = { s: Date.now() }; const end = performance.now() + 1200; while (performance.now() < end); window.__busy.e = Date.now(); }, 0); });
+        await pg.waitForFunction(() => window.__busy && window.__busy.e, null, { timeout: 10000 });   /* answers once the block is over */
+        const busy = await pg.evaluate(() => window.__busy);
+        await cdp.send("Page.stopScreencast");
+        const inside = frames.filter((f) => f.at > busy.s + 50 && f.at < busy.e);
+        s.probe = { frames: frames.length, inside: inside.length, distinct: new Set(inside.map((f) => f.png)).size, ms: busy.e - busy.s, acks: acks.slice(0, 2) };
+      }
+      release();
+      if (o.fail) {   /* the read fails: the loader's error screen, where the wheel was */
+        await pg.waitForSelector(".boot > .empty-state.err", { timeout: 15000 });
+        s.err = await pg.evaluate(() => { const b = document.querySelector(".boot > .empty-state.err"), r = b.getBoundingClientRect(), t = b.querySelector(".t-head");
+          return { role: b.getAttribute("role"), title: t.textContent, retry: !!b.querySelector("#s2Retry"), spin: !!document.querySelector(".spin"), cx: r.left + r.width / 2, cy: r.top + r.height / 2,
+            top: t.getBoundingClientRect().top, align: getComputedStyle(t).textAlign, vw: innerWidth, vh: innerHeight }; });
+        await ctx.close();
+        return s;
+      }
+      const up = await pg.waitForFunction(() => window.S2 && S2.M && document.querySelector("#app header") && document.querySelector("#page h1, #page section"), null, { timeout: 30000 }).then(() => true, () => false);
+      s.after = await pg.evaluate(() => ({ boot: !!document.querySelector(".boot, .spin"), theme: document.documentElement.getAttribute("data-theme"), state: S2.state.theme, bg: getComputedStyle(document.body).backgroundColor }));
+      s.up = up; s.errs = errs.filter((e) => !/^Failed to load resource/.test(e));
+      await ctx.close();
+      return s;
+    }
+    for (const scheme of ["light", "dark"]) {
+      const s = await held({ scheme, probe: true });
+      /* review 2026-11-25: the caption is the status's text, read once; the old aria-label over an aria-hidden caption gave
+         assistive technology a status with no text inside it, so the snapshot (the accessibility tree) is checked, not a name */
+      A(scheme + ": while the league is read, the boot screen is the wheel (eight spokes, hidden from assistive technology) in a status whose text is the caption Loading the league",
+        s.spokes === 8 && s.role === "status" && s.live === null && s.label === null && s.hidden[0] === "true" && s.hidden[1] === null && s.cap === "Loading the league" &&
+        /^- status:\s*\n\s+- paragraph: Loading the league\s*$/.test(s.aria), [s.aria, s.role, s.live, s.label, s.hidden, s.cap]);
+      /* review 2026-11-25: html starts at data-mode site, so the boot screen is on the public pages' canvas and bar (white in
+         light) and #/today, a site page, draws on the same canvas: no gray-to-white jump */
+      A(scheme + ": the look is the system's from the first paint, on the public pages' canvas and status bar (" + (scheme === "dark" ? "black" : "white") + "), the same canvas the page then draws on",
+        s.theme === scheme && s.mode === "site" && s.bg === (scheme === "dark" ? "rgb(0, 0, 0)" : "rgb(255, 255, 255)") && s.meta === (scheme === "dark" ? "#000000" : "#ffffff") && s.after.bg === s.bg, [s.theme, s.mode, s.bg, s.meta, s.after.bg]);
+      A(scheme + ": the spokes clear 3:1 against the canvas (WCAG 1.4.11 for a graphic): " + ratio(s.ink, s.bg).toFixed(2) + ":1", ratio(s.ink, s.bg) >= 3, [s.ink, s.bg]);
+      A(scheme + ": it is invisible for its first 150ms (a quick load shows nothing) and fully there once faded in", s.delay >= 150 && s.early === "0" && s.late === "1", [s.delay, s.early, s.late]);
+      /* review 2026-11-25: the turn is one opacity trail per spoke, never a rotation in steps() (WebKit keeps steps() on the
+         main thread, and every browser on an iPhone is WebKit; this suite's Chromium cannot show that, so the timing is
+         pinned here and the probe below proves the Chromium half) */
+      A(scheme + ": the turn is eight endless linear opacity trails, at most a second a turn, the brightest spoke moving clockwise (spoke k at k x 45 degrees, 100ms behind spoke k - 1), and only opacity animates",
+        s.trail.length === 8 && s.trail.every((t) => t.it === Infinity && t.run === "running" && t.ms <= 1000 && /^linear(,linear)*$/.test(t.ease)) &&
+        s.trail.every((t, k) => k === 0 || Math.round(t.delay - s.trail[k - 1].delay) === 100) && s.deg.join() === "0,45,90,135,180,225,270,315" && JSON.stringify(s.props) === '["opacity"]', [s.trail.slice(0, 3), s.deg, s.props]);
+      A(scheme + ": no animation in the wheel runs in steps() (WebKit cannot composite one, so it would freeze while the bundle parses)", s.eases.length > 0 && !s.eases.some((e) => /steps/.test(e)), s.eases);
+      A(scheme + ": it keeps moving while the main thread is busy (held 1.2 s; the compositor draws new frames of it inside the block)", s.probe && s.probe.distinct >= 3, s.probe);
+      A(scheme + ": the wheel is centered in the viewport, on a whole pixel (the caption's line box is whole too)", Math.abs(s.cx - s.vw / 2) <= 1 && Math.abs(s.cy - s.vh / 2) <= 2 && Number.isInteger(s.top) && Number.isInteger(s.h), [s.cx, s.cy, s.vw, s.vh, s.top, s.h]);
+      A(scheme + ": the page replaces it once the read lands, in the same look, with no console error", s.up && !s.after.boot && s.after.theme === scheme && s.after.state === scheme && s.errs.length === 0, [s.after, s.errs.slice(0, 3)]);
+    }
+    /* dark stored on a light system (review 2026-11-25): the old loader painted light at boot whatever was stored, so only
+       this direction fails on it; light stored on a dark system passed there too and pinned nothing */
+    let s = await held({ scheme: "light", look: "dark" });
+    A("a look chosen in You, Settings wins over the system's from the first paint (dark on a light system), and the page keeps it",
+      s.theme === "dark" && s.bg === "rgb(0, 0, 0)" && s.after.theme === "dark" && s.after.state === "dark", [s.theme, s.bg, s.after]);
+    s = await held({ scheme: "light", reduce: true, vp: { width: 390, height: 844 } });
+    A("Reduce Motion: the trail stands still (no spoke animates); the wheel breathes its opacity instead, still hidden for 150ms",
+      s.trail.length === 0 && s.name === "spin-calm" && JSON.stringify(s.props) === '["opacity"]' && s.early === "0" && s.late === "1", [s.trail, s.name, s.props, s.early, s.late]);
+    A("Reduce Motion: at the bottom of each breath the brightest spoke still clears 3:1 on the canvas (review 2026-11-25: 1.8:1 at a .45 dip): " + (s.trough ? ratio(mix(s.ink, s.bg, s.trough), s.bg).toFixed(2) : "?") + ":1",
+      s.trough > 0 && s.trough < 1 && ratio(mix(s.ink, s.bg, s.trough), s.bg) >= 3, [s.trough, s.ink, s.bg]);
+    A("Reduce Motion at 390: still centered on a whole pixel, the same size, and gone once the page draws", s.w === 32 && Math.abs(s.cx - s.vw / 2) <= 1 && Math.abs(s.cy - s.vh / 2) <= 2 && Number.isInteger(s.top) && s.up && !s.after.boot, [s.w, s.cx, s.cy, s.vw, s.vh, s.top, s.after]);
+    /* review 2026-11-25: a failed read (here a 503; the 20 s timeout ends in the same screen) was drawn in .page, pinned to
+       the top left with no top inset, under an iPhone's status bar; it now takes the wheel's place */
+    s = await held({ scheme: "light", fail: true, vp: { width: 390, height: 844 } });
+    A("a read that fails ends the wait where the wheel was: The league did not answer, with Try again, centered in the same frame at 390 (not pinned under the status bar)",
+      s.err && s.err.role === "alert" && s.err.title === "The league did not answer" && s.err.retry && !s.err.spin && s.err.align === "center" &&
+      Math.abs(s.err.cx - s.err.vw / 2) <= 1 && Math.abs(s.err.cy - s.err.vh / 2) <= 2 && s.err.top > 100, s.err);
+  }
+
   /* i3f (2026-11-25): the switched site, as members get it. Each page is the built root signed in through its own
      supabase-js client (the harness seeds the persona's stored sign-in; page: false, so nothing is injected) and its reads
      answered as an empty league office would: no case, no application, no club move or notice, no lineup on file. No

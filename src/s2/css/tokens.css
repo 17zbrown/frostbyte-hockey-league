@@ -87,7 +87,8 @@
   [data-theme="dark"] { --hairline: rgba(255, 255, 255, .4); --muted: #d1d1d6; }
 }
 /* league website v2: public pages are a white WEBSITE (tiles are light gray, no card shadows); workspaces keep the gray
-   app canvas with white cards. S2.route sets html[data-mode] from the page definition (mode: "app" for workspaces). */
+   app canvas with white cards. S2.route sets html[data-mode] from the page definition (mode: "app" for workspaces);
+   demo.html starts it at site, so the boot screen is already on the common landing page's canvas. */
 :root[data-mode="site"]:not([data-theme="dark"]) {
   --canvas: #ffffff; --surface: #f5f5f7; --surface-2: #ffffff; --raised: #ffffff; --canvas-2: #f5f5f7;
   --shadow-1: none; --bar: #ffffff;

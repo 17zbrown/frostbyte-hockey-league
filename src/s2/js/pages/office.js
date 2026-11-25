@@ -78,15 +78,24 @@
      page without its heading; the reason stays on screen (fail loud). When a re-read fails while the earlier stories are
      on screen, a status line says they may be out of date, with its own Try again, instead of the console alone */
   var RETRY = '<button type="button" class="btn site outline" data-news="retry">Try again</button>';
+  /* QA round 2 (2026-11-25, QA function 22): a failed read is said in plain words first, and the league's own words are
+     kept after them, marked as its own (a member can repeat them to staff; the console has the whole error). It printed
+     the raw message as the sentence ("The league's data service did not answer. canceling statement due to ...").
+     QA round 2 review: "reported a problem", since its words follow (it said "did not answer" and then quoted it) */
+  function readFailed(e) {
+    return "The league's data service reported a problem, so the stories could not be shown. Try again in a moment." +
+      (e && e.message ? '<span class="of-why">The league said: “' + esc(e.message) + "”</span>" : "");
+  }
   function newsBody(r) {
     if (!NEWS.rows) return (r.arg ? "" : hero("News", "League news", "")) + (NEWS.err
-      ? S2.empty("err", "The news did not load", "The league's data service did not answer. " + esc(NEWS.err.message || ""), RETRY)
+      ? S2.empty("err", "The news did not load", readFailed(NEWS.err), { t: "Try again", data: { news: "retry" } })
       : S2.empty("none", "Loading the news", ""));
     var note = NEWS.wait ? "Reading the news again." : NEWS.err ? "The news could not be refreshed; these stories are from the earlier read." : "";
     return (note ? '<p class="of-stale" role="status">' + S2.ic("alert") + "<span>" + note + "</span>" + (NEWS.wait ? "" : RETRY) + "</p>" : "") + newsPage(r);
   }
   S2.page("news", {
-    title: function (r) { var s = r.arg && M && NEWS.rows && storyById(r.arg); return s ? s.title : "News"; }, tab: "news",
+    /* a story is its own page in the News section ("<story> · News · CGHL", S2.setTitle's order) */
+    title: function (r) { var s = r.arg && M && NEWS.rows && storyById(r.arg); return s ? s.title + " · News" : "News"; }, tab: "news",
     render: function (r) {
       if (!M) return fail("News");
       return '<div id="ofNews">' + newsBody(r) + "</div>";
@@ -107,8 +116,9 @@
         var host = S2.$("#ofNews", root); if (!host || S2.parse().name !== "news") return;   /* the reader has moved on */
         host.outerHTML = '<div id="ofNews">' + newsBody(r) + "</div>";
         /* the router titled the page before the read landed ("News"), so a story's own title is set here, as desk.js does
-           for its in-place repaints (review 2026-11-24: an article read live kept the tab title "News") */
-        var t = S2.pages.news.title(r), it = S2.$("#inlineTitle"); document.title = t + " · CGHL"; if (it) it.textContent = t;
+           for its in-place repaints (review 2026-11-24: an article read live kept the tab title "News"), through core's one
+           S2.setTitle (QA round 2: this wrote document.title and the bar by hand, a third copy of the suffix) */
+        S2.setTitle(S2.pages.news.title(r));
         S2.reveal(root);
         bind();
       };

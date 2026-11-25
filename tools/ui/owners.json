@@ -251,6 +251,11 @@
         "owner": "live-model",
         "since": "2026-11-24",
         "why": "W0: PLAN 6.5 (d then c2); demo.html is the script tags until f takes it"
+      },
+      {
+        "owner": "main",
+        "since": "2026-11-25",
+        "why": "the boot loading wheel"
       }
     ],
     "src/s2/js/abbr.js": [
@@ -324,6 +329,11 @@
         "owner": "live-model",
         "since": "2026-11-24",
         "why": "W0: PLAN 6.5 (d then c2); demo.html is the script tags until f takes it"
+      },
+      {
+        "owner": "main",
+        "since": "2026-11-25",
+        "why": "the boot loading wheel"
       }
     ],
     "src/s2/js/lobby.js": [
@@ -931,6 +941,11 @@
         "owner": "i2",
         "since": "2026-11-24",
         "why": "i2: the built site in Chromium (next and s2 modes)"
+      },
+      {
+        "owner": "main",
+        "since": "2026-11-25",
+        "why": "the boot loading wheel"
       }
     ],
     "robots.txt": [

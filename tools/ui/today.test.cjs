@@ -142,6 +142,13 @@ const AS = { guest: "anon", player: "member", office: "gm", staff: "staff", comm
   r = await p.evaluate(() => document.getElementById("tdClub").textContent);
   A("?club=all keeps the whole league for a member", /All clubs/.test(r), r);
   await done(p);
+  /* QA round 2 (2026-11-25): Games' empty states give S2.empty their action, which it draws as the website button */
+  p = await open("?season=1#/games?club=all");
+  const outClub = await p.evaluate(() => (S2.M.teams.filter((t) => !S2.M.games.some((g) => g.stage === "playoff" && (g.home === t.code || g.away === t.code)))[0] || {}).code);
+  await p.evaluate((c) => { location.hash = "#/games?week=playoffs&club=" + c; }, outClub); await p.waitForTimeout(500);
+  r = await p.evaluate(() => { const a = document.querySelector(".td-gempty .empty-acts a"); return { t: (document.querySelector(".td-gempty .t-head") || {}).textContent, a: a ? [a.className, a.getAttribute("href"), a.textContent] : null }; });
+  A("Games, playoffs for a club with none: the empty state's Projected bracket is S2.empty's website button", !!outClub && r.t === "No playoff games yet" && JSON.stringify(r.a) === JSON.stringify(["btn site outline", "#/standings?view=playoffs", "Projected bracket"]), { club: !!outClub, r });
+  await done(p);
   p = await open("?season=1#/stats?tab=" + "skaters", { persona: "member" });
   const role1 = await p.evaluate(() => { const me = S2.mine(); return me && me.mainRole; });
   if (role1 === "G") { await p.evaluate(() => { location.hash = "#/stats?tab=goalies"; }); await p.waitForTimeout(500); }
@@ -167,6 +174,30 @@ const AS = { guest: "anon", player: "member", office: "gm", staff: "staff", comm
     return { n, cols, camp: camp ? +camp.textContent : 0 }; });
   A("the club's position columns add up to its active-roster headline", r.n === r.cols && r.n > 0, r);
   await done(p);
+  /* QA round 2 (2026-11-25): Special teams with no chance of a kind yet. Season 1 with Vancouver's every power play
+     taken off (its own opportunities 0): the power play meter reads none, with no rank and no fill; the penalty kill
+     leads, ranked among the clubs that have one; no club with none is a 0% in a rank or the league average */
+  {
+    const vanNoPP = () => { const x = clone(S1), van = x.teams.filter((t) => t.code === "VAN")[0];
+      x.games.forEach((g) => { if (g.home_team_id === van.id) { g.home_ppg = 0; g.home_ppo = 0; } if (g.away_team_id === van.id) { g.away_ppg = 0; g.away_ppo = 0; } }); return x; };
+    p = await open("?season=1#/club/VAN?tab=stats", { rpcs: { s2_league: (a) => mock.ok(+a.p_season === 1 ? vanNoPP() : mock.league(a)) } });
+    await p.waitForSelector("#pfcSpH", { timeout: 10000 }).catch(() => {});
+    r = await p.evaluate(() => { const sec = document.querySelector('[aria-labelledby="pfcSpH"]'); if (!sec) return null;
+      const L = S2.M.standings("league"), withPk = L.filter((x) => x.pk_pct != null), van = L.filter((x) => x.code === "VAN")[0];
+      return { h: document.getElementById("pfcSpH").textContent, p: sec.querySelector(".copy p").textContent, pp: van.pp_pct, nPk: withPk.length, nPp: L.filter((x) => x.pp_pct != null).length,
+        avgPp: L.filter((x) => x.pp_pct != null).reduce((a, x) => a + x.pp_pct, 0) / L.filter((x) => x.pp_pct != null).length,
+        m: [...sec.querySelectorAll(".pfc-meter")].map((m) => ({ v: m.querySelector(".pf-pb-v").textContent, fill: !!m.querySelector(".pf-pb-t i"), tick: !!m.querySelector(".pf-pb-m"), n: m.querySelector(".pf-pb-n").textContent, aria: m.querySelector(".pf-pb-t").getAttribute("aria-label"),
+          bar: Math.round(m.querySelector(".pf-pb-t").getBoundingClientRect().top), lab: Math.round(m.querySelector(".pf-pb-l").getBoundingClientRect().bottom) })) }; });
+    /* QA round 2 review: rewritten. It pinned the note repeating "No power plays yet" (the lede and the value already say
+       it, so it read three times); the note now gives only the league average, and every note ends in a period */
+    A("no power play yet: the meter says so, with no rank and no fill; the tick is the league average of the clubs that have one", r && r.pp === null && r.m[0].v === "No power plays yet" && !r.m[0].fill && r.m[0].tick &&
+      r.m[0].n === "League average " + r.avgPp.toFixed(1) + "% (the tick)." && /^Power play No power plays yet, league average /.test(r.m[0].aria), r);
+    A("special teams: 'No power plays yet' is said twice (the lede and the value), and both notes end in a period", r && (r.p + r.m.map((m) => m.v + " " + m.n).join(" ")).split("No power plays yet").length === 3 && r.m.every((m) => /\.$/.test(m.n)), r && r.m.map((m) => m.n));
+    A("special teams at 1280: the two bars and the two labels line up though one meter has no large numeral", r && r.m.length === 2 && Math.abs(r.m[0].bar - r.m[1].bar) <= 1 && Math.abs(r.m[0].lab - r.m[1].lab) <= 2, r && r.m.map((m) => [m.bar, m.lab]));
+    A("the penalty kill leads the section, ranked among the clubs with one (of " + (r && r.nPk) + ")", r && /^Penalty kill \d+(\.\d)?%, (tied for )?\d+(st|nd|rd|th) of \d+\.$/.test(r.h) && r.h.endsWith(" of " + r.nPk + ".") && /^No power plays yet; the penalty kill stopped \d+ of \d+ \(/.test(r.p) &&
+      / of \d+$/.test(r.m[1].v) && r.m[1].v.endsWith(" of " + r.nPk) && r.m[1].fill, r);
+    await done(p);
+  }
   /* game night, read live: a live game's room */
   const liveId = "00000000-0000-4000-8000-000000000000";
   p = await open("#/game/" + liveId, { phase: "tonight" });
@@ -246,6 +277,43 @@ const AS = { guest: "anon", player: "member", office: "gm", staff: "staff", comm
       areas: li[0] ? getComputedStyle(li[0]).gridTemplateAreas : "" }; });
   A("Today's power rankings: three rows, each a grid of crest (32 px), club and rating on one line at desktop width", r.state === "quiet" && r.n === 3 && r.grid && r.crest === 32 && /"cr t at"/.test(r.areas), r);
   await done(p);
+  /* QA round 2 (A7, 2026-11-25): Today's title leaders come from the model's one read of the race (M.readTitles); the section
+     was left out live. The board here names two rostered players (ids only, from the recording), read once for Season 1's
+     id, five a title; the section takes its place in the page when the read lands. A failed read is said in plain words
+     with the league's own words kept, and Try again lands it */
+  {
+    const S1ID = S1.seasons.filter((x) => +x.number === 1)[0].id, A1 = S1.rosters.spots[0].profile_id, G1 = S1.rosters.spots.filter((x) => x.profile_id !== A1)[0].profile_id;
+    const board = ["points_title", "goals_title", "assists_title"].map((c, i) => ({ category: c, place: 1, profile_id: A1, gamertag: null, gp: 20, total: 40 - 10 * i, per_game: (40 - 10 * i) / 20 }))
+      .concat([{ category: "goaltending_title", place: 1, profile_id: G1, gamertag: null, gp: 18, total: 45, per_game: 2.5 }]);
+    const seen = [], s2l = (a) => mock.ok(+a.p_season === 1 ? s1Active() : mock.league(a));
+    p = await open("?season=1#/today", { rpcs: { s2_league: s2l, statistical_title_board: (a) => { seen.push(a); return mock.ok(board); } } });
+    await p.waitForSelector("#tdLeaders .td-lead-who", { timeout: 8000 }).catch(() => {}); await p.waitForTimeout(300);
+    r = await p.evaluate(() => { const s = document.getElementById("tdLeaders"); return s ? { hidden: s.hidden, href: (s.querySelector(".td-lead-who") || { getAttribute: () => null }).getAttribute("href"),
+      more: [...s.querySelectorAll(".td-lead-more a")].map((a) => a.getAttribute("href")), h: s.querySelector("h2").textContent.replace(/^.+ leads /, "X leads "), page: S2.parse().name, inView: s.classList.contains("in") } : null; });
+    A("Today's title leaders: the model's one read (Season 1's id, five a title) lands in place, its leader and the goaltending leader linked", seen.length === 1 && seen[0].p_season === S1ID && seen[0].p_top === 5 &&
+      r && !r.hidden && r.href === "#/player/" + A1 && r.more.indexOf("#/player/" + G1) >= 0 && r.h === "X leads three title races" && r.inView, { seen: seen.length, r });
+    await done(p);
+    const errsT = errors.length, calls = [];
+    p = await open("?season=1#/today", { rpcs: { s2_league: s2l, statistical_title_board: (a) => { calls.push(a); return calls.length === 1 ? mock.fail("57014", "canceling statement due to statement timeout") : mock.ok(board); } } });
+    await p.waitForSelector('#tdLeaders [data-tdtitles="retry"]', { timeout: 8000 }).catch(() => {});
+    r = await p.evaluate(() => { const s = document.getElementById("tdLeaders"); return s ? { t: (s.querySelector(".empty-state.err .t-head") || {}).textContent, foot: (s.querySelector(".empty-state.err .t-foot") || {}).textContent || "",
+      why: (s.querySelector(".td-why") || {}).textContent, btn: (s.querySelector('[data-tdtitles="retry"]') || {}).className } : null; });
+    /* QA round 2 review: rewritten to pin words that agree with the quote after them (it pinned "did not answer" followed by
+       what the league said) and no pointer to Stats, which fails on the same read */
+    A("Today's title leaders, a failed read: plain words, the league's own words kept, Try again as the website button", r && r.t === "The title race did not load" && /^The league's data service reported a problem, so the race cannot be shown here\. Try again in a moment\.The league said/.test(r.foot) && !/Stats/.test(r.foot) &&
+      r.why === "The league said: “canceling statement due to statement timeout”" && r.btn === "btn site outline", r);
+    await p.click('#tdLeaders [data-tdtitles="retry"]').catch(() => {});
+    await p.waitForSelector("#tdLeaders .td-lead-who", { timeout: 8000 }).catch(() => {});
+    A("Today's title leaders: Try again reads once more and the board lands in place", calls.length === 2 && (await p.evaluate(() => !!document.querySelector("#tdLeaders .td-lead-who") && S2.parse().name === "today")), calls.length);
+    await done(p);
+    errors.splice(errsT, errors.length - errsT, ...errors.slice(errsT).filter((e) => !/status of 400|title race could not be read/i.test(e)));
+    /* Season 2 before its first final: no race to tell, and nothing is read for one */
+    const none = [];
+    p = await open("#/today", { phase: "quiet", rpcs: { statistical_title_board: (a) => { none.push(a); return mock.ok([]); } } });
+    await p.waitForTimeout(400);
+    A("before the season's first final: no title leaders section, and the race is not read", none.length === 0 && !(await p.$("#tdLeaders")), none.length);
+    await done(p);
+  }
 
   console.log("## Season 2 on Today, read live: each phase before the schedule, then game nights");
   p = await open("#/today", { phase: "offseason" });
@@ -257,6 +325,15 @@ const AS = { guest: "anon", player: "member", office: "gm", staff: "staff", comm
   A("before clubs exist: every door is open (owner applications close Nov 28)", JSON.stringify(r.doors) === JSON.stringify(["Sign up", "Own a club", "Join the staff"]) && r.band === "Sign up. Own a club. Join the staff.", r);
   A("before clubs exist: the lede gives Season 2's puck drop from M.s2cal", /Season 2 drops the puck Wednesday, December 16\.$/.test(r.lede), r.lede);
   A("no demo device on the page: no dock, no scene button, no Watch, nothing sample", r.dock === 0 && r.sample === 0, r);
+  await done(p);
+  /* QA round 2 (2026-11-25): the lead's name wraps by the kit's one default (.d-1, overflow-wrap anywhere); today.css's
+     own break-word outranked it, so a long unbroken name pushed Today sideways at 390 px.
+     QA round 2 review: measured against the fixed 390, not innerWidth: the page is a mobile context, whose layout viewport
+     widens to the content (on the old code innerWidth came back 1223, so the width clauses could not fail) */
+  p = await open("#/today", { phase: "offseason", width: 390 });
+  r = await p.evaluate(() => { const b = document.querySelector(".td-lead-who b"); if (!b) return null; b.textContent = "W".repeat(36);
+    return { wrap: getComputedStyle(b).overflowWrap, scroll: document.documentElement.scrollWidth, right: Math.round(b.getBoundingClientRect().right), vw: innerWidth }; });
+  A("390 px: a 36-letter name in the lead wraps inside the page (the kit's overflow-wrap anywhere); no sideways scroll", r && r.wrap === "anywhere" && r.scroll <= 390 && r.right <= 390 && r.vw === 390, r);
   await done(p);
 
   p = await open("#/today", { phase: "draft", persona: "member" });
@@ -271,6 +348,11 @@ const AS = { guest: "anon", player: "member", office: "gm", staff: "staff", comm
   A("before the draft: the movement deadline is marked projected (no schedule yet), and nothing else is", r.cal.filter((x) => x.chip).map((x) => x.t + ":" + x.chip).join() === "Movement deadline:projected", r.cal);
   A("before the draft: owner applications have closed, so the band offers sign-up and the staff", JSON.stringify(r.doors) === JSON.stringify(["Sign up", "Join the staff"]) && r.band === "Sign up. Join the staff.", r);
   A("before the draft: nothing on the page is sample", r.sample === 0, r);
+  /* QA round 2 (A6, 2026-11-25): Today asks the model's one "the draft is complete" (M.draftDone: draft_state, or the
+     market's draft_done once read), never draft_state on its own: when the model says done, a repaint is the schedule phase */
+  r = await p.evaluate(() => { const before = S2.M.draftDone(), real = S2.M.draftDone; S2.M.draftDone = function () { return true; }; S2.route(true);
+    const st = document.querySelector(".td").dataset.state; S2.M.draftDone = real; S2.route(true); return { before, st, back: document.querySelector(".td").dataset.state }; });
+  A("before the draft: Today's phase follows M.draftDone (draft, then schedule when the model says the draft is done)", r.before === false && r.st === "schedule" && r.back === "draft", r);
   await done(p);
 
   p = await open("#/today", { phase: "schedule" });
@@ -360,6 +442,38 @@ const AS = { guest: "anon", player: "member", office: "gm", staff: "staff", comm
     await done(p);
   }
 
+  /* QA round 2 (A4, 2026-11-25): every club tile and club hero wears core's one band, S2.clubBand (league.js, today.js and
+     profile.js each kept their own ink test and wrote the ink-band fallback by hand): Today's tiles, the Clubs page, the
+     trophy tiles and the Cup panel, the club hero. A club with no color takes the ink band with light text */
+  console.log("## club bands: one definition, S2.clubBand");
+  {
+    const bandsOn = (pg, sel) => pg.evaluate((sel) => [...document.querySelectorAll(sel)].map((el) => {
+      const a = el.matches("a") ? el : el.querySelector("a[href^='#/club/']"), code = a ? a.getAttribute("href").replace(/^#\/club\/([A-Z]+).*$/, "$1") : null;
+      return { code, ok: !!code && el.getAttribute("style") === S2.clubBand(S2.M.team(code)) };
+    }), sel);
+    const pale = () => { const x = clone(S1); x.teams[0].color = null; return x; };
+    p = await open("?season=1#/clubs", { rpcs: { s2_league: (a) => mock.ok(+a.p_season === 1 ? pale() : mock.league(a)) } });
+    const clubs = await bandsOn(p, ".lg-ct");
+    const none = await p.evaluate(() => { const t = S2.M.teams.filter((x) => !x.color)[0], el = t && document.querySelector('.lg-ct[href="#/club/' + t.code + '"]');
+      return el ? { style: el.getAttribute("style"), ink: getComputedStyle(el).color, bg: getComputedStyle(el).backgroundColor } : null; });
+    await p.evaluate(() => { location.hash = "#/stats?tab=awards"; }); await p.waitForTimeout(600);
+    const trophies = await bandsOn(p, ".lg-tr, .lg-sc");
+    await done(p);
+    p = await open("#/today", { phase: "quiet" });
+    const today = await bandsOn(p, ".td-clubs .lg-ct");
+    await done(p);
+    p = await open("?season=1#/club/BOS");
+    /* the hero is a .reveal, so S2.reveal sets its stagger index (--i) and the browser writes the style back in its own
+       spacing: the band's two properties are compared one by one */
+    const heroR = await p.evaluate(() => { const el = document.getElementById("pfcHero"), want = {}; S2.clubBand(S2.M.team("BOS")).split(";").forEach((d) => { const i = d.indexOf(":"); want[d.slice(0, i)] = d.slice(i + 1); });
+      return el ? { club: el.style.getPropertyValue("--club").trim(), ink: el.style.getPropertyValue("--club-ink").trim(), want } : null; });
+    const hero = !!heroR && heroR.club === heroR.want["--club"] && heroR.ink === heroR.want["--club-ink"];
+    await done(p);
+    const bad = clubs.concat(trophies, today).filter((x) => !x.ok);
+    A("every club tile (Clubs " + clubs.length + ", trophies and the Cup " + trophies.length + ", Today " + today.length + ") and the club hero wear S2.clubBand", clubs.length >= 8 && trophies.length >= 2 && today.length >= 8 && !bad.length && hero, { bad, heroR });
+    A("a club with no color: the ink band with light text, never white on the light page", none && none.style === "--club:var(--ink-band);--club-ink:#fff" && none.ink === "rgb(255, 255, 255)" && none.bg !== "rgba(0, 0, 0, 0)" && none.bg !== "rgb(255, 255, 255)", none);
+  }
+
   console.log("## QA 2026-11-25: the map's pins, the clubs before a first final, the Season page's doors by the clock, News");
   /* QA motion 11: the hover lift and the press had one specificity, the lift came later, and a mouse always hovers what it
      presses, so the press never showed on a desktop. QA visual 34: the pin disc is a white crest plate in both themes */
@@ -369,11 +483,26 @@ const AS = { guest: "anon", player: "member", office: "gm", staff: "staff", comm
     await p.mouse.move(bx.x + bx.width / 2, bx.y + bx.height / 2); await p.waitForTimeout(250);
     const lift = await p.evaluate(() => getComputedStyle(document.querySelector(".td-hero .td-pin:hover .td-pin-disc")).transform);
     await p.mouse.down(); await p.waitForTimeout(250);
-    const press = await p.evaluate(() => getComputedStyle(document.querySelector(".td-hero .td-pin:hover .td-pin-disc")).transform);
+    const press = await p.evaluate(() => { const c = getComputedStyle(document.querySelector(".td-hero .td-pin:hover .td-pin-disc")); return { scale: c.scale, transform: c.transform }; });
     await p.mouse.move(2, 880); await p.mouse.up();   /* released away from the pin, so the press opens no club page */
-    A("a Today map pin lifts under a mouse and still shows its press (scale .93) when pressed", /matrix\(1, 0, 0, 1, 0, -2\)/.test(lift) && /^matrix\(0\.93, 0, 0, 0\.93, 0, 0\)$/.test(press), { lift, press });
+    /* QA round 2 (2026-11-25): rewritten. It pinned the press on transform; the press is the scale property now (the kit's
+       reduce rule removes it), and a pressed pin sets its lift down, as before */
+    A("a Today map pin lifts under a mouse and still shows its press (the scale property, .93, the lift set down) when pressed", /matrix\(1, 0, 0, 1, 0, -2\)/.test(lift) && press.scale === "0.93" && press.transform === "none", { lift, press });
     r = await p.evaluate(() => { const d = document.querySelector(".td-hero .td-pin-disc"), light = getComputedStyle(d).backgroundColor; document.documentElement.setAttribute("data-theme", "dark"); const dark = getComputedStyle(d).backgroundColor; return { light, dark }; });
     A("the pin's crest plate is white in both themes", r.light === "rgb(255, 255, 255)" && r.dark === "rgb(255, 255, 255)", r);
+    /* QA round 2 (2026-11-25): every press on Today, the profile, the league pages and the office pages is the scale
+       property (as ui.css's .btn), so the kit's one Reduce Motion rule (scale: none) removes them all: no :active or
+       .is-down rule in those four sheets presses on transform, none restates a transform: none for Reduce Motion, and the
+       ones named in the QA pass (.td-pin-disc, .td-doors a, .td-lead-who, .pf-press, .lg-dr-star) press on scale */
+    r = await p.evaluate(() => {
+      const rules = [], walk = (list, sheet, media) => { for (const x of list) { if (x.cssRules && x.media) walk(x.cssRules, sheet, x.media.mediaText); else if (x.selectorText) rules.push({ sheet, media: media || "", sel: x.selectorText, t: x.style.transform, s: x.style.getPropertyValue("scale") }); } };
+      for (const sh of document.styleSheets) { const m = /\/(today|profile|league|office)\.css/.exec(sh.href || ""); if (!m) continue; try { walk(sh.cssRules, m[1], ""); } catch (e) { /* not readable */ } }
+      const press = rules.filter((x) => /:active|\.is-down/.test(x.sel));
+      return { sheets: [...new Set(rules.map((x) => x.sheet))].sort().join(), onTransform: press.filter((x) => /scale\(/.test(x.t)).map((x) => x.sel),
+        undo: press.filter((x) => /reduce/.test(x.media) && x.t === "none").map((x) => x.sel),
+        named: [".td-pin:active .td-pin-disc", ".td-doors a:active", ".td-lead-who:active", ".pf-press.is-down", ".lg-dr-star:active svg"].filter((n) => !press.some((x) => x.sel.split(/,\s*/).indexOf(n) >= 0 && x.s && x.s !== "none")) };
+    });
+    A("every press on the league pages is the scale property, none on transform, none undone by hand for Reduce Motion (" + r.sheets + ")", r.sheets === "league,office,profile,today" && !r.onTransform.length && !r.undo.length && !r.named.length, r);
   }
   await done(p);
   /* QA nits 8: before a season's first final the tiles and the pins rank no club ("1st East, 0-0-0, 0 pts") */
@@ -399,6 +528,16 @@ const AS = { guest: "anon", player: "member", office: "gm", staff: "staff", comm
   r = await p.evaluate(seasonRead);
   A("Season page, Dec 6: owner applications have closed, and a member is offered Register only if not signed up", door(r, "Own a club")[1] === "Closed Sat, Nov 28" && /^Two are open today\./.test(r.text) &&
     (r.signed ? r.cta[0] === "You are signed up" && door(r, "Register")[2] === "You are signed up" && r.cta.indexOf("Register for Season 2") < 0 : r.cta[0] === "Register for Season 2"), r);
+  /* QA round 2 review: the draft door asks the model's one "the draft is complete" (M.draftDone, d80285c), never
+     draft_state on its own: stubbed done before the draft, a repaint reads the door Done and names no day it opens */
+  {
+    const drBefore = door(r, "Draft room")[1], opensBefore = /draft room opens/.test(r.text);
+    await p.evaluate(() => { window.__dd = S2.M.draftDone; S2.M.draftDone = function () { return true; }; S2.route(true); });
+    r = await p.evaluate(seasonRead);
+    await p.evaluate(() => { S2.M.draftDone = window.__dd; S2.route(true); });
+    A("Season page, Dec 6: the draft door follows M.draftDone (said done: Done, and no line saying when the room opens)", /^Opens /.test(drBefore || "") && opensBefore && door(r, "Draft room")[1] === "Done" && !/draft room opens/.test(r.text),
+      { drBefore, opensBefore, after: door(r, "Draft room"), text: r.text });
+  }
   await done(p);
   p = await open("#/season", { phase: "schedule", persona: "member" });
   r = await p.evaluate(seasonRead);
@@ -419,8 +558,20 @@ const AS = { guest: "anon", player: "member", office: "gm", staff: "staff", comm
   const errsNews = errors.length;
   p = await open("#/news", { rpcs: newsRpc(null) });
   await p.waitForTimeout(400);
-  r = await p.evaluate(() => ({ h1: (document.querySelector("#ofNews h1") || {}).textContent, err: (document.querySelector("#ofNews .empty-state.err .t-foot") || {}).textContent, retry: !!document.querySelector('#ofNews [data-news="retry"]') }));
+  r = await p.evaluate(() => ({ h1: (document.querySelector("#ofNews h1") || {}).textContent, err: (document.querySelector("#ofNews .empty-state.err .t-foot") || {}).textContent, retry: !!document.querySelector('#ofNews [data-news="retry"]'),
+    why: (document.querySelector("#ofNews .empty-state.err .of-why") || {}).textContent || "", btn: (document.querySelector('#ofNews [data-news="retry"]') || {}).className }));
   A("News, a failed read: the page keeps its heading, says why and offers Try again", r.h1 === "League news" && /canceling statement due to statement timeout/.test(r.err || "") && r.retry, r);
+  /* QA round 2 (function 22): plain words first; the league's own words kept after them, marked as its own; the Try
+     again is S2.empty's action, the website button on this public page. QA round 2 review: rewritten to pin words that
+     agree with the quote after them (it pinned "did not answer" followed by what the league said) */
+  A("News, a failed read: plain words lead, the league's own words follow as its own, and Try again is the website button", /^The league's data service reported a problem, so the stories could not be shown\. Try again in a moment\./.test(r.err || "") &&
+    r.why === "The league said: “canceling statement due to statement timeout”" && r.btn === "btn site outline", r);
+  await done(p);
+  /* QA round 2 (A1): a story names its tab "<story> · News · CGHL" through S2.setTitle once the read lands */
+  p = await open("#/news/n-1", { rpcs: newsRpc([{ id: 1, title: "A story about the league", body: "First paragraph.", category: "League news", published_at: "2026-11-20T03:00:00Z" }]) });
+  await p.waitForSelector(".of-art h1", { timeout: 10000 }).catch(() => {});
+  r = await p.evaluate(() => ({ h1: (document.querySelector(".of-art h1") || {}).textContent, doc: document.title, bar: (document.getElementById("inlineTitle") || {}).textContent }));
+  A("News: a story opened by its address is titled '<story> · News · CGHL' (the bar '<story> · News') once the read lands", r.h1 === "A story about the league" && r.doc === "A story about the league · News · CGHL" && r.bar === "A story about the league · News", r);
   await done(p);
   errors.splice(errsNews, errors.length - errsNews, ...errors.slice(errsNews).filter((e) => !/status of 400|News:/.test(e)));
   p = await open("#/news", { rpcs: newsRpc([{ id: 1, title: "MaximumLengthGamertag021 scores four in a win", body: "First paragraph.\n\nSecond paragraph.", category: "Night recap", published_at: "2026-11-20T03:00:00Z" }]), width: 390 });
@@ -490,7 +641,8 @@ const AS = { guest: "anon", player: "member", office: "gm", staff: "staff", comm
     p = await livePage("?source=live&season=1" + href);
     await p.waitForFunction(() => document.querySelector(".of-art h1, #ofNews .empty-state.err"), null, { timeout: 45000 });
     r = await p.evaluate(() => ({ h1: (document.querySelector(".of-art h1") || {}).textContent, doc: document.title, inline: (document.getElementById("inlineTitle") || {}).textContent }));
-    A("live News: a story opened by its address takes its own title once the read lands", !!r.h1 && r.doc.indexOf(r.h1 + " · ") === 0 && r.inline === r.h1, r);
+    /* QA round 2: rewritten for the section in the title ("<story> · News", S2.setTitle); it pinned the bar as the story alone */
+    A("live News: a story opened by its address takes its own title once the read lands", !!r.h1 && r.doc === r.h1 + " · News · CGHL" && r.inline === r.h1 + " · News", r);
     await done(p);
   }
 

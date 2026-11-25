@@ -234,3 +234,4 @@ begin
     end if;
   end loop;
 end $chk$;
+-- Applied as migration v463c_s2_staff_copy on 2026-11-25 (re-rehearsed on production that morning, rolled back, then applied after the v4.63 deploy); tools/sql/grant-audit.sql returned zero rows.

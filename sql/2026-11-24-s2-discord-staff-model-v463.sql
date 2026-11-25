@@ -61,3 +61,4 @@ begin
     raise exception 'v463 check: app_config.staff_model is not committees';
   end if;
 end $chk$;
+-- Applied as migration v463d_s2_discord_staff_model on 2026-11-25 (re-rehearsed on production that morning, rolled back, then applied after the v4.63 deploy); tools/sql/grant-audit.sql returned zero rows.

@@ -1,4 +1,5 @@
 const S2_BASE = process.env.S2_BASE || (() => { throw new Error("S2_BASE unset: run through tools/ui/run.cjs") })();
+const S2_ROOT = process.env.S2_ROOT || (() => { throw new Error("S2_ROOT unset: run through tools/ui/run.cjs") })();
 /* The Season 2 staff on the site: node tools/ui/run.cjs --suite staffing --mode live. Commissioner's rulings, 2026-11-23:
    six committees (Officiating, Statistics and imports, Applications, Community, Transactions, Draft and Bidding), Game
    Operations folded into Officiating, each with one manager who sets priorities and is the go-to person; every staffer's
@@ -11,6 +12,7 @@ const S2_BASE = process.env.S2_BASE || (() => { throw new Error("S2_BASE unset: 
    opens on the league office tools/ui/desklive.cjs keeps. The concept's role switcher, its placeholder officials and
    seats, the demo market clock and its role locks, the demo draft room and S2.demo's committee seats are gone with demo
    mode, and so are the checks that pinned them (listed in the commit). Nothing here writes to the league. */
+const fs = require("fs"), path = require("path");
 const mock = require(process.env.S2_MOCK);
 const { chromium } = require(mock.PW);
 const live = require("./desklive.cjs");
@@ -219,6 +221,94 @@ const DESK_TABLES = { action_requests: [], action_messages: [], owner_applicatio
     A(hash + " (" + role + ") at 375 in dark mode: no sideways scroll", await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
     await done(p);
   }
+
+  /* QA round 2 (staff, 2026-11-25): the desk on core's shared helpers (S2.initials, S2.rd, S2.setTitle, S2.words,
+     M.draftDone), one definition each, and the desk's own furniture on the kit's rules */
+  console.log("## QA round 2 (staff): the desk on the shared helpers");
+  const deskSrc = fs.readFileSync(path.join(S2_ROOT, "js/pages/desk.js"), "utf8");
+  A("qa2: desk.js reads through S2.rd (js/live.js) in its own offline words, and keeps no read door or error builder of its own",
+    /function rd\(q\) \{ return S2\.rd\(q, \{ offline: "Not connected to the league, so the desk cannot be read here\. Reload the page and try again\." \}\); \}/.test(deskSrc) &&
+    !/function (dbErr|client)\(/.test(deskSrc) && !/S2\.ensureSb/.test(deskSrc));
+  A("qa2: desk.js keeps no copy of the avatar initials; it reads S2.initials (js/core.js)", !/function initials\(/.test(deskSrc) && /\binitials = S2\.initials\b/.test(deskSrc));
+  L = await live.open(b, BASE, { persona: "staff", hash: "#/desk?tab=committees" });
+  r = await L.p.evaluate(() => [...document.querySelectorAll(".dk-ccard-mgr .avatar")].map((a) => a.textContent));
+  A("qa2: the committee cards' avatars draw S2.initials (an open seat keeps its ?)", r.length === 6 && r.every((t) => t === "?" || /^[\p{L}\p{N}]{1,2}$/u.test(t)), r);
+  r = await L.p.evaluate(() => { const host = document.querySelector(".dk-ccard-mgr"), a = document.createElement("span"); a.className = "avatar dk-av xs"; a.textContent = "MW"; host.appendChild(a);
+    const rg = document.createRange(); rg.selectNodeContents(a);
+    const o = { font: getComputedStyle(a).fontSize, w: a.clientWidth, h: a.clientHeight, text: Math.ceil(rg.getBoundingClientRect().width), cards: [...document.querySelectorAll(".dk-ccard-mgr .dk-av.xs")].map((x) => getComputedStyle(x).fontSize) }; a.remove(); return o; });
+  A("qa2: the small desk avatar reads 11px, the type floor, in a 24px circle that keeps two wide initials (MW) clear of its edge", r.font === "11px" && r.w === 24 && r.h === 24 && r.text <= r.w - 2 && r.cards.every((f) => f === "11px"), r);
+  r = await L.p.evaluate(() => document.getElementById("dkSub").textContent);
+  A("qa2: the Committees lede counts the six committees in words through S2.words, and desk.js keeps no list of number words",
+    /^One staff, six committees\./.test(r) && /S2\.words\(COMMITTEES\.length, "zero"\)/.test(deskSrc) && /function nw\(n\) \{ return S2\.words\(n, "none"\); \}/.test(deskSrc) && !/\["(none|zero)", "one", "two"/.test(deskSrc), r);
+  /* a committee with four items open reads "Four open", as one with one reads "One open" (QA round 2 review: the desk kept
+     a None/One/numeral rule of its own beside S2.words) */
+  const kick = await L.p.evaluate(() => [...document.querySelectorAll(".dk-ccard > .kicker")].map((k) => k.textContent));
+  A("qa2: the committee lineup's counts go through S2.words (None, One, Four), never a numeral beside a word",
+    /function countSay\(n\) \{ return cap1\(nw\(n\)\); \}/.test(deskSrc) && /openSay: countSay\(n\)/.test(deskSrc) && !/=== 1 \? "One" : (String\(n\)|h\.toMgr)/.test(deskSrc) &&
+    kick.length === 6 && kick.every((k) => /^(Clear|[A-Z][a-z]+ open)$/.test(k)), kick);
+  /* every style rule on the page, with its media (the walk fixround uses for the kit's presses) */
+  const sheetRules = (pg) => pg.evaluate(() => { const out = [], walk = (list, media) => { for (const x of list) { if (x.cssRules && x.media) walk(x.cssRules, x.media.mediaText); else if (x.selectorText) out.push({ sel: x.selectorText, media: media || "",
+    t: x.style.transform || "", s: x.style.getPropertyValue("scale"), tr: x.style.getPropertyValue("transition"), pad: x.style.padding || "", pb: x.style.paddingBlock || "", pi: x.style.paddingInline || "", fs: x.style.fontSize || "" }); } };
+    for (const sh of document.styleSheets) { try { walk(sh.cssRules, ""); } catch (e) { /* cross-origin font sheet */ } } return out; });
+  let rules = await sheetRules(L.p);
+  const dkPress = rules.filter((x) => /\.dk-[\w-]+(\[[^\]]*\])?:active/.test(x.sel));
+  const dkMoved = [".dk-chip", ".dk-stepbtn", ".dk-lock", ".dk-vote", ".lineup > a.dk-ccard"].map((sel) => (rules.filter((x) => x.sel === sel && !x.media && x.tr)[0] || {}).tr || "");
+  A("qa2: every Staff Desk press is the scale property (.dk-chip, .dk-stepbtn, .dk-lock, .dk-vote), none a transform, so ui.css's one Reduce Motion rule removes them all",
+    dkPress.length >= 6 && dkPress.every((x) => !x.t) && [".dk-chip:active", ".dk-stepbtn:active", ".dk-lock:active", ".dk-vote:active"].every((sel) => dkPress.some((x) => x.sel === sel && /^0\.9\d*$/.test(x.s))) &&
+    dkMoved.every((tr) => /\bscale\b/.test(tr) && !/\btransform\b/.test(tr)), { press: dkPress.map((x) => [x.sel, x.t, x.s]), moved: dkMoved });
+  const esOver = rules.filter((x) => /^\.dk-(ps|aside-sec) \.empty-state$/.test(x.sel)).map((x) => [x.sel, x.pad, x.pb, x.pi]);
+  A("qa2: the desk's own empty-state rules set only their vertical rhythm (the inline zero they wrote is ui.css's default), and desk.css owns the panel's inline 18px",
+    esOver.length === 2 && esOver.every((x) => !x[1] && x[2] && !x[3]) && rules.some((x) => x.sel === ".dk-panel > .empty-state" && x.pi === "18px"), esOver);
+  const card = await L.p.$eval('.dk-ccard[data-committee="community"]', (e) => { const q = e.getBoundingClientRect(); return [q.x + q.width / 2, q.y + q.height / 2]; });
+  await L.p.mouse.move(card[0], card[1]); await L.p.mouse.down(); await wait(250);
+  r = await L.p.$eval('.dk-ccard[data-committee="community"]', (e) => ({ scale: getComputedStyle(e).scale, transform: getComputedStyle(e).transform, tr: getComputedStyle(e).transitionProperty }));
+  await L.p.mouse.up();
+  A("qa2: a committee card presses to .985 on the scale property, through its own transition (it once listed transform, so the press snapped)", r.scale === "0.985" && r.transform === "none" && /\bscale\b/.test(r.tr), r);
+  /* the first committee whose focus has nothing open: its state sits inside the white panel */
+  r = null;
+  for (const k of await L.p.$$eval("#dkLineup [data-committee]", (xs) => xs.map((x) => x.dataset.committee))) {
+    await L.p.click('#dkLineup [data-committee="' + k + '"]'); await wait(350);
+    r = await L.p.evaluate(() => { const e = document.querySelector("#dkFocus .dk-panel > .empty-state"), c = e && getComputedStyle(e); return c ? [c.paddingLeft, c.paddingRight, c.paddingTop] : null; });
+    if (r) break;
+  }
+  A("qa2: a committee with nothing open says so inside its panel, 18px in from the panel's edge", !!r && r[0] === "18px" && r[1] === "18px" && r[2] === "22px", r);
+  await L.close();
+  L = await live.open(b, BASE, { persona: "staff", hash: "#/desk?tab=people", w: 390 });
+  const pill = await L.p.$eval('.dk-views [data-pf]:not([aria-pressed="true"])', (e) => { const q = e.getBoundingClientRect(); return [q.x + q.width / 2, q.y + q.height / 2]; });
+  await L.p.mouse.move(pill[0], pill[1]); await L.p.mouse.down(); await wait(250);
+  r = await L.p.$eval('.dk-views [data-pf]:not([aria-pressed="true"])', (e) => ({ scale: getComputedStyle(e).scale, transform: getComputedStyle(e).transform, tr: getComputedStyle(e).transitionProperty }));
+  await L.p.mouse.up();
+  A("qa2: on a phone the People filter pill presses to .96 on the scale property, through the strip's transition", r.scale === "0.96" && r.transform === "none" && /\bscale\b/.test(r.tr), r);
+  await L.close();
+  L = await live.open(b, BASE, { persona: "staff", hash: "#/desk?tab=people" });
+  r = await L.p.$$eval("#dkPeopleRows .dk-pname .title", (xs) => ({ n: xs.length, bad: xs.filter((x) => !x.title || x.title !== x.textContent).map((x) => x.textContent).length, cut: getComputedStyle(xs[0]).textOverflow }));
+  A("qa2: a People row's name, cut with an ellipsis, carries the full tag as its title", r.n > 0 && r.bad === 0 && r.cut === "ellipsis", r);
+  await L.p.click("#dkPeopleRows .dk-prow"); await L.p.waitForSelector('#dkPsTabs [data-v="roles"]'); await L.p.click('#dkPsTabs [data-v="roles"]');
+  await L.p.waitForSelector("#dkPsBody .dk-ps > .empty-state");
+  r = await L.p.evaluate(() => { const e = document.querySelector("#dkPsBody .dk-ps > .empty-state"), c = getComputedStyle(e); return [c.paddingTop, c.paddingBottom, c.paddingLeft, c.paddingRight]; });
+  A("qa2: in a member's record the Roles state keeps the sheet's close rhythm (4px over, 8px under) and starts on the sheet's column", r.join() === "4px,8px,0px,0px", r);
+  await L.close();
+  L = await live.open(b, BASE, { persona: "staff", hash: "#/desk?tab=newsroom" });
+  const news = () => L.p.evaluate(() => ({ finals: S2.M.view.finals, sub: document.getElementById("dkSub").textContent, ranks: document.querySelectorAll("#dkMain .dk-rank").length,
+    empty: ((document.querySelector('[aria-labelledby="dkPwH"] .empty-state') || {}).textContent || "").replace(/\s+/g, " ").trim(), teams: S2.M.teams.length }));
+  /* both halves set the model's count by hand and repaint through the rail, so the check outlives a fixture recorded after
+     puck drop (QA round 2 review: the first half read finals straight from the recorded s2_league) */
+  const repaint = async (n) => { await L.p.evaluate((k) => { S2.M.view.finals = k; }, n); await L.p.click('.dk-side [data-pane="people"]'); await wait(300); await L.p.click('.dk-side [data-pane="newsroom"]'); await wait(300); };
+  await repaint(0);
+  r = await news();
+  A("qa2: before the season's first final the Newsroom says no club leads the power rankings, and lists no order", r.finals === 0 && /^No club leads the power rankings until a game is played\./.test(r.sub) && !/lead the power rankings with/.test(r.sub) && r.ranks === 0 && /^No rankings yet/.test(r.empty), r);
+  /* the same pane once a final is on record */
+  await repaint(1);
+  r = await news();
+  A("qa2: from the first final the Newsroom names the leader and lists every club", /^The .+ lead the power rankings with a club rating of \d+\./.test(r.sub) && r.ranks === r.teams && !r.empty, r);
+  r = await L.p.evaluate(() => ({ doc: document.title, bar: (document.getElementById("inlineTitle") || {}).textContent }));
+  A("qa2: a pane switched in place names the tab and the bar through S2.setTitle, and desk.js writes document.title nowhere itself",
+    r.doc === "Newsroom · Staff Desk · CGHL" && r.bar === "Newsroom · Staff Desk" && !/document\.title\s*=/.test(deskSrc) && /S2\.setTitle\(titleFor\(r\)\)/.test(deskSrc), r);
+  r = await L.p.evaluate(() => { const before = [S2.draftDone(), S2.M.draftDone()], keep = S2.M.draft.state; S2.M.draft.state = { status: "complete", season_number: 2 };
+    const after = [S2.draftDone(), S2.M.draftDone()]; S2.M.draft.state = keep; return { before, after }; });
+  A("qa2: S2.draftDone is M.draftDone's answer (js/model.js, the one definition), before and once the draft is complete, and desk.js keeps no draft test of its own",
+    r.before.join() === "false,false" && r.after.join() === "true,true" && /function draftDone\(\) \{ return M\.draftDone\(\); \}/.test(deskSrc) && !/status === "complete"/.test(deskSrc), r);
+  await L.close();
 
   /* ================= the LIVE desk (v5.00 swap, g1): the real doors, the database's gates, before and after the flip ================= */
   {

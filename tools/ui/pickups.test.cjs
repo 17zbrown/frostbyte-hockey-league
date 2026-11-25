@@ -428,6 +428,10 @@ function writes(H) {
     !!(await o.p.$('#puImp [data-pu="gate"]')) && !(await o.p.$("#puQ")), await txt(o.p, "#puImp"));
   await o.ctx.close();
 
+  /* QA round 2 (A10): the pickup pages read through S2.rd (js/live.js), the one read door, and keep no copy of it */
+  const puSrc = require("fs").readFileSync(require("path").join(S2_ROOT, "js/pages/pickups.js"), "utf8");
+  A("qa2: pickups.js reads through S2.rd and keeps no read door of its own", /function rd\(q\) \{ return S2\.rd\(q\); \}/.test(puSrc) && !/r\.error\.message \|\| "The league did not answer\."/.test(puSrc) && !/S2\.ensureSb/.test(puSrc));
+
   A("no page error or console error across the whole run", errors.length === 0, errors.slice(0, 6));
   await b.close();
   console.log("\n" + n + " checks, " + fails + " failed");

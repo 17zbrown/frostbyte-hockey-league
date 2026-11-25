@@ -15,7 +15,7 @@
    sitting merge is the one choreographed moment. Owned by the desk builder: js/pages/desk.js and css/desk.css only. */
 (function () {
   "use strict";
-  var S2 = window.S2, $ = S2.$, $$ = S2.$$, esc = S2.esc, M = S2.M;
+  var S2 = window.S2, $ = S2.$, $$ = S2.$$, esc = S2.esc, M = S2.M, initials = S2.initials;   /* QA round 2: the one avatar initials, js/core.js */
 
   /* ---------- icons the kit lacks (same 24 grid and stroke as S2.ic) ---------- */
   var XP = {
@@ -37,7 +37,6 @@
   function ageShort(h) { if (h == null) return ""; if (h < 1) return Math.max(1, Math.round(h * 60)) + " min"; if (h < 24) return Math.round(h) + " h"; return Math.round(h / 24) + " d"; }
   function ageLong(h) { return h == null ? "" : h < 0.02 ? "just now" : M.ago(Math.round(h * 60)); }
   function clock(s) { return M.toi(Math.round(s)); }
-  function initials(t) { var c = String(t || "").replace(/[^\p{L}\p{N}]/gu, ""); return (c.slice(0, 2) || "?").toUpperCase(); }
   function narrow() { return window.innerWidth < 1000; }
   /* change the address in place, keeping the entry's state (the kit keys its scroll memory on history.state.k) */
   function setHash(h) { history.replaceState(history.state, "", h); }
@@ -203,11 +202,13 @@
     var ages = [0, 0, 0, 0]; aged.forEach(function (x) { ages[bucket4(x.ageHours)]++; });
     var n = open.length;
     return { items: items, open: open, n: n, ages: ages, oldest: aged.length ? Math.max.apply(null, aged.map(function (x) { return x.ageHours; })) : null,
-      openSay: n === 0 ? "None" : n === 1 ? "One" : String(n),
+      openSay: countSay(n),
       unclaimed: open.filter(function (x) { return x.kind === "case" && !x.claimant; }).length,
       toMgr: open.filter(function (x) { return x.toMgr; }).length };
   }
-  function countSay(n) { return n === 0 ? "None" : n === 1 ? "One" : String(n); }
+  /* a committee count in words, "None" for zero, through S2.words (QA round 2 review: the lineup read "4 open" beside "One
+     open", the desk's own None/One/numeral rule beside core's words) */
+  function countSay(n) { return cap1(nw(n)); }
 
   function shapes(n, label) { return S2.shapes(n, label); }   /* core's one count of dots */
 
@@ -226,11 +227,9 @@
      is complete an empty group is the expected state, never a club outside a limit. Complete is draft_state.status, the
      test the market itself opens on (public._market_draft_done, v4.58) and Team HQ's draftPhase reads: the league read's
      draft section (S2.M.draft, kept current by the pulse), or the market's own draft_done once a page has read the market.
-     Exported as S2.draftDone for the Control Center (js/pages/control.js loads after this file) */
-  function draftDone() {
-    var d = M.draft && M.draft.state, k = S2.market && S2.market.status ? S2.market.status() : null;
-    return !!(d && d.status === "complete") || !!(k && k.loaded && k.draftDone);
-  }
+     QA round 2 (2026-11-25): that test is now M.draftDone (js/model.js), the one definition the Control Center and Team HQ
+     call too; S2.draftDone, the round-1 export, stays as its other name and only forwards to it */
+  function draftDone() { return M.draftDone(); }
   S2.draftDone = draftDone;
   function txOut(cs, pre) {
     var o = {}; if (cs.active.total > cs.limit) o.total = true; if (cs.room < 0) o.room = true;
@@ -266,7 +265,7 @@
     /* qa (function 25): the same flip test the pane's body (lvAppsLead) and its ballots read */
     applications: function () { return (LV.flip ? "Every staffer and commissioner votes" : "The applications reviewers vote, every staffer and commissioner on a committee seat") + ", and the applicant only ever sees the decision. Owner applications stay confidential to the league office until owners are decided."; },
     people: function () { return M.players.length + " people on record. Open one for their club, their lines this season and the discipline tools."; },
-    committees: function () { return "One staff, " + (["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"][COMMITTEES.length] || COMMITTEES.length) + " committees. Anyone on staff may pick up any item; each committee has a manager who knows the topic best and is the first stop when something needs a second look."; },
+    committees: function () { return "One staff, " + S2.words(COMMITTEES.length, "zero") + " committees. Anyone on staff may pick up any item; each committee has a manager who knows the topic best and is the first stop when something needs a second look."; },
     transactions: function () {
       var t = txOver();
       if (!t || !t.cs) return TX_NONE;
@@ -275,8 +274,9 @@
         : "All " + t.rows.length + " clubs sit inside the Season 2 roster limit of " + t.cs.limit + ", the minimums and the " + esc(M.money(t.cs.cap)) + " cap.";
     },
     newsroom: function () {
-      var p = M.standings("power")[0], nx = nextNight().next;
-      return (p ? "The " + esc(p.team.full) + " lead the power rankings with a club rating of " + p.ovr + "." : "") + (nx ? " The next recap posts after the last final on " + esc(nx.label) + "." : "");
+      var p = powerNow()[0], nx = nextNight().next;
+      return (p ? "The " + esc(p.team.full) + " lead the power rankings with a club rating of " + p.ovr + "." : "No club leads the power rankings until a game is played.") +
+        (nx ? " The next recap posts after the last final on " + esc(nx.label) + "." : "");
     }
   };
   /* the workspace is the title, as on You, Team HQ and Control Center; the pane is named by the rail and by an sr-only h2
@@ -593,8 +593,8 @@
   /* cm: a committee manager application (RULING 2026-11-23: "current staff members can apply for committee manager
      positions that are not filled and are voted on by all other staff members") */
   var AKIND = { owner2: "Season 2 owner application", staff: "Staff application", cm: "Committee manager application", mgmt: "Front office nomination" };
-  var NW = ["none", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
-  function nw(n) { return NW[n] || String(n); }
+  /* a count in words, zero said "none": S2.words (js/core.js), the one list of these words (QA round 2: the desk kept two) */
+  function nw(n) { return S2.words(n, "none"); }
   function applicant(a) { return a.who; }
   function agoIso(h) { return new Date(Date.now() - h * 3600e3).toISOString(); }
   function dayOf(h) { return M.etFull(agoIso(h)).replace(/, \d{4}$/, ""); }
@@ -792,8 +792,9 @@
     return l;
   }
   function squadLabel(p) { return p.former ? "Former player" : p.squad === "tc" ? "Training camp" : p.squad === "pro" ? "Active roster" : "Not rostered"; }
+  /* the name is cut with an ellipsis on one line, so it carries the full tag as its title (QA round 2) */
   function personRow(p) {
-    return '<a class="dk-prow" href="#/desk/person/' + p.id + '" data-person="' + p.id + '" data-kbd-item><span class="avatar">' + esc(initials(p.tag)) + '</span><span class="dk-pname"><span class="title">' + esc(p.tag) + '</span><span class="sub">' +
+    return '<a class="dk-prow" href="#/desk/person/' + p.id + '" data-person="' + p.id + '" data-kbd-item><span class="avatar">' + esc(initials(p.tag)) + '</span><span class="dk-pname"><span class="title" title="' + esc(p.tag) + '">' + esc(p.tag) + '</span><span class="sub">' +
       esc([p.posName, squadLabel(p), p.seat].filter(Boolean).join(" · ")) + '</span></span><span class="dk-pclub">' + M.crest(p.club) + "<span>" + esc(p.club || "None") + '</span></span><span class="num dk-pc">' + esc(p.pos || "–") +
       '</span><span class="num dk-pc">' + (p.ovr ? p.ovr.ovr + (p.ovr.provisional ? "*" : "") : "–") + '</span><span class="num dk-pc">' + p.gp + "</span></a>";
   }
@@ -889,7 +890,7 @@
     /* a clear committee says what is next instead of a grid of "None" */
     var body = h.n ? ageStrip(h) + '<dl class="spec"><div><dt>Oldest</dt><dd>' + esc(h.oldest == null ? "Not timed" : ageLong(h.oldest).replace(/ ago$/, "")) + "</dd></div>" +
         (h.open.some(function (x) { return x.kind === "case"; }) ? "<div><dt>Unclaimed</dt><dd>" + countSay(h.unclaimed) + "</dd></div>" : "<div><dt>Items</dt><dd>" + esc(h.openSay) + "</dd></div>") + "</dl>" +
-        (h.toMgr ? '<span class="dk-flag on">' + (h.toMgr === 1 ? "One" : h.toMgr) + " escalated to the manager</span>" : "")
+        (h.toMgr ? '<span class="dk-flag on">' + countSay(h.toMgr) + " escalated to the manager</span>" : "")
       : '<span class="dk-ccard-next">' + esc(nx || "Nothing waiting.") + "</span>";
     return '<a class="dk-ccard' + (focus ? " on" : "") + '" href="#/desk?tab=committees&amp;c=' + c.key + '" data-committee="' + c.key + '"' + (focus ? ' aria-current="true"' : "") + ">" +
       '<span class="kicker">' + esc(!h.n ? "Clear" : h.openSay + " open") + "</span>" +
@@ -907,7 +908,7 @@
   }
   function focusSection(key) {
     var c = com(key), h = committeeHealth(key), mg = manager(key), mine = me().manages === key, home = COM_HOME[key], nx = comNext(key);
-    var say = h.n ? (h.openSay === "One" ? "One item is open" : h.openSay + " items are open") + (h.unclaimed ? ", " + (h.unclaimed === 1 ? "one" : h.unclaimed) + " unclaimed" : "") + "." : "Nothing is open." + (nx ? " " + esc(nx) : "");
+    var say = h.n ? (h.openSay === "One" ? "One item is open" : h.openSay + " items are open") + (h.unclaimed ? ", " + S2.words(h.unclaimed) + " unclaimed" : "") + "." : "Nothing is open." + (nx ? " " + esc(nx) : "");
     var list = h.items.length ? '<div class="dk-panel"><div class="dk-rows" id="dkFocusRows" data-kbd-list>' + h.items.map(focusRow).join("") + "</div></div>"
       : '<div class="dk-panel">' + stateBox("ok", "Nothing open for " + c.name, "When something on this topic needs staff it appears here, and anyone may pick it up.") + "</div>";
     return '<section class="dk-focus" id="dkFocus" aria-labelledby="dkFocusH"><div class="sec-head"><div class="copy"><span class="kicker">In focus</span><h3 class="d-2" id="dkFocusH" tabindex="-1">' + esc(c.name) + "</h3>" +
@@ -1066,16 +1067,20 @@
       S2.toast("The front page did not change: " + e.message, "err");
     });
   }
+  /* the power rankings as the desk shows them: none before the season's first final, when every club is level at zero
+     (QA round 2, 2026-11-25: the Newsroom named a club as leading before a game was played; Today and the public
+     standings already wait for the first final, by M.view.finals) */
+  function powerNow() { return M.view.finals ? M.standings("power") : []; }
   function paneNews(r) {
-    var pw = M.standings("power"), commish = me().commish, nx = nextNight().next;
+    var pw = powerNow(), commish = me().commish, nx = nextNight().next;
     return '<div class="dk-two dk-two-main">' +
       '<section class="' + R + '" aria-labelledby="dkPwH">' + /* no Media committee in Season 2 (2026-10-22): the recap and the rankings are automatic, and in one staff anyone may write a story */
       secHead({ id: "dkPwH", k: "Automatic", h: "Power rankings", p: "Automatic, from the table: the club rating mixes record, goal difference, goaltending, depth and form. Anyone on staff may check the order before it publishes.",
         arrow: arrowLink("#/standings?view=power", "Public rankings") }) +
-      '<div class="card pad-0"><div class="dk-rows">' + pw.map(function (p) {
+      '<div class="card pad-0">' + (!pw.length ? stateBox("muted", "No rankings yet", "The power rankings start with the season&rsquo;s first final; until then every club is level.") : '<div class="dk-rows">' + pw.map(function (p) {
         var mv = p.move > 0 ? '<span class="delta up num">▲' + p.move + "</span>" : p.move < 0 ? '<span class="delta down num">▼' + (-p.move) + "</span>" : '<span class="t-foot">Same</span>';
         return '<a class="row" href="' + esc(p.href) + '"><span class="d-num dk-rank">' + p.rank + "</span>" + M.crest(p.code) + '<span class="grow"><span class="title">' + esc(p.team.full) + '</span><span class="sub">' + p.pts + " points</span></span>" + mv + '<span class="num dk-ovr">' + p.ovr + "</span></a>";
-      }).join("") + "</div></div></section>" +
+      }).join("") + "</div>") + "</div></section>" +
       '<div class="dk-aside">' +
       '<section class="dk-aside-sec ' + R + '" aria-labelledby="dkRcH">' + secHead({ id: "dkRcH", k: "Automatic", h: "Night recap", sm: true, p: "One post per game night in the news channel, written by the recap job after the last final. Spotlights stay on the site." }) +
         '<p class="dk-next">' + esc(nx ? "Next: " + nx.label + ", " + nx.games.length + " games" : "No game night is scheduled") + "</p></section>" +
@@ -1093,8 +1098,8 @@
   /* =========================================================================================================== */
   /* LIVE: the real Staff Desk (v5.00 swap, stream g1, 2026-11-24)                                                */
   /* =========================================================================================================== */
-  /* In live mode (S2.LIVE, js/core.js) the desk reads the league office's own records through f's client (S2.ensureSb, the
-     same read as js/pages/gamedesk.js rd()) and writes only through S2.write (contracts/client-api.md), on the doors the
+  /* In live mode (S2.LIVE, js/core.js) the desk reads the league office's own records through f's client (S2.rd, the one
+     read door every staff page uses) and writes only through S2.write (contracts/client-api.md), on the doors the
      current site uses (src/live/part_live.js CG.AFTER._complaintsLive, CG.suspendUser, CG.caseDisciplineModal,
      CG.appBallotSection, CG.wireAppChat; write-paths.md section 3 "Staff Desk" and "Filed forms"):
        cases        action_requests (read, and update with the final decision statement, v4.32), action_messages (read,
@@ -1118,13 +1123,9 @@
   var LV = { state: "idle", err: null, at: 0, G: null, flip: null, cases: null, msgs: {}, apps: null, ballots: null, amsgs: {},
     desk: null, staff: [], voters: null, cmVote: {}, reqs: null, rec: {}, run: null };
   function myId() { return (S2.session && S2.session.profileId) || null; }
-  function client() {
-    var c = S2.ensureSb ? S2.ensureSb() : null;
-    if (!c) throw new Error("Not connected to the league, so the desk cannot be read here. Reload the page and try again.");
-    return c;
-  }
-  function dbErr(e) { var x = new Error((e && e.message) || "The league did not answer."); x.code = (e && e.code) || null; x.hint = (e && e.hint) || null; return x; }
-  function rd(q) { return Promise.resolve().then(function () { return q(client()); }).then(function (r) { if (r && r.error) throw dbErr(r.error); return r ? r.data : null; }); }
+  /* every desk read goes through S2.rd (js/live.js), the one read door (QA round 2, A10): no read client is an error in the
+     desk's own words, never an empty answer, and a refusal carries the database's message, code and hint */
+  function rd(q) { return S2.rd(q, { offline: "Not connected to the league, so the desk cannot be read here. Reload the page and try again." }); }
   function rpcRd(name, args) { return rd(function (c) { return c.rpc(name, args || {}); }); }
   /* qa (nits 19): only PostgREST's "no such function" and "no such table" mean a Season 2 record is not applied yet; an
      undefined function or table INSIDE a gate that exists (42883, 42P01) is a broken gate and stays a failure, never a
@@ -1978,7 +1979,7 @@
     var r = S2.parse(), keep = R; R = "";
     closePop();
     dk.outerHTML = paint(r); R = keep;
-    var t = titleFor(r); document.title = t + " · CGHL"; var it = $("#inlineTitle"); if (it) it.textContent = t;
+    S2.setTitle(titleFor(r));   /* the tab and the bar's collapsed title, as the router names a page (QA round 2) */
     mount(r); S2.charts.hydrate($("#dk"));
     /* a new section: focus its name (the sr-only pane h2; the Game desk's h1), never BODY */
     if (push) { window.scrollTo(0, 0); var ph = $("#dkPaneH"); if (ph) ph.focus({ preventScroll: true }); else landOn($("#dkTitle")); }

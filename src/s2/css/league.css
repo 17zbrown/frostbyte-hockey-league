@@ -44,8 +44,8 @@
 .lg-strip::-webkit-scrollbar { display: none; }
 .lg-strip-a { flex: 1 0 auto; min-width: 60px; min-height: 76px; display: grid; justify-items: center; align-content: center; gap: 6px; border-radius: var(--r-xs);
   font: 750 .75rem/1 var(--font-brand); font-stretch: 85%; font-variation-settings: "wdth" 85; letter-spacing: .1em; color: var(--muted);
-  transition: background-color 160ms ease, color 160ms ease, transform var(--t-press) var(--ease-out); }
-.lg-strip-a:active { transform: scale(.94); }
+  transition: background-color 160ms ease, color 160ms ease, scale var(--t-press) var(--ease-out); }
+.lg-strip-a:active { scale: .94; }
 .lg-strip-a .crest { width: 44px; height: 44px; }
 @media (hover: hover) and (pointer: fine) { .lg-strip-a:hover { background: var(--fill-2); color: var(--ink); } }
 @media (min-width: 1180px) { .lg-strip { margin-left: 0; margin-right: 0; padding-left: 0; padding-right: 0; } }
@@ -342,8 +342,8 @@
 .lg-tt-sk-hero { height: 56px; }
 .lg-tt-sk-val { height: 40px; width: 55%; }
 .lg-tt-sk-row { height: 22px; }
-.lg-tt-hero { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 14px; color: var(--ink); transition: transform var(--t-press) var(--ease-out); }
-.lg-tt-hero:active { transform: scale(.985); }
+.lg-tt-hero { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 14px; color: var(--ink); transition: scale var(--t-press) var(--ease-out); }
+.lg-tt-hero:active { scale: .985; }
 .lg-tt-hero .crest { width: 56px; height: 56px; }
 .lg-tt-who { display: grid; gap: 2px; min-width: 0; }
 .lg-tt-tag { font: 700 1.375rem/1.15 var(--font-display); letter-spacing: -0.018em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -503,8 +503,8 @@
   background: var(--club); color: var(--club-ink); }
 @media (min-width: 900px) { .lg-sc { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); align-items: start; } }
 .lg-sc-id { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: clamp(16px, 2.4vw, 28px); color: inherit;
-  transition: transform var(--t-press) var(--ease-out); -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-.lg-sc-id:active { transform: scale(.985); }
+  transition: scale var(--t-press) var(--ease-out); -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.lg-sc-id:active { scale: .985; }
 .lg-sc-t { display: grid; gap: 10px; min-width: 0; }
 .lg-sc-t .d-1 { font-size: clamp(2rem, 4.6vw, 3.5rem); overflow-wrap: anywhere; text-wrap: balance; }
 .lg-sc-l { font: 500 1rem/1.4 var(--font); }
@@ -545,8 +545,8 @@
   .lg-rec-h span { font: 650 .6875rem/1.2 var(--font); letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
 }
 .lg-rec-c > a, .lg-rec-c > span { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 60px; color: var(--ink);
-  transition: transform var(--t-press) var(--ease-out); }
-.lg-rec-c > a:active { transform: scale(.985); }
+  transition: scale var(--t-press) var(--ease-out); }
+.lg-rec-c > a:active { scale: .985; }
 .lg-rec-c .crest { width: 28px; height: 28px; }
 .lg-rec-w { display: grid; gap: 3px; min-width: 0; }
 .lg-rec-a { font: 650 .6875rem/1.2 var(--font); letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
@@ -571,8 +571,8 @@
 /* the medallion is white in both themes: the crests are drawn for a light ground, and a crest that shares its club's color
    (the Red Wings' wheel on Red Wings red) would vanish straight on the tile */
 .lg-ct { --lg-medal: var(--on-dark); position: relative; display: grid; gap: 14px; align-content: start; min-height: 100%; padding: 16px 16px 18px; border-radius: var(--r-sm);
-  background: var(--club); color: var(--club-ink); transition: transform var(--t-press) var(--ease-out); -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-.lg-ct:active { transform: scale(.985); }
+  background: var(--club); color: var(--club-ink); transition: scale var(--t-press) var(--ease-out); -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.lg-ct:active { scale: .985; }
 .lg-ct-top { display: flex; flex-wrap: wrap; align-items: center; align-self: start; justify-content: space-between; gap: 6px 8px; min-height: 26px; }
 .lg-ct-rk { font: 650 .6875rem/1 var(--font); letter-spacing: .02em; text-transform: uppercase; }
 /* the same mark as the club page hero (.pfx-flag in profile.css): one Clinched treatment on a club's own color */
@@ -787,9 +787,9 @@
 .lg-dr-cc > .kicker { width: 100%; color: var(--muted); }
 .lg-dr-secs { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--fill); }
 .lg-dr-sec { min-width: 48px; min-height: 34px; padding: 0 10px; border-radius: 999px; color: var(--ink-2); font: 600 .8125rem/1 var(--font-num);
-  transition: background-color 160ms ease, color 160ms ease, transform var(--t-press) var(--ease-out); }
+  transition: background-color 160ms ease, color 160ms ease, scale var(--t-press) var(--ease-out); }
 .lg-dr-sec[aria-pressed="true"] { background: var(--raised); color: var(--ink); }
-.lg-dr-sec:active { transform: scale(.95); }
+.lg-dr-sec:active { scale: .95; }
 @media (min-width: 900px) {
   .lg-dr-now { grid-template-columns: minmax(0, 1fr) auto; align-items: end; column-gap: 56px; }
   .lg-dr-clockbox { justify-items: end; text-align: right; }
@@ -847,10 +847,10 @@
 .lg-dr-pb { display: grid; gap: 3px; min-width: 0; }
 .lg-dr-pt { font: 600 1rem/1.25 var(--font); color: var(--ink); overflow-wrap: anywhere; }
 .lg-dr-star { color: var(--muted); }
-.lg-dr-star svg { width: 22px; height: 22px; fill: none; transition: fill 160ms ease, transform 200ms var(--ease-out); }
+.lg-dr-star svg { width: 22px; height: 22px; fill: none; transition: fill 160ms ease, scale 200ms var(--ease-out); }
 .lg-dr-star[aria-pressed="true"] { color: var(--accent-ink); }
 .lg-dr-star[aria-pressed="true"] svg { fill: currentColor; }
-.lg-dr-star:active svg { transform: scale(.88); }
+.lg-dr-star:active svg { scale: .88; }
 @media (hover: hover) and (pointer: fine) { .lg-dr-pt:hover, .lg-dr-rn a:hover, .lg-dr-bn a:hover, .lg-dr-rw a:hover, .lg-dr-last a:hover { color: var(--accent-ink); } }
 
 /* the board: nine columns (rounds and the eight clubs) that fit 320px; names show from 700px */
@@ -861,8 +861,8 @@
 .lg-dr-gh.me { color: var(--accent-ink); }
 .lg-dr-gr { align-self: center; font: 650 .6875rem/1 var(--font); color: var(--muted); }
 .lg-dr-cell { position: relative; display: grid; align-content: space-between; min-width: 0; min-height: 46px; padding: 5px 5px 4px; border-radius: 5px; text-align: left;
-  background: var(--fill-2); color: var(--muted); transition: background-color 200ms ease, color 200ms ease, transform var(--t-press) var(--ease-out); }
-.lg-dr-cell:active { transform: scale(.94); }
+  background: var(--fill-2); color: var(--muted); transition: background-color 200ms ease, color 200ms ease, scale var(--t-press) var(--ease-out); }
+.lg-dr-cell:active { scale: .94; }
 .lg-dr-cell.me { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
 .lg-dr-cell.made { background: var(--surface); color: var(--ink); box-shadow: inset 0 0 0 1px var(--separator); }
 .lg-dr-cell.made.me { background: var(--accent-soft); box-shadow: none; }
@@ -883,10 +883,10 @@
 .lg-dr-rtabs { display: flex; gap: 6px; width: max-content; padding: 2px 0 4px; }
 .lg-dr-rt { position: relative; min-height: 40px; padding: 0 14px; border-radius: 999px; background: var(--fill-2); color: var(--ink-2); white-space: nowrap;
   font: 750 .75rem/1 var(--font-brand); font-stretch: 85%; font-variation-settings: "wdth" 85; letter-spacing: .1em; text-transform: uppercase;
-  transition: background-color 160ms ease, color 160ms ease, transform var(--t-press) var(--ease-out); }
+  transition: background-color 160ms ease, color 160ms ease, scale var(--t-press) var(--ease-out); }
 .lg-dr-rt[aria-pressed="true"] { background: var(--ink); color: var(--canvas); }
 .lg-dr-rt.live { background: none; box-shadow: inset 0 0 0 1.5px currentColor; color: var(--accent-ink); }
-.lg-dr-rt:active { transform: scale(.96); }
+.lg-dr-rt:active { scale: .96; }
 .lg-dr-dot { display: inline-block; width: 6px; height: 6px; margin-left: 7px; border-radius: 50%; background: var(--live); vertical-align: middle; }
 .lg-dr-rh { margin: 14px 0 10px; font: 400 .9375rem/1.45 var(--font); color: var(--muted); }
 .lg-dr-rl { border-top: 2px solid var(--ink); }
@@ -910,11 +910,9 @@
 /* reduced motion: state changes still show, without movement */
 @media (prefers-reduced-motion: reduce) {
   .lg-pw-more, .lg-chev, .lg-sort, .lg-ct-medal { transition: none; }
-  .lg-strip-a:active, .lg-tt-hero:active, .lg-ct:active, .lg-potw-c:active { transform: none; }
   .lg-ct:hover .lg-ct-medal, .lg-sc-id:hover .lg-ct-medal { transform: none; }
-  .lg-sc-id:active, .lg-rec-c > a:active { transform: none; }
   .lg-dr-bar i, .lg-dr-cell, .lg-dr-star svg, .lg-dr-clock { transition: none; }
-  .lg-dr-cell:active, .lg-dr-rt:active, .lg-dr-sec:active, .lg-dr-star:active svg { transform: none; }
+  /* every press on these pages is the scale property (QA round 2, 2026-11-25): the kit's one reduce rule removes them */
 }
 
 /* phone feel (mobile-native), scoped to these pages: no gray tap flash, no double-tap delay, no text selection on a

@@ -36,6 +36,11 @@ function eve(args, o) {
   (b.games || []).forEach((g) => { if (AHEAD.has(g.id)) Object.assign(g, { status: "scheduled", home_score: null, away_score: null, forfeit: null, forfeit_team_id: null, went_ot: false, home_shots: null, away_shots: null, ea_match_id: null }); });
   if (b.box && b.box.byGame) AHEAD.forEach((id) => { delete b.box.byGame[id]; });
   if (o && o.noSignup && b.signups) b.signups = b.signups.filter((x) => x.profile_id !== ME);
+  /* QA round 2 (2026-11-25): o.ownerClosed puts Season 2's owner application deadline a day before the read; o.regClosed
+     closes Season 2's registration */
+  (b.seasons || []).forEach((x) => { if (x.number !== 2) return;
+    if (o && o.ownerClosed) x.owner_app_deadline = new Date(Date.parse(EVE) - 864e5).toISOString();
+    if (o && o.regClosed) x.registration_open = false; });
   return b;
 }
 /* the fixture, worked out from the recording before any page opens: the member, their club's week and its players */
@@ -57,6 +62,11 @@ const FX = (() => {
 })();
 
 (async () => {
+  /* QA round 2 nit (2026-11-25): "the draft is complete" is the model's one definition (M.draftDone); You's unrostered line
+     read draft_state itself. No club page tests a draft's status for "complete" on its own */
+  { const fs = require("fs"), path = require("path"), hits = ["hq", "you", "lineups", "tradebuild"].map((f) => [f, fs.readFileSync(path.join(process.env.S2_ROOT, "js/pages/" + f + ".js"), "utf8")])
+      .filter((x) => /\b(st|state|draft)\.status\s*===\s*"complete"/.test(x[1])).map((x) => x[0]);
+    A("no club page (Team HQ, You, lineups, the trade page) tests the draft's completion itself: each asks M.draftDone", hits.length === 0, hits); }
   const b = await chromium.launch(), errs = [];
   let H = null;
   /* o: answered (false: no answer on file), late (the week row on file is stamped late), readFail ({table: message}), chosen (the number saved; "free"), inGuild,
@@ -89,6 +99,9 @@ const FX = (() => {
     const app = (k) => (q) => { H.R.push({ t: k + "_applications", f: q.filters.slice() }); if (H.F[k]) return no("42501", H.F[k]); const s = q.filters.filter((f) => f[0] === "season_id")[0];
       return H.apps[k] ? [Object.assign({ profile_id: ME, season_id: s ? s[1].slice(3) : null }, H.apps[k])] : []; };
     tables.owner_applications = app("owner"); tables.staff_applications = app("staff");
+    /* o.pfFail: the league profile's own read (Settings, its ea_player_id column) is refused with that message, as an
+       unknown column answers (42703); the session's profile read is not touched */
+    if (o.pfFail) { const t0 = tables.profiles; tables.profiles = (q) => /ea_player_id/.test(q.select || "") ? no("42703", o.pfFail) : t0(q); }
     const rec = (k, r) => (url, args) => { H.auth.push({ k, args, path: url.pathname }); return r(args); };
     await mock.install(ctx, { live: true, persona: who, page: o.page, writes: Object.assign({}, o.writes), tables,
       rpcs: { s2_league: (a) => ok(eve(a, o)), my_discord_accounts: () => ok(JSON.parse(JSON.stringify(H.dc))) },
@@ -262,8 +275,14 @@ const FX = (() => {
   await click(p, '[data-x="recheck"]'); await wait(700);
   r = { t: await toasts(p), s: await p.evaluate(() => (S2.$('[data-w="dcs"]') || {}).textContent || "") };
   A("still outside the server: said, and the re-check stays offered", r.t.some((x) => /Not seeing that account in the server yet/.test(x)) && /I have joined, re-check/.test(r.s), r);
+  const door = () => p.evaluate(() => ((S2.$("[data-foot-door]") || {}).textContent || "").trim());
+  r = await door();
+  A("outside the server, the footer offers Join the Discord", /Join the Discord/.test(r), r);
   H.dc = Object.assign({}, H.dc, { in_guild: true });
   await click(p, '[data-x="recheck"]'); await wait(700);
+  /* QA round 2 (2026-11-25): the re-check set in_guild but left the chrome as it was */
+  r = await door();
+  A("once the re-check finds the member in the server, the footer's Join the Discord door is gone, repainted in place (S2.paintChrome)", r === "", r);
   r = { t: await toasts(p), row: await p.evaluate(() => (S2.$('[data-w="dc"]') || {}).textContent || ""), inGuild: await p.evaluate(() => S2.auth.profile && S2.auth.profile.in_guild) };
   A("joined: You are in is said, the row reads In the server and the member's profile is in the guild", r.t.some((x) => /You are in/.test(x)) && /In the server/.test(r.row) && r.inGuild === true, r);
   await p.context().close();
@@ -272,7 +291,10 @@ const FX = (() => {
   mock.respond(H.ctx, "rpc:my_discord_accounts", () => no("57014", "canceling statement due to statement timeout"));
   await click(p, '[data-x="recheck"]'); await wait(700);
   r = { t: await toasts(p), b: await p.evaluate(() => { const x = S2.$('[data-x="recheck"]'); return x ? { off: x.disabled, text: x.textContent } : null; }) };
-  A("a failed check is said in the database's words and the button comes back", r.t.some((x) => /The check did not go through: canceling statement due to statement timeout/.test(x)) && r.b && !r.b.off && r.b.text === "I have joined, re-check", r);
+  /* rewritten in QA round 2 (2026-11-25): this check pinned the raw form ("The check did not go through: canceling
+     statement ..."), the database's words as the whole sentence; it now pins plain words first, with those words kept */
+  A("a failed check is said in plain words with the database's own words kept, and the button comes back",
+    r.t.some((x) => /^The check did not go through\. The league did not answer as expected\..*The league said: canceling statement due to statement timeout\.$/.test(x)) && r.b && !r.b.off && r.b.text === "I have joined, re-check", r);
   await p.context().close();
 
   p = await open("#/you?tab=settings", who, { stash: true, writes: { switch_discord_account: ok({ changed: true, discord_id: "dc-new", in_guild: false, display: "NewName" }) } });
@@ -386,16 +408,39 @@ const FX = (() => {
   await click(p, '.sheet [data-x="go"]'); await wait(600);
   r = await p.evaluate(() => ({ open: !!S2.$(".sheet"), t: (S2.$('[data-w="apps"]') || {}).textContent || "" }));
   A("confirmed: the sheet closes and the application reads Withdrawn, with File again", !r.open && /Withdrawn/.test(r.t) && /File again/.test(r.t), r);
+  /* QA round 2 nit (2026-11-25): filing again updates the same row, so it is "file it again", never "a new one"; with the
+     one edit unused nothing more is said */
+  A("...and says it may be filed again until the deadline, not that a new one may be filed", /You may file it again until /.test(r.t) && !/a new one|one edit is used/.test(r.t), r.t);
+  await p.context().close();
+  /* with the one edit used, a changed refiling is refused (guard_owner_app_one_edit, v4.20): the block says so */
+  p = await open("#/you?tab=applications", who, { ownerApp: { id: "oa1", status: "withdrawn", ea_id: null, availability: null, experience: null, preferred_club: "Minnesota Wild", franchise_2: null, franchise_3: null, pitch: null,
+    edited_at: "2026-11-20T15:00:00Z" } });
+  r = await text(p, '[data-w="apps"]');
+  A("withdrawn after the one edit: it may be filed again only as it was", r && /You may file it again until /.test(r) && /Your one edit is used, so it can be filed again only as it was\./.test(r) && !!(await p.$('[data-w="apps"] [data-flow="owner"]')), r);
   await p.context().close();
   p = await open("#/you?tab=applications", who, { readFail: { owner: "permission denied for table owner_applications" } });
   r = await text(p, '[data-w="apps"]');
   A("an application that could not be read says so, with Try again", r && /Could not be read/.test(r) && /permission denied/.test(r) && !!(await p.$('[data-ya="ap-reload"]')), r);
+  A("...in plain words first, the database's words kept after them (QA round 2)", /The league did not answer as expected\..*The league said: permission denied for table owner_applications\./.test(r), r);
+  await p.context().close();
+  /* QA round 2 (2026-11-25): the block offered Apply, the one edit and File again after owner applications closed, and the
+     database refused each; it follows S2.forms.ownerAppsOpen now */
+  p = await open("#/you?tab=applications", who, { ownerClosed: true, ownerApp: null });
+  r = await p.evaluate(() => ({ open: S2.forms.ownerAppsOpen(), t: ((S2.$('[data-w="apps"] .hqx-app') || {}).textContent || "").replace(/\s+/g, " "), apply: !!S2.$('[data-w="apps"] [data-flow="owner"]'), staff: !!S2.$('[data-w="apps"] [data-flow="staff"]') }));
+  A("owner applications closed and none on file: says they closed, and when, with no Apply (S2.forms.ownerAppsOpen)",
+    !r.open && /Owner applications are closed/.test(r.t) && /Owner applications for Season 2 closed .* \(Rule 2\.6\)\./.test(r.t) && !r.apply && r.staff, r);
+  await p.context().close();
+  p = await open("#/you?tab=applications", who, { ownerClosed: true });
+  r = await p.evaluate(() => ({ t: ((S2.$('[data-w="apps"] .hqx-app') || {}).textContent || "").replace(/\s+/g, " "), edit: !!S2.$('[data-w="apps"] [data-flow="owner"]'), wd: !!S2.$('[data-act="app-withdraw"][data-app="owner"]') }));
+  A("closed with one in review: no one edit offered, Withdraw stays, and it says why", !r.edit && r.wd && /so it can no longer be changed\./.test(r.t), r);
   await p.context().close();
 
   /* QA function 21 (2026-11-25): the Inbox's Mark all read changed only this page, so the alerts came back unread on a
      reload, while the bell persisted it; both are the bell's door now */
   console.log("## Inbox: Mark all read is kept by the league (S2.notifs.seen)");
   p = await open("#/you?tab=inbox", who, { notifs: 2 });
+  r = await p.evaluate(() => ({ doc: document.title, bar: (S2.$("#inlineTitle") || {}).textContent }));
+  A("a You tab names its section and the page through S2.setTitle: \"Inbox · You · CGHL\" (QA round 2 A1)", r.doc === "Inbox · You · CGHL" && r.bar === "Inbox · You", r);
   r = await text(p, '[data-w="inboxh"]');
   A("two unread alerts read from the league", /2 unread items/.test(r || ""), r);
   await click(p, '[data-act="read-all"]'); await wait(700);
@@ -418,12 +463,27 @@ const FX = (() => {
   /* QA visual 1 (2026-11-25): the hero told every visitor "0 members are already in the league Discord" */
   r = await p.evaluate(() => ({ lede: ((S2.$(".hqx-jhero .lede-l") || {}).textContent || "").replace(/\s+/g, " "), partial: !!S2.M.partial.control }));
   A("a visitor never reads s2_control, so the join page prints no Discord count and never a zero it did not read", r.partial && r.lede.length > 0 && !/league Discord/.test(r.lede) && !/(^|\D)0 (members|have)/.test(r.lede), r);
+  r = await text(p, ".hqx-jhero .kicker");
+  A("while Season 2 takes sign-ups the join page's kicker says so", r === "Season 2 · Sign-ups open", r);
   await click(p, '[data-act="join"]'); await wait(400);
   r = await sheetText(p);
   A("the join sheet never promises an automatic server join (auto-join is retired)", r && /Join the CGHL server/.test(r) && !/You are added/.test(r) && !/sample player/.test(r), r);
   await click(p, '.sheet [data-x="go"]'); await wait(1200);
   r = H.auth.filter((x) => x.k === "oauth").pop();
   A("Continue with Discord is the real sign-in, identify only", r && r.args.provider === "discord" && r.args.scopes === "identify", r);
+  await p.context().close();
+
+  /* QA round 2 (2026-11-25): the kicker said "Sign-ups open" in every week of the year */
+  p = await open("#/you", "anon", { regClosed: true });
+  r = await text(p, ".hqx-jhero .kicker");
+  A("once Season 2's sign-ups close the join page's kicker is the season alone", r === "Season 2", r);
+  await p.context().close();
+  /* QA function 22, round 2 (2026-11-25): Settings printed a refused read's raw words ("column ... does not exist") as the
+     whole sentence */
+  p = await open("#/you?tab=settings", who, { pfFail: "column profiles.ea_player_id does not exist" });
+  r = await text(p, '[data-w="lprof"]');
+  A("a league profile the league could not read is said in plain words, the database's words kept, with Try again",
+    /Your league profile could not be read/.test(r || "") && /The league did not answer as expected\. Try again in a moment.*The league said: column profiles\.ea_player_id does not exist\./.test(r || "") && !!(await p.$('[data-ya="pf-reload"]')), r);
   await p.context().close();
 
   console.log("## a phone");

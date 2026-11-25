@@ -110,9 +110,11 @@
   /* QA function 29 (2026-11-25): from Season 2 on a member off every roster is not idle. Before the draft no club has a
      roster yet; after it, a signed-up member is in the training camp pool, where a club requests them one game at a time
      and they accept or decline each on the site (Rule S2.5). The plain line stays for a season without the pool, and for a
-     member who has not signed up for the season on screen */
+     member who has not signed up for the season on screen. "The draft is complete" is the model's one definition
+     (M.draftDone, QA round 2 nit, 2026-11-25: this read draft_state itself, so a draft the market already called done
+     still read "Rosters are built at the draft") */
   function unrostered(p) {
-    var su = p && p.signup, signed = !!su && su.status !== "declined" && su.status !== "withdrawn", st = M.draft && M.draft.state, done = !!st && st.status === "complete";
+    var su = p && p.signup, signed = !!su && su.status !== "declined" && su.status !== "withdrawn", done = M.draftDone();
     if (M.view.season >= 2 && signed && !done) return { where: "Not on a roster yet", say: "Rosters are built at the draft" + (cal(M.view.season, "draft_at") ? ", " + calText(M.view.season, "draft_at") : "") + " (Rule S2.3)." };
     if (M.view.season >= 2 && signed) return { where: "Training camp pool", say: "You are in the training camp pool: clubs can request you for single games, and you accept or decline each on the site (Rule S2.5)." };
     return { where: "Not on a roster", say: "You are not on a club's roster right now, so you play no games until one adds you." };
@@ -352,6 +354,15 @@
      filing again are e5's forms (data-flow); the database decides whether each is open (the one edit, the deadline,
      Rule 2.7's conflicts) and says so in its own words ---- */
   var AP = { state: "idle", owner: null, staff: null, err: null, at: 0 };
+  /* a read the league refused, in plain words first and the database's own words after them (QA function 22, round 2,
+     2026-11-25: Settings printed "column profiles.ea_player_id does not exist" as its whole sentence). A refusal carries
+     the database's code (js/live.js fail and S2.rd); a sentence this page or js/live.js wrote itself (no code, or an
+     S2_ code) is already plain and is said as it is */
+  function readSaid(e) {
+    var m = String((e && e.message) || "").trim();
+    if (!e || !e.code || /^S2_/.test(e.code)) return m || "The league did not answer.";
+    return "The league did not answer as expected. Try again in a moment, and if it keeps happening tell a commissioner. The league said: " + m.replace(/[.\s]+$/, "") + ".";
+  }
   var APP_WORD = { pending: "In review", approved: "Approved", denied: "Not approved", waitlisted: "Waitlisted", withdrawn: "Withdrawn" };
   function said(e) { return S2.forms && S2.forms.said ? S2.forms.said(e) : String((e && e.message) || e); }
   function loadApps(force) {
@@ -374,20 +385,28 @@
     var rs = S2.forms && S2.forms.regSeason ? S2.forms.regSeason() : null;
     var owner = kind === "owner", label = owner ? "Owner application" : "Staff application", n = rs ? rs.number : M.view.season, r = x && x.row;
     var wrap = function (h, p, body, acts) { return '<section class="hqx-block hqx-app">' + head({ k: esc(label + (owner ? " · " + (rs ? rs.name || "Season " + rs.number : sn()) : "")), h: h, p: p }) + (body || "") + '<div class="hqx-actions">' + (acts || "") + "</div></section>"; };
-    if (x && x.err) return wrap("Could not be read", esc(said(x.err)), "", '<button class="btn secondary sm" data-ya="ap-reload">Try again</button>');
-    if (!r) return wrap(owner ? "No owner application on file" : "No staff application on file",
-      owner ? "A member signed up for the season may apply to own any of the 32 NHL franchises until " + esc(calText(n, "owner_app_deadline")) + " (Rule 2.6)." : "Season 2 has one staff group. Every staffer and commissioner votes on each application (Rule 2.6).",
-      "", '<button class="btn" data-flow="' + kind + '">' + (owner ? "Apply to own a club" : "Apply to join the staff") + "</button>");
+    /* the one reading of "owner applications are open" (S2.forms.ownerAppsOpen; QA round 2, 2026-11-25: after the close
+       this block still offered Apply, the one edit and File again, which the database then refused) */
+    var open = !!(S2.forms && S2.forms.ownerAppsOpen && S2.forms.ownerAppsOpen()), closed = rs && cal(n, "owner_app_deadline") ? "Owner applications for " + (rs.name || "Season " + rs.number) + " closed " + calText(n, "owner_app_deadline") + " (Rule 2.6)." : "Owner applications are not open now (Rule 2.6).";
+    if (x && x.err) return wrap("Could not be read", esc(readSaid(x.err)), "", '<button class="btn secondary sm" data-ya="ap-reload">Try again</button>');
+    if (!r) return wrap(owner ? (open ? "No owner application on file" : "Owner applications are closed") : "No staff application on file",
+      owner ? (open ? "A member signed up for the season may apply to own any of the 32 NHL franchises until " + esc(calText(n, "owner_app_deadline")) + " (Rule 2.6)." : esc(closed)) : "Season 2 has one staff group. Every staffer and commissioner votes on each application (Rule 2.6).",
+      "", owner && !open ? "" : '<button class="btn" data-flow="' + kind + '">' + (owner ? "Apply to own a club" : "Apply to join the staff") + "</button>");
     var pend = r.status === "pending", word = APP_WORD[r.status] || r.status;
     if (owner) {
       var picks = [r.preferred_club, r.franchise_2, r.franchise_3].filter(Boolean);
       return wrap(esc(pend ? (r.preferred_club ? r.preferred_club + ", in review" : "In review") : word),
-        pend ? "Every staffer and commissioner votes on each application; more than half of them must approve." : r.status === "withdrawn" ? "You withdrew this application. The league decides whether a new filing is still open." : "",
+        pend ? "Every staffer and commissioner votes on each application; more than half of them must approve." + (open ? "" : " " + esc(closed).replace(/ \(Rule 2\.6\)\.$/, ", so it can no longer be changed.")) :
+          /* filing again updates this same row (one per member and season), so a used edit holds: guard_owner_app_one_edit
+             (v4.20) refuses a changed refiling once edited_at is set (QA round 2 nit, 2026-11-25: "file a new one" promised
+             a fresh application) */
+          r.status === "withdrawn" ? (open ? "You withdrew this application. You may file it again until " + esc(calText(n, "owner_app_deadline")) + "." +
+            (r.edited_at ? " Your one edit is used, so it can be filed again only as it was." : "") :"You withdrew this application. " + esc(closed).replace(/ \(Rule 2\.6\)\.$/, ", so it cannot be filed again this season.")) : "",
         '<dl class="spec hqx-spec4"><div><dt>Franchise' + (picks.length > 1 ? "s" : "") + "</dt><dd>" + esc(picks.join(", ") || "Not named") + '</dd></div><div><dt>Status</dt><dd>' + esc(word) + "</dd></div>" +
           '<div><dt>Applications close</dt><dd class="num">' + esc(calText(n, "owner_app_deadline")) + '</dd></div><div><dt>Your one edit</dt><dd>' + (r.edited_at ? "Used " + esc(stamp(Date.parse(r.edited_at))) : "Not used") + "</dd></div></dl>" +
           '<p class="hqx-fine">An applicant may change a submitted application once while applications are open, and may withdraw it at any time (Rule 2.6).</p>',
-        pend ? (r.edited_at ? "" : '<button class="btn secondary" data-flow="owner">Use my one edit</button>') + '<button class="btn danger" data-act="app-withdraw" data-app="owner">Withdraw</button>' :
-          r.status === "withdrawn" ? '<button class="btn" data-flow="owner">File again</button>' : "");
+        pend ? (r.edited_at || !open ? "" : '<button class="btn secondary" data-flow="owner">Use my one edit</button>') + '<button class="btn danger" data-act="app-withdraw" data-app="owner">Withdraw</button>' :
+          r.status === "withdrawn" && open ? '<button class="btn" data-flow="owner">File again</button>' : "");
     }
     var names = (r.departments || []).map(function (k) { var c = S2.COMMITTEE_DEFS.filter(function (d) { return d.key === k || d.name === k; })[0]; return c ? c.name : k; });
     return wrap(esc(word), pend ? "Every staffer and commissioner votes on each application, and it passes when more than half of them approve (Rule 2.6)." : r.status === "withdrawn" ? "You withdrew this application. Applying again starts a new one, which is voted on afresh." : "",
@@ -443,15 +462,13 @@
   var PF_COLS = "id,ea_id,platform,platform_gamertag,preferred_server,jersey_number,ea_player_id";
   function loadProfile() {
     if (PF.state === "loading" || PF.state === "ready") return;
-    var sb = S2.ensureSb && S2.ensureSb(), uid = S2.session && S2.session.profileId;
+    var uid = S2.session && S2.session.profileId;
     PF.state = "loading"; PF.err = null; paintProfile();
     Promise.resolve().then(function () {
       if (!uid) throw new Error("Sign in with Discord first.");
-      if (!sb) throw new Error("Not connected to the league, so your profile cannot be read. Reload the page and try again.");
-      return sb.from("profiles").select(PF_COLS).eq("id", uid).maybeSingle();
-    }).then(function (r) {
-      if (r && r.error) throw new Error(r.error.message || "The league did not answer.");
-      var row = r && (Array.isArray(r.data) ? r.data[0] : r.data);
+      return S2.rd(function (c) { return c.from("profiles").select(PF_COLS).eq("id", uid).maybeSingle(); }, { offline: "Not connected to the league, so your profile cannot be read. Reload the page and try again." });
+    }).then(function (data) {
+      var row = Array.isArray(data) ? data[0] : data;
       if (!row) throw new Error("Your profile was not found. Sign out and back in, then try again.");
       PF.row = row; PF.state = "ready"; paintProfile();
     }).catch(function (e) { console.warn("You: the league profile could not be read", e); PF.state = "error"; PF.err = e; paintProfile(); });
@@ -481,7 +498,7 @@
   }
   function lprofReal(p) {
     var foot = "Your gamertag, position and EA ID are public on your profile (Rule 1.1). Your console name is seen only by your club's management and league staff. A position change is a request to the league office.";
-    if (PF.state === "error") return group("League profile", '<div class="row"><span class="grow"><span class="title">Your league profile could not be read</span><span class="sub">' + esc(PF.err.message) + '</span></span><button class="btn secondary sm" data-ya="pf-reload">Try again</button></div>');
+    if (PF.state === "error") return group("League profile", '<div class="row"><span class="grow"><span class="title">Your league profile could not be read</span><span class="sub">' + esc(readSaid(PF.err)) + '</span></span><button class="btn secondary sm" data-ya="pf-reload">Try again</button></div>');
     if (PF.state !== "ready" || !p) return group("League profile", '<div class="row"><span class="grow sub" aria-live="polite">Reading your league profile…</span></div>');
     var r = PF.row, plat = r.platform || "", j = jersey(p), num = j.wearing || j.chosen || "", cons = (consoleField("console") || { opts: [] }).opts;
     var opt = function (v, label, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? " selected" : "") + ">" + esc(label) + "</option>"; };
@@ -595,6 +612,7 @@
       var d = (r && r.data) || {};
       DC.busy = null;
       if (S2.auth && S2.auth.profile) { S2.auth.profile.discord_id = String(d.discord_id || id); S2.auth.profile.in_guild = !!d.in_guild; }
+      S2.paintChrome();   /* the footer's Join the Discord door reads in_guild (js/core.js footDoor) */
       if (d.changed) S2.toast("Switched to " + (name || d.display || "your new account") + (d.in_guild ? ". Your Discord roles are moving over." : ". Site roles moved; join the server with it for Discord roles."), "ok");
     }, function (e) { DC.busy = null; S2.toast("Could not switch: " + ((e && e.message) || "the league refused it."), "err"); })
       .then(function () { DC.state = "idle"; return loadDc(); });
@@ -602,12 +620,12 @@
   function dcRow() {
     var d = DC.data || {}, st = DC.state;
     var state = st === "ready" ? (d.in_guild ? tag("win", "In the server") : tag("loss", "Not in the server yet")) : "";
-    var sub = st === "error" ? "Your Discord accounts could not be read: " + ((DC.err && DC.err.message) || "the league did not answer.") : st === "ready" ? "The league follows " + dcName(d) + ". Switch or link another." : "Checking your Discord accounts…";
+    var sub = st === "error" ? "Your Discord accounts could not be read. " + readSaid(DC.err) : st === "ready" ? "The league follows " + dcName(d) + ". Switch or link another." : "Checking your Discord accounts…";
     return '<button class="row hqx-dcrow" data-act="discord"><span class="grow"><span class="title">Discord account</span>' + state + '<span class="sub">' + esc(sub) + "</span></span>" + S2.chev() + "</button>";
   }
   function dcInner() {
     var d = DC.data || {}, st = DC.state;
-    if (st === "error") return '<div class="hqx-callout" role="alert"><p class="t-sub hqx-ink"><b>Your Discord accounts could not be read.</b> ' + esc((DC.err && DC.err.message) || "") + '</p><div class="hqx-actions"><button class="btn secondary sm" data-x="reload">Try again</button></div></div>';
+    if (st === "error") return '<div class="hqx-callout" role="alert"><p class="t-sub hqx-ink"><b>Your Discord accounts could not be read.</b> ' + esc(readSaid(DC.err)) + '</p><div class="hqx-actions"><button class="btn secondary sm" data-x="reload">Try again</button></div></div>';
     if (st !== "ready") return '<p class="t-sub" aria-live="polite">Checking your Discord accounts…</p>';
     var cur = String(d.current || ""), others = (d.accounts || []).filter(function (a) { return String(a.discord_id) !== cur; }), inv = d.invite || S2.siteConfig("discord_invite");
     return '<p class="t-body">The league follows <b>' + esc(dcName(d)) + "</b>.</p>" +
@@ -638,10 +656,12 @@
         /* my_discord_accounts reads presence from the bot's guild_members row, so a join shows within seconds */
         S2.discordAccounts().then(function (d) {
           DC.data = d || {}; DC.at = Date.now();
-          if (DC.data.in_guild) { if (S2.auth && S2.auth.profile) S2.auth.profile.in_guild = true; S2.toast("You are in. Your Discord roles follow within a couple of minutes.", "ok"); }
+          /* QA round 2 (2026-11-25): the footer kept its Join the Discord door after a member joined; it reads in_guild
+             (js/core.js footDoor), so the chrome is repainted in place once the league says they are in */
+          if (DC.data.in_guild) { if (S2.auth && S2.auth.profile) S2.auth.profile.in_guild = true; S2.paintChrome(); S2.toast("You are in. Your Discord roles follow within a couple of minutes.", "ok"); }
           else S2.toast("Not seeing that account in the server yet. Join with the account the league follows.", "err");
           paintDc();
-        }, function (err) { b.disabled = false; b.textContent = "I have joined, re-check"; S2.toast("The check did not go through: " + ((err && err.message) || ""), "err"); });
+        }, function (err) { b.disabled = false; b.textContent = "I have joined, re-check"; S2.toast("The check did not go through. " + readSaid(err), "err"); });
       }
     });
   }
@@ -660,6 +680,7 @@
      ink band and the league office links. Every number is real; nothing private appears. ---- */
   function daysTo(at) { var a = M.etDay(M.generated), b = M.etDay(at); return a && b ? Math.round((Date.parse(b) - Date.parse(a)) / 864e5) : null; }
   function s2val(label) { var s = M.control && M.control.season(2); return s ? (s.summary.filter(function (x) { return x.label === label; })[0] || {}).value || "" : ""; }
+  function regOpen() { var rs = S2.forms && S2.forms.regSeason ? S2.forms.regSeason() : null; return !!(rs && rs.number === 2); }
   function guestHtml() {
     /* QA visual 1 (2026-11-25): a count the reader never received is never printed. A visitor never reads s2_control()
        (M.partial.control), so M.control's Discord count is a zero for them, and the page told every visitor the Discord was
@@ -682,7 +703,9 @@
     var office = [["Rulebook", "Every rule, searchable", "#/rulebook"], ["Season 2", "Calendar, settings and sign-ups", "#/season"], ["Own a club", "Owner applications close " + md(cal(2, "owner_app_deadline")), "#/season"],
       ["Join the staff", "One staff group, with six committees from officiating to draft and bidding", "#/season"], ["Standings", "Season 1, division by division", "#/standings"]];
     return '<div class="hqx-guest" data-ws="you-guest">' +
-      '<section class="hero hqx-jhero' + rv + '"><span class="kicker">Season 2 · Sign-ups open</span><h1 class="d-hero">Join the league</h1>' +
+      /* QA round 2 (2026-11-25): "Sign-ups open" only while Season 2 takes them (S2.forms.regSeason: its seasons row has
+         registration_open), as the strip reads it; the kicker said it in every week of the year */
+      '<section class="hero hqx-jhero' + rv + '"><span class="kicker">Season 2' + (regOpen() ? " · Sign-ups open" : "") + '</span><h1 class="d-hero">Join the league</h1>' +
         '<p class="lede-l">Competitive 6v6 EASHL on Wednesday, Thursday and Friday nights.' + (mem != null ? ' <b class="hqx-ink">' + S2.fmt(mem) + "</b> members are already in the league Discord" + (su != null ? ', and <b class="hqx-ink">' + su + "</b> have signed up for Season 2." : ".") :
           su != null ? ' <b class="hqx-ink">' + S2.fmt(su) + "</b> " + (su === 1 ? "member has" : "members have") + " signed up for Season 2." : "") + "</p>" +
         '<div class="hqx-jcta"><button class="btn site discord" data-act="join">Join with Discord</button><a class="btn site outline" href="#/season">See Season 2</a></div>' +
@@ -715,7 +738,8 @@
      follow it; each swatch also carries the theme it was drawn for */
   document.addEventListener("s2:look", function () { if (S2.$('[data-w="look"]')) repaint("look", lookInner); });
   S2.page("you", {
-    title: function (r) { var t = S2.has("member") && valid(youTabs(), r.q.tab); return t ? tabName(youTabs(), t) : S2.has("member") ? "You" : "Join the league"; },
+    /* "<section> · You" for S2.setTitle, as Team HQ's (QA round 2 A1, 2026-11-25: "Inbox · CGHL" named no page) */
+    title: function (r) { var t = S2.has("member") && valid(youTabs(), r.q.tab); return t ? tabName(youTabs(), t) + " · You" : S2.has("member") ? "You" : "Join the league"; },
     tab: "you",
     /* a member's You is a workspace on the gray app canvas; a guest's is a public join page on the white site canvas */
     get mode() { return S2.has("member") ? "app" : "site"; },

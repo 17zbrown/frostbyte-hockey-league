@@ -20,10 +20,34 @@
   var asked = q.get("season") != null ? parseInt(q.get("season"), 10) : null;
 
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
-  /* the one screen the loader draws: core.js's state box markup (S2.empty), because core.js is not loaded yet */
+  /* the activity wheel (loader, 2026-11-25; commissioner: "can you make a nice looking loading wheel instead of the page
+     just saying Loading the League?"). Apple's activity indicator: eight round-capped spokes, the brightest one leading a
+     clockwise turn with a fading trail. Drawn ONCE here, since this file runs before core.js, and kept as S2.spinner, the
+     one markup for any later wait; css/ui.css .spin holds the look and the motion (the delay, the trail, Reduce Motion).
+     Each spoke is an HTML element with its index in --k, because the turn is one opacity animation per spoke, which the
+     compositor runs while the main thread is busy (review 2026-11-25: the first cut turned an SVG in steps(), and WebKit
+     keeps a stepped animation on the main thread, so on an iPhone it froze while the bundle parsed) */
+  var WHEEL = (function () {
+    var s = "";
+    for (var k = 0; k < 8; k++) s += '<i style="--k:' + k + '"></i>';
+    return '<span class="spin-w" aria-hidden="true">' + s + "</span>";
+  })();
+  /* label says what is loading: the caption under the wheel, and the status's only text, so a screen reader reads the
+     words on screen once (review 2026-11-25: an aria-label over a caption marked aria-hidden left the status empty to
+     assistive technology, because a live region is announced from the text that changes inside it and browse mode reads
+     a container's text, never the aria-label of a plain div). role status implies aria-live polite. A status born with
+     its text, as the boot screen's is, is read in place but rarely announced: a later wait inside a page that must be
+     announced puts the spinner into a live region that is already in the page (core.js keeps the toasts' for that) */
+  S2.spinner = function (label) {
+    if (!label) throw new Error("S2.spinner needs a label that says what is loading");
+    return '<div class="spin" role="status">' + WHEEL + '<p class="t-sub spin-t">' + esc(label) + "</p></div>";
+  };
+  /* the error screen the loader draws: core.js's state box markup (S2.empty), because core.js is not loaded yet. It sits in
+     the boot screen's own centered frame, where the wheel was (review 2026-11-25: in .page it jumped to the top left, under
+     an iPhone's status bar, since .page has no top inset) */
   function show(kind, title, text, retry) {
     var app = document.getElementById("app"); if (!app) return;
-    app.innerHTML = '<main id="page" class="page"><div class="empty-state ' + kind + '"' + (kind === "err" ? ' role="alert"' : ' aria-live="polite"') + '><div class="empty-t">' +
+    app.innerHTML = '<main id="page" class="boot"><div class="empty-state ' + kind + '"' + (kind === "err" ? ' role="alert"' : ' aria-live="polite"') + '><div class="empty-t">' +
       '<p class="t-head">' + esc(title) + "</p>" + (text ? '<p class="t-foot">' + esc(text) + "</p>" : "") +
       (retry ? '<div class="empty-acts"><button type="button" class="btn" id="s2Retry">Try again</button></div>' : "") + "</div></div></main>";
     var b = document.getElementById("s2Retry"); if (b) b.addEventListener("click", function () { location.reload(); });
@@ -129,7 +153,10 @@
     });
   };
   if (source === "live") {
-    show("none", "Loading the league", null, false);
+    /* the boot screen until the page draws (S2.boot replaces #app): the wheel in the middle of the viewport, never a bare
+       line of text in the corner. On a phone network it can stay up for seconds */
+    var app = document.getElementById("app");
+    if (app) app.innerHTML = '<main class="boot">' + S2.spinner("Loading the league") + "</main>";
     read(asked, null).then(function (body) {
       var a = archiveSeason(body), as = S2.load.readAs;
       return (a ? read(a, ["games", "box", "tenures"]) : Promise.resolve(null)).then(function (archive) {

@@ -64,6 +64,10 @@
   function codeOf(s) { return s === "me" ? ST.club : ST.partner; }
   function tv(pid) { return T.tradeValue(pid); }
   function locked() { return ST.mode === "offer"; }
+  /* an archive is read only (QA round 2, 2026-11-25; hq.js archErr, the test js/trade.js seasonId makes): the page drew a
+     live builder, ticks, the block buttons and Propose, whose every door then refused. It still reads (both rosters, the
+     reading, the comparison), but nothing can be picked or sent, and the send section leads to the current season's */
+  function arch() { return S2._hq && S2._hq.archErr ? S2._hq.archErr() : null; }
   function arrow(label, href) { return '<a class="arrow" href="' + esc(href) + '"><span>' + esc(label) + "</span>" + S2.ic("chev") + "</a>"; }
   /* a section head in the site's grammar: kicker, a headline that says something, one sentence (all escaped by the caller) */
   /* the kit's one section head (S2.secHead, audit 2026-11-09); h and p arrive already escaped */
@@ -466,6 +470,10 @@
   /* =====================================================================================================================
      THE HEAD: Team HQ's own band in the club's color, one level deeper (crumbs back to Trades)
      ===================================================================================================================== */
+  /* the tab and bar title: the page's own title in Team HQ, set through the one door (S2.setTitle) wherever the page draws
+     its title again in place (QA round 2 A1, 2026-11-25: an offer that landed after its read wrote only the bar's title,
+     so the tab kept "Offer · CGHL"; a repaint that changed the heading changed neither) */
+  function docTitle() { return titleText() + " · Team HQ"; }
   function titleText() {
     var o = ST.offer && offerOf(ST.offer);
     if (ST.mode === "offer" && o) return (side(o, ST.club) === "in" ? "Offer from the " : "Offer to the ") + team(ST.partner).name;
@@ -481,7 +489,7 @@
   function crumbs() { return S2.crumbs([["#/hq", "Team HQ"], ["#/hq?tab=trades", "Trades"], ["", ST.mode === "offer" ? "Offer" : ST.counter ? "Counter" : "Build a trade"]]); }
   function headHtml() {
     var t = team(ST.club);
-    return '<header class="page-head hqx-head band club tight hqx-band tp-head reveal" style="--club:' + esc(t.color || "var(--ink-band)") + ";--club-ink:" + S2.inkOn(t.color) + '">' +
+    return '<header class="page-head hqx-head band club tight hqx-band tp-head reveal" style="' + esc(S2.clubBand(t)) + '">' +   /* the one band (S2.clubBand, QA round 2 A4) */
       '<div data-w="crumbs">' + crumbs() + "</div>" +
       '<div class="hqx-head-in"><div class="hqx-head-copy"><span class="kicker hqx-kick">' + esc(t.full) + " · Trade Hub</span>" +
         '<h1 class="d-1" data-w="title">' + esc(titleText()) + '</h1><p class="hqx-lede" data-w="lede">' + esc(ledeText()) + "</p>" +
@@ -647,7 +655,7 @@
     var picked = picks(s).indexOf(p.id) >= 0, open = !!ST.open[p.id], seat = !!p.seat, blk = !!listing(p.id);
     var meta = esc([p.pos + (p.num != null ? " · #" + p.num : ""), p.squad === "tc" ? "Camp" : null, seat ? p.seat + " seat" : null].filter(Boolean).join(" · ")) + (blk ? ' · <span class="tp-blk">On the block</span>' : "");
     return '<tr class="tp-row' + (picked ? " is-picked" : "") + (seat ? " is-seat" : "") + '" data-pid="' + p.id + '">' +
-      '<td class="tp-c-pick"><button type="button" class="tp-tick" data-act="pick" data-side="' + s + '" data-pid="' + p.id + '" aria-pressed="' + picked + '"' + (seat || locked() ? ' aria-disabled="true"' : "") +
+      '<td class="tp-c-pick"><button type="button" class="tp-tick" data-act="pick" data-side="' + s + '" data-pid="' + p.id + '" aria-pressed="' + picked + '"' + (seat || locked() || arch() ? ' aria-disabled="true"' : "") +
         ' aria-label="' + esc(seat ? p.tag + " holds the " + p.seat + " seat and can't be traded (Rule 2.6)" : picked ? "Take " + p.tag + " off the trade" : "Add " + p.tag + " to the trade") + '">' + S2.ic("check") + "</button></td>" +
       '<th scope="row" class="tp-c-name"><button type="button" class="tp-name" data-act="more" data-pid="' + p.id + '" aria-expanded="' + open + '" aria-controls="tpMore-' + p.id + '">' +
         '<span class="tp-n" title="' + esc(p.tag) + '">' + esc(p.tag) + '</span><span class="tp-meta">' + meta + "</span>" + S2.chev() + "</button></th>" +
@@ -796,6 +804,11 @@
   function names(a) { return list(a.map(function (x) { var p = M.player(x); return p ? p.tag : "a player"; })); }
   function isCounter() { var c = ST.counter && offerOf(ST.counter); return !!(c && c.status === "pending" && c.from === ST.partner && c.to === ST.club); }
   function sendHtml(ev) {
+    var ae = arch();
+    /* built from archErr's parts (shown, season), never by editing its sentence, which is Team HQ's and names its tools
+       (QA round 2 nit, 2026-11-25: a regex cut that sentence's tail and kept "so Team HQ is read only here") */
+    if (ae) return S2.empty("lock", "Trades run in " + ae.season, "This page shows " + esc(ae.shown) + ", so no trade can be sent from it. Trades act on " + esc(ae.season) + ".",
+      '<a class="btn secondary sm" href="' + esc(S2.seasonHref(null, "#/trade")) + '">Trade in ' + esc(ae.season) + "</a>");
     if (ST.mode === "offer") return answerHtml(offerOf(ST.offer));
     /* three parts, so a repaint (a pick, the pulse) redraws the head and the buttons and never the note being typed */
     return '<div data-w="sendh">' + sendHead(ev) + "</div>" +
@@ -857,7 +870,7 @@
       '<span class="tp-tray-rd" data-tone="' + (e ? "none" : S2.trade.tone(ev, ST.club)) + '"><span class="tp-tray-v"><span class="tr-tone" aria-hidden="true"></span><b>' + esc(e ? "Waiting for players" : S2.trade.verdict(ev, ST.club)) + "</b></span>" +
         '<span class="tr-bar sm' + (e ? " is-empty" : "") + '" aria-hidden="true"><i class="tr-bar-a" style="transform:scaleX(' + (e ? 0 : s).toFixed(4) + ')"></i><span class="tr-bar-mid"></span></span></span>' +
       '<span class="tp-tray-n r"><span>Get</span><b class="num">' + sumVal("them") + "</b></span>" + (ST.partner ? M.crest(ST.partner) : "") +
-      '<a class="btn sm" href="#tpSend" data-act="jump" tabindex="-1">' + (ST.mode === "offer" ? "Answer" : 'Review<span class="tp-long"> and send</span>') + "</a></div>";
+      (arch() ? "" : '<a class="btn sm" href="#tpSend" data-act="jump" tabindex="-1">' + (ST.mode === "offer" ? "Answer" : 'Review<span class="tp-long"> and send</span>') + "</a>") + "</div>";
   }
 
   /* =====================================================================================================================
@@ -963,6 +976,7 @@
     var seg = S2.$('[data-seg="pane"]'), b = seg ? S2.$$("button", seg) : []; if (b[1]) b[1].textContent = ST.partner ? city(ST.partner) + " sends" : "Their roster";
     var m = S2.$('[data-w="match"]'); if (m) m.innerHTML = matchHtml();
     paint("title", esc(titleText())); paint("lede", esc(ledeText()));
+    if (host) S2.setTitle(docTitle());
     refresh({ clubs: true });
   }
 
@@ -1076,7 +1090,7 @@
       done: function (res) { if (res && res.data && S2.$(".tp")) S2.go(S2.tradePage.offer(res.data)); else ensure(o.id, true); } });
   }
   /* the trade block from the trade page (Rule 2.3: a listing is the one public part of a trade before it is made) */
-  function blockable(p) { return !!p && p.club === ST.club && !p.seat && ST.mode === "build" && ST.acting; }
+  function blockable(p) { return !!p && p.club === ST.club && !p.seat && ST.mode === "build" && ST.acting && !arch(); }
   function setBlock(pid, on) {
     var p = M.player(pid); if (!blockable(p) || ST.busy) return;
     var said = function (queued) { return queued ? "Sent to the Owner for approval: " + (on ? "put " : "take ") + p.tag + (on ? " on" : " off") + " the trade block."
@@ -1116,7 +1130,7 @@
       init(S2.parse()); host.outerHTML = pageHtml();
       /* what the router does for a page it draws: the entrance (a .reveal section is hidden until it runs) and the charts */
       S2.reveal(page); if (S2.charts) S2.charts.hydrate(page);
-      var t = S2.$("#inlineTitle"); if (t && S2.$(".tp", page)) t.textContent = titleText();
+      if (S2.$(".tp", page)) S2.setTitle(docTitle());
       if (S2.$(".tp", page)) { syncUrl(); after(page); } else wireWait(page);
       return;
     }
@@ -1214,11 +1228,12 @@
   }
   /* the domains the page reads (rosters and the block, scores and standings, lines, clubs, names) repaint it in place */
   ["rosters", "scores", "stats", "league", "people"].forEach(function (d) { S2.live.on(d, function () { moved(d === "rosters"); }); });
+  if (S2.market && S2.market.on) S2.market.on(function (ev) { if (ev.type === "load") moved(false); });
   /* a version reload waits while a note is typed or a write is on its way; the picks themselves live in the address */
   if (S2.holds) S2.holds.push(function () { return !!S2.$(".tp") && (ST.busy || (ST.mode === "build" && !!ST.note)); });
 
   S2.page("trade", {
-    title: function (r) { if (!canSee(r)) return "Team HQ"; init(r); return wantId() && !(LV[wantId()] || {}).at ? (r.q.offer ? "Offer" : "Counter") : titleText(); },
+    title: function (r) { if (!canSee(r)) return "Team HQ"; init(r); return (wantId() && !(LV[wantId()] || {}).at ? (r.q.offer ? "Offer" : "Counter") : titleText()) + " · Team HQ"; },
     tab: "hq",
     /* a workspace page on the gray app canvas; anyone without a front-office seat (or, for an offer, a staff seat) meets
        Team HQ's lock (S2.pages.locked) */
@@ -1230,6 +1245,10 @@
       try {
         if (!M) throw new Error("S2.M is missing");
         var id = wantId(); if (id) ensure(id);   /* read (or read again) the offer the address names */
+        /* the cards read S2.market.clubState and the minimums M.draftDone, both the market's once it is read: the page asks
+           for it (js/market.js ensure; QA round 2, 2026-11-25: reached straight from an address it never did, so the cap
+           room was the model's and left out the bids a club leads), and its answer repaints the page in place (below) */
+        if (S2.market && S2.market.ensure) S2.market.ensure();
         return pageHtml();
       } catch (e) { console.error("[tradebuild] the trade page failed to render", e); return headless("This page could not be drawn", "Something in the data was not what the page expected. The details are in the console."); }
     },

@@ -34,7 +34,8 @@ boxed.forEach((gid) => D.box.byGame[gid].forEach((r) => rows.push({ gid, pid: r[
   hits: v(r, "hits"), blk: v(r, "blocked_shots"), tk: v(r, "takeaways"), gv: v(r, "giveaways"), int: v(r, "interceptions"), pim: v(r, "pim"), dsv: v(r, "diving_saves"), sop: v(r, "shutout_periods"),
   psv: v(r, "pen_shot_saves"), psa: v(r, "pen_shots_against"), sog: v(r, "shots"), sat: v(r, "shot_attempts"), sa: v(r, "shots_against") })));
 const sum = (list, k) => list.reduce((a, x) => a + (x[k] || 0), 0);
-/* QA visual 3 (2026-11-25): the Leaders tab reads the title race from statistical_title_board (league.js tbRead). The
+/* QA visual 3 (2026-11-25): the Leaders tab reads the title race from statistical_title_board (the model's one read,
+   M.readTitles, since QA round 2; league.js read it itself before). The
    harness answers it with a board worked out here from a body's own box scores in the function's shape (category, place,
    profile_id, gamertag, gp, total, per_game), top N a title over the season's games-played floor; the page must show
    exactly what the board says. TBCALLS records each read's arguments */
@@ -278,6 +279,12 @@ A("no skater line carries a goalie figure", rows.filter((r) => !r.goalie).every(
   A("live standings: the hero names Season 2 and its puck drop, never a table of zeros", r.kicker === "Standings, Season 2" && /^Season 2 starts December \d+$/.test(r.h1) && r.tables === 0 && !r.tabs && !r.zeroRow, r);
   A("live standings: the empty state says nothing is played yet, when play starts, and opens Season 1's final standings", r.empty === "No Season 2 games played yet" && /Puck drop is \w+, December \d+\./.test(r.emptyFoot) &&
     r.back.length === 1 && r.back[0][0] === "Season 1 final standings" && /[?&]season=1(&|#|$)/.test(r.back[0][1]) && /#\/standings$/.test(r.back[0][1]), r.back);
+  /* QA round 2 (2026-11-25): the link is S2.empty's own action (the website button on this public page) and its address
+     is core's one S2.seasonHref; league.js keeps no copy of it */
+  r = await p.evaluate(() => { const a = document.querySelector(".empty-state .empty-acts a"); return a ? { cls: a.className, href: a.getAttribute("href"), want: S2.seasonHref(1, "#/standings") } : null; });
+  const lgSrc = fs.readFileSync(path.join(process.env.S2_ROOT, "js/pages/league.js"), "utf8");
+  A("live standings: the Season 1 link is S2.empty's website button, at S2.seasonHref's address; league.js has no seasonHref of its own", r && r.cls === "btn site outline" && r.href === r.want && r.href === "?season=1#/standings" &&
+    !/function seasonHref/.test(lgSrc), { r, own: /function seasonHref/.test(lgSrc) });
   await p.context().close();
   for (const tab of ["leaders", "skaters", "goalies", "teams"]) {
     p = await livePage("#/stats" + (tab === "leaders" ? "" : "?tab=" + tab));
@@ -350,11 +357,34 @@ A("no skater line carries a goalie figure", rows.filter((r) => !r.goalie).every(
   const errsBefore = errors.length;
   p = await page("?season=1#/stats", null, Object.assign({}, LEAGUE2, { statistical_title_board: mock.fail("57014", "canceling statement due to statement timeout") }));
   await p.waitForTimeout(600);
-  r = await p.evaluate(() => ({ said: [...document.querySelectorAll(".lg-tt [role=alert]")].map((x) => x.textContent), retry: document.querySelectorAll('.lg-tt [data-tb="retry"]').length, old: /not loaded on this page/.test(document.getElementById("page").textContent) }));
-  A("live, ?season=1: a failed read says so in each column with the reason and a Try again, never the old sentence", r.said.length === 4 && r.said.every((t) => t === "The title race did not load. canceling statement due to statement timeout") && r.retry === 4 && !r.old, r);
+  r = await p.evaluate(() => ({ said: [...document.querySelectorAll(".lg-tt [role=alert]")].map((x) => x.textContent), why: [...document.querySelectorAll(".lg-tt .lg-tt-why")].map((x) => x.textContent),
+    retry: document.querySelectorAll('.lg-tt [data-tb="retry"]').length, old: /not loaded on this page/.test(document.getElementById("page").textContent) }));
+  /* QA round 2 review: rewritten. It pinned the database's message printed as the end of the sentence ("The title race did
+     not load. canceling statement ..."); the column now says it as Today and News do: plain words, then the league's own */
+  A("live, ?season=1: a failed read says so in each column in plain words, the league's own words after them, and a Try again, never the old sentence",
+    r.said.length === 4 && r.said.every((t) => t === "The league's data service reported a problem, so this race cannot be shown. Try again in a moment.") &&
+    r.why.length === 4 && r.why.every((t) => t === "The league said: “canceling statement due to statement timeout”") && r.retry === 4 && !r.old, r);
   await p.context().close();
   /* that failure was the point of the check: its console lines (the 400 and the page's own fail-loud line) are expected */
-  errors.splice(errsBefore, errors.length - errsBefore, ...errors.slice(errsBefore).filter((e) => !/status of 400|the title race could not be read/.test(e)));
+  /* QA round 2: the fail-loud line is the model's now ("The title race could not be read:"), so the match ignores case */
+  errors.splice(errsBefore, errors.length - errsBefore, ...errors.slice(errsBefore).filter((e) => !/status of 400|the title race could not be read/i.test(e)));
+  /* QA round 2 (A7, 2026-11-25): the board is the model's one read, so Stats, Today and the profile share it, and every
+     column's Try again reads again (only the first of the four was bound): the read fails once, the LAST column's Try again
+     reads it again, and the board lands in all four */
+  {
+    const calls = [], errsHere = errors.length;
+    p = await page("?season=1#/stats", null, Object.assign({}, LEAGUE2, { statistical_title_board: (a) => { calls.push(a); return calls.length === 1 ? mock.fail("57014", "canceling statement due to statement timeout") : mock.ok(titleBoard(BODY.s1, a.p_top)); } }));
+    await p.waitForFunction(() => document.querySelectorAll('.lg-tt [data-tb="retry"]').length === 4, null, { timeout: 8000 }).catch(() => {});
+    await p.click('.lg-tt:last-of-type [data-tb="retry"]').catch(() => {});
+    await p.waitForFunction(() => document.querySelectorAll(".lg-tt-hero").length === 4, null, { timeout: 8000 }).catch(() => {});
+    r = await p.evaluate(() => ({ heroes: document.querySelectorAll(".lg-tt-hero").length, alerts: document.querySelectorAll(".lg-tt [role=alert]").length, partial: !!S2.M.partial.titles, err: !!S2.M.titlesErr(),
+      model: !!(S2._titleBoard && S2._titleBoard.rows && S2._titleBoard.rows.length) }));
+    const lgSrc2 = fs.readFileSync(path.join(process.env.S2_ROOT, "js/pages/league.js"), "utf8");
+    A("live, ?season=1: the last column's Try again reads the board again, and it lands in all four columns from the model's one read", calls.length === 2 && r.heroes === 4 && r.alerts === 0 && !r.partial && !r.err && r.model &&
+      !/statistical_title_board"/.test(lgSrc2) && /M\.readTitles\(/.test(lgSrc2), { calls: calls.length, r });
+    await p.context().close();
+    errors.splice(errsHere, errors.length - errsHere, ...errors.slice(errsHere).filter((e) => !/status of 400|the title race could not be read/i.test(e)));
+  }
 
   console.log("## QA 2026-11-25: the type floor, the tag's contrast and fingertips (visual 28, phone 1, 2, 10, 11, 13)");
   const TINY = () => [...document.querySelectorAll("#page *")].filter((el) => [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) && el.getClientRects().length &&

@@ -902,6 +902,7 @@ begin
     raise exception 'v463 staff powers: suspension_requests lacks the extension columns';
   end if;
 end $chk$;
+-- Applied as migration v463_s2_staff_powers on 2026-11-25 (re-rehearsed on production that morning, rolled back, then applied after the v4.63 deploy); tools/sql/grant-audit.sql returned zero rows.
 -- <<< record text
 
 -- S1 to S3 as N

@@ -129,16 +129,18 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   p = await page("#/news", { reduce: true });
   const row1 = await p.$(".of-n-row"); await row1.scrollIntoViewIfNeeded(); await wait(200); const box = await row1.boundingBox();
   await p.mouse.move(box.x + 20, box.y + 20); await p.mouse.down(); await wait(200);
-  r = await p.evaluate(() => { const a = document.querySelector(".of-n-row:active"); return a ? getComputedStyle(a).transform : "not pressed"; });
+  /* QA round 2 (2026-11-25): these two read the scale property now, where every press is (they read transform, which a
+     press no longer sets, so the Reduce Motion one would pass whatever happened) */
+  r = await p.evaluate(() => { const a = document.querySelector(".of-n-row:active"); if (!a) return "not pressed"; const c = getComputedStyle(a); return { scale: c.scale, transform: c.transform, opacity: +c.opacity }; });
   await p.mouse.up();
-  A("reduced motion: a pressed story row does not scale", r === "none", r);
+  A("reduced motion: a pressed story row does not scale (it dims)", r.scale === "none" && r.transform === "none" && r.opacity < 1, r);
   await done(p);
   p = await page("#/news");
   const row2 = await p.$(".of-n-row"); await row2.scrollIntoViewIfNeeded(); await wait(200); const box2 = await row2.boundingBox();
   await p.mouse.move(box2.x + 20, box2.y + 20); await p.mouse.down(); await wait(220);
-  r = await p.evaluate(() => { const a = document.querySelector(".of-n-row:active"); return a ? getComputedStyle(a).transform : "not pressed"; });
+  r = await p.evaluate(() => { const a = document.querySelector(".of-n-row:active"); return a ? getComputedStyle(a).scale : "not pressed"; });
   await p.mouse.up();
-  A("a story row answers the press on pointer-down (scale .985)", /matrix\(0\.985/.test(r), r);
+  A("a story row answers the press on pointer-down (the scale property, .985)", r === "0.985", r);
   await done(p);
 
   A("no console errors", errors.length === 0, errors.slice(0, 5));

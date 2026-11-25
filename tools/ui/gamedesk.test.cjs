@@ -339,6 +339,10 @@ const DESK = {
   A("a sitting imported as a pickup game says so and links to that game", await until(p, () => !!document.querySelector('#dkSit a[href="#/pickups/00000000-0000-4000-8000-0000000000a1"]'), null, 8000) && /Imported as a pickup game/.test(await txt(p, "#dkSit")), await txt(p, "#dkSit"));
   await done(p);
 
+  /* QA round 2 (A10): the Game desk reads through S2.rd (js/live.js), the one read door, and keeps no copy of it */
+  const gdSrc = require("fs").readFileSync(require("path").join(S2_ROOT, "js/pages/gamedesk.js"), "utf8");
+  A("qa2: gamedesk.js reads through S2.rd and keeps no read door of its own", /function rd\(q\) \{ return S2\.rd\(q\); \}/.test(gdSrc) && !/r\.error\.message \|\| "The league did not answer\."/.test(gdSrc) && !/S2\.ensureSb/.test(gdSrc));
+
   A("no page error, no console error and no request past the harness's answers in any check", errors.length === 0 && unexpected.length === 0, { errors: errors.slice(0, 5), unexpected: unexpected.slice(0, 5) });
   await b.close();
   process.exit(fails ? 1 : 0);

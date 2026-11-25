@@ -125,7 +125,11 @@ function tablesFor(X, staff) {
   r = await plan(p);
   A("a sheet that could not be read is never drawn as empty: the reason and Try again", r && /The lineups could not be read/.test(r.text) && /permission denied/.test(r.text) && !!(await p.$('[data-lux="reload"]')), r && r.text);
   delete H.F.game_lineups; H.R = [];
+  /* QA round 2 A10 (2026-11-25): the sheet's reads go through the site's one read door, S2.rd (lineups.js kept a copy) */
+  await p.evaluate(() => { const r0 = S2.rd; window.__rd = []; S2.rd = function (q, o) { window.__rd.push(!!(o && o.list)); return r0.apply(this, arguments); }; });
   await p.click('[data-lux="reload"]'); await wait(600);
+  r = await p.evaluate(() => window.__rd.slice());
+  A("Try again reads the week through S2.rd, each as a list (QA round 2 A10)", r.length >= 5 && r.every(Boolean), r);
   const rl = H.R.filter((x) => x.t === "game_lineups")[0], ra = H.R.filter((x) => x.t === "availability")[0];
   A("the sheets are read for the club and its week's games only", rl && filt(rl, "team_id", "eq", X.tid) && filt(rl, "game_id", "in", (l) => l.length === X.wk.length), rl);
   A("availability is read for the season, the week and the club's own people (bounded, never a whole season)", ra && filt(ra, "season_id", "eq", X.sid) && filt(ra, "week_key", "in", (l) => l.join() === "w" + X.week) && ra.f.some((f) => f[0] === "profile_id"), ra);
@@ -239,6 +243,19 @@ function tablesFor(X, staff) {
   await p.selectOption('[data-lux="night-line"]', "2"); await wait(400);
   c = calls().filter((x) => x.rpc === "set_team_line_night").pop();
   A("the night's line goes to set_team_line_night with the night's three letters", c && c.args.p_night === (await p.evaluate(() => S2.$('[data-lux="night-line"]').dataset.night)) && /^[a-z]{3}$/.test(c.args.p_night) && c.args.p_slot === 2 && c.args.p_season === X.sid, c);
+  /* QA round 2 nit (2026-11-25): the lineup pane drew Fill, File all lineups, the sheet doors and the night's line select on
+     an archive (each door then refused with S2_ARCHIVE). Season 1's archive has no nights, so this week is made an archive
+     by closing Season 1 in place, as tradepage's archive check does */
+  r = await p.evaluate(async () => {
+    const s1 = S2.M.control.seasons.filter((s) => s.number === 1)[0].settings, was = s1.status; s1.status = "complete";
+    try { S2.route(true); await new Promise((res) => setTimeout(res, 400)); const w = S2.$('[data-w="plan"]');
+      return { arch: !!S2._hq.archErr(), rows: w ? w.querySelectorAll(".hqx-plan-r").length : 0, lines: /Top line/.test((S2.$('[data-w="lulines"]') || {}).textContent || ""),
+        doors: [...document.querySelectorAll('.hqx [data-act="sheet"], .hqx [data-act="file-night"], .hqx [data-lux="fill-night"], .hqx select[data-lux="night-line"], .hqx button.hqx-plan-r')].map((e) => e.getAttribute("data-act") || e.getAttribute("data-lux") || e.className) };
+    } finally { s1.status = was; S2.route(true); }
+  });
+  await wait(400);
+  A("on an archive the night's sheets and lines still read, with no Fill, File all lineups, sheet door or night's line select", r.arch && r.rows > 0 && r.lines && r.doors.length === 0, r);
+  A("...and back on the current season they return", await p.evaluate(() => !S2._hq.archErr() && !!S2.$('[data-lux="fill-night"]') && !!S2.$('select[data-lux="night-line"]') && !!S2.$('[data-act="sheet"]')));
 
   console.log("## the lock");
   await p.evaluate(() => { window.__now = window.__fx.at1 - 20 * 60000; });

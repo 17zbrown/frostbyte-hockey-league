@@ -1,4 +1,5 @@
 -- v463 (DRAFT, S2 swap stream g2, 2026-11-24; the main session rehearses, applies and ships it): a box-score line changed
+-- Applied as migration v463f_box_line_audit on 2026-11-25 (re-rehearsed on production that morning, rolled back, then applied after the v4.63 deploy); tools/sql/grant-audit.sql returned zero rows.
 -- from the Season 2 Game desk writes its own audit row and moves the club's shot count with it.
 --
 -- Why. The Season 2 site's Game desk (src/s2/js/pages/gamedesk.js) is the first client of public.stats_game_row. The

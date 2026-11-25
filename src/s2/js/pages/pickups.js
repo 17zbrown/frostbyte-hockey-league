@@ -39,18 +39,9 @@
   /* =========================================================================================================== */
   /* DOORS                                                                                                        */
   /* =========================================================================================================== */
-  /* a read through f's client (js/live.js S2.ensureSb, live mode only). Anything else has no connection and says so, so an
-     empty list here always means the league answered empty, never that nothing was asked (the twin of gamedesk.js rd) */
-  function rd(q) {
-    return Promise.resolve().then(function () {
-      var c = S2.ensureSb ? S2.ensureSb() : null;
-      if (!c) throw new Error("Not connected to the league, so this can't be read here. Reload the page and try again.");
-      return q(c);
-    }).then(function (r) {
-      if (r && r.error) throw new Error(r.error.message || "The league did not answer.");
-      return r ? r.data : null;
-    });
-  }
+  /* a read through S2.rd (js/live.js), the one read door (QA round 2, A10). Anything without a read client has no
+     connection and says so, so an empty list here always means the league answered empty, never that nothing was asked */
+  function rd(q) { return S2.rd(q); }
   function ea() {
     if (!S2.ea || !S2.ea.post) throw new Error("The EA search did not load on this page (js/pages/gamedesk.js). Reload the page.");
     return S2.ea;

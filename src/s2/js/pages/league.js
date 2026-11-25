@@ -87,12 +87,9 @@
   function cal(n, key) { var s = M.control.season(n); return s ? s.calendar.filter(function (c) { return c.key === key; })[0] || null : null; }
   function md(c) { return c ? c.date.replace(/, \d{4}$/, "") : "to be set"; }
   function chev() { return '<svg class="lg-chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
-  /* text that sits on a club color: black or white by the color's luminance (0.179 is where both clear 4.5:1 equally) */
-  function inkOn(hex) {
-    var m = /^#?([0-9a-f]{6})$/i.exec(hex || ""); if (!m) return "var(--on-dark)";
-    var n = parseInt(m[1], 16), c = [n >> 16 & 255, n >> 8 & 255, n & 255].map(function (v) { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
-    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2] > 0.179 ? "var(--on-light)" : "var(--on-dark)";
-  }
+  /* a club tile's color and the text on it are core's one S2.clubBand (QA round 2, 2026-11-25: this page kept its own
+     inkOn, black or white by luminance with 0.179 where both clear 4.5:1 equally, and wrote the ink-band fallback by hand
+     at three tiles, passing a color the test could not read straight into the style) */
   /* an ink band is dark in both themes and keeps following the chosen finish (S2.applyLook updates data-look-scope) */
   function inkBand(cls, inner, label) {
     return '<section class="band ink lg-band ' + cls + '" data-theme="dark" data-look-scope data-finish="' + esc(S2.state.finish) + '"' + (label ? ' aria-label="' + esc(label) + '"' : "") + ">" + inner + "</section>";
@@ -250,13 +247,14 @@
     STARS = null; MOVES = null;
   }
   sync();
-  function seasonHref(n, hash) { var q = new URLSearchParams(location.search); q.set("season", n); return "?" + q.toString() + hash; }
   /* the one empty state for a season with no final: what fills in, puck drop, and the last complete season's page */
   function noGames(hash, what, label) {
     var start = cal(VIEW.season, "starts_at");
     return S2.empty("none", "No " + VIEW.name + " games played yet", esc(what + (start ? " Puck drop is " + M.etLong(start.at) + "." : "")),
-      /* QA visual 6 (2026-11-25): website furniture wears the website button (core.js, 2026-10-19), not the app's gray pill */
-      PREV ? '<a class="btn site outline" href="' + esc(seasonHref(PREV, hash)) + '">Season ' + PREV + " " + esc(label) + "</a>" : "");
+      /* QA visual 6 (2026-11-25): website furniture wears the website button (core.js, 2026-10-19), not the app's gray pill;
+         QA round 2: S2.empty draws it from the action itself, and the address is core's one S2.seasonHref (this page kept
+         its own copy) */
+      PREV ? { t: "Season " + PREV + " " + label, href: S2.seasonHref(PREV, hash) } : "");
   }
   function source() { return "Source: all " + FINALS + " " + VIEW.name + " finals " + THROUGH + (BOXED.length ? ", and the " + S2.fmt(BOXLINES) + " box-score lines of the " + BOXED.length + " games with a box score" : "") + "."; }
 
@@ -563,50 +561,16 @@
   };
   /* QA visual 3 (2026-11-25): the title race board. s2_league carries none (model.js M.partial.titles: "read by the pages
      that show it"), and no page read it, so every title said "not loaded" in the Season 1 archive and would all of Season 2.
-     This page reads the league's one definition, statistical_title_board, for the season on screen, five a title (titleCol's
-     "only N have reached the floor" counts a board of five), and puts the rows on the model in M.titles' shape. A re-read
-     rebuilds S2.M without them, so the rows are kept here by season and put back (tbApply) until the next read lands; a read
-     after a rebuild refreshes them (the race moves with every final). A failure is said on the board with its reason */
-  var TB = { key: null, gen: null, rows: null, err: null, wait: null };
-  function tbSeason() { var s = M.control.season(M.view.season); return s && s.settings ? s.settings.id || null : null; }
-  function tbApply() {
-    if (!M.partial.titles || !TB.rows || TB.key !== tbSeason()) return;
-    Object.keys(TITLE).forEach(function (cat) { M.honors.titles[cat] = TB.rows[cat] || []; });
-    delete M.partial.titles;
-  }
-  function tbNeeded() { return !!M.partial.titles || TB.key !== tbSeason() || TB.gen !== M.generated; }
-  function tbRead() {
-    var key = tbSeason(), gen = M.generated;
-    if (TB.wait) return TB.wait;
-    if (TB.key !== key) TB.rows = null;
-    TB.key = key; TB.err = null;
-    TB.wait = Promise.resolve().then(function () {
-      if (!key) throw new Error("this season has no id in the league read");
-      var c = S2.ensureSb ? S2.ensureSb() : null;
-      if (!c) throw new Error("the league's data service is not on this page");
-      return c.rpc("statistical_title_board", { p_season: key, p_top: 5 });
-    }).then(function (r) {
-      if (r && r.error) throw new Error(r.error.message || "statistical_title_board did not answer");
-      var by = {}; Object.keys(TITLE).forEach(function (k) { by[k] = []; });
-      ((r && r.data) || []).forEach(function (t) {
-        if (!by[t.category]) return;
-        var p = M.player(t.profile_id), v = t.per_game == null ? null : +t.per_game;
-        by[t.category].push({ category: t.category, label: TITLE[t.category][0], rank: t.place, id: t.profile_id, tag: t.gamertag || (p ? p.tag : "Unknown player"), club: p ? p.club : null,
-          gp: t.gp, total: t.total, value: v, display: S2.fmt(v, 2) + (t.category === "goaltending_title" ? " GAA" : " per game"), href: "#/player/" + t.profile_id });
-      });
-      Object.keys(by).forEach(function (k) { by[k].sort(function (a, b) { return a.rank - b.rank; }); });
-      if (TB.key === key) { TB.rows = by; TB.gen = gen; }
-    }).catch(function (e) { console.error("Leaders: the title race could not be read:", e); if (TB.key === key) { TB.err = e; TB.gen = gen; } })
-      .then(function () { TB.wait = null; });
-    return TB.wait;
-  }
+     QA round 2 (A7, 2026-11-25): this page read statistical_title_board itself (its own TB, tbRead and tbApply); the read is
+     the model's one now (M.readTitles: the season on screen, five a title, once per league read, kept by season across a
+     rebuild and put back until the next read lands), which Today's titles and the profile's race places share. A failure
+     is said on the board with its reason (M.titlesErr) */
   /* the board's own repaint: the titles section, the players short of the floor and the hero's mention of the race, each in
      place (the page is never routed again). Bound once per drawn page; a reader who has left the tab is not repainted */
-  function tbLoad(root, t) {
-    if (NOGAMES || (t !== "leaders" && t !== "goalies") || !tbNeeded()) return;
-    tbRead().then(function () {
+  function tbLoad(root, t, again) {
+    if (NOGAMES || (t !== "leaders" && t !== "goalies") || (!again && !M.titlesNeeded())) return;
+    M.readTitles(again).then(function () {
       if (!root.isConnected || S2.parse().name !== "stats") return;   /* the reader has moved on */
-      tbApply();
       var now = sxTab(S2.parse().q.tab), host = S2.$("#ttHost", root);
       /* the first board in place of the placeholder enters as a section does (its numbers count up); a refresh of a board
          on screen is the quiet swap. A quiet swap finishes the host's animations, which the placeholder's endless shimmer
@@ -617,9 +581,12 @@
       if ((now === "leaders" || now === "goalies") && old && old.textContent !== box.textContent) heroSwap(root, now);
     });
   }
+  /* every column's Try again (QA round 2: only the first of the four was bound). The read is asked for first, which clears
+     the model's failure, so the board drawn meanwhile is the placeholder */
   function bindTitles(root) {
-    var again = S2.$('#ttHost [data-tb="retry"]', root);
-    if (again) again.addEventListener("click", function () { TB.err = null; var host = S2.$("#ttHost", root); if (host) host.innerHTML = titlesBlock(); tbLoad(root, "leaders"); });
+    S2.$$('#ttHost [data-tb="retry"]', root).forEach(function (again) {
+      again.addEventListener("click", function () { tbLoad(root, "leaders", true); var host = S2.$("#ttHost", root); if (host) host.innerHTML = titlesBlock(); });
+    });
   }
   /* a shared place reads as a tie, "T2", so two players level on the board never look first and second (audit 2026-11-09;
      commissioner on the leaderboards: "easy to understand at a glance") */
@@ -633,10 +600,16 @@
     var rows = M.honors.titles[cat] || [], meta = TITLE[cat], top = rows[0], g = cat === "goaltending_title", dec = 2;   /* every rate to two decimals, as the profile and the tables (audit 2026-11-09) */
     var ranks = rows.map(function (t) { return t.rank; }), level = rows.filter(function (t) { return top && t.rank === top.rank; }).length;
     var h = '<h3 class="d-3">' + meta[0] + '</h3><p class="lg-tt-sub">' + meta[1] + ". " + (g ? "At least " + FLOOR + " games in goal" : "At least " + FLOOR + " games skated") + ".</p>";
-    /* the board is read by this page (tbRead): while it is on its way the column holds its place, and a failed read says
-       so with the reason; never that nobody qualifies, and never the old "not loaded on this page" */
-    if (M.partial.titles) return '<article class="lg-tt">' + h + (TB.err && TB.key === tbSeason()
-      ? '<p class="lg-tt-none" role="alert">The title race did not load. ' + esc(TB.err.message || "") + '</p><p><button type="button" class="btn site outline sm" data-tb="retry">Try again</button></p>'
+    /* the board is the model's read (M.readTitles, tbLoad): while it is on its way the column holds its place, and a failed
+       read says so with the reason; never that nobody qualifies, and never the old "not loaded on this page".
+       QA round 2 review: in plain words first and the league's own words after them, marked as its own, as Today and News
+       say the same failed read (it printed the database's message as the end of its sentence).
+       shortcut: a third copy of that pattern (today.js leadersSection, office.js readFailed); one helper beside S2.empty
+       when core next opens */
+    var tbErr = M.partial.titles ? M.titlesErr() : null;
+    if (M.partial.titles) return '<article class="lg-tt">' + h + (tbErr
+      ? '<p class="lg-tt-none" role="alert">The league\'s data service reported a problem, so this race cannot be shown. Try again in a moment.</p>' +
+        (tbErr.message ? '<p class="lg-tt-none lg-tt-why">The league said: “' + esc(tbErr.message) + "”</p>" : "") + '<p><button type="button" class="btn site outline sm" data-tb="retry">Try again</button></p>'
       : '<div class="lg-tt-skel" role="status"><span class="sr">Loading the ' + esc(meta[0]) + ' race</span><span class="skeleton lg-tt-sk-hero" aria-hidden="true"></span>' +
         '<span class="skeleton lg-tt-sk-val" aria-hidden="true"></span><span class="skeleton lg-tt-sk-row" aria-hidden="true"></span><span class="skeleton lg-tt-sk-row" aria-hidden="true"></span><span class="skeleton lg-tt-sk-row" aria-hidden="true"></span></div>') + "</article>";
     if (!top) return '<article class="lg-tt">' + h + '<p class="lg-tt-none">Nobody has reached the ' + FLOOR + "-game floor at this position yet.</p></article>";
@@ -655,7 +628,7 @@
     var cats = Object.keys(TITLE), by = {}, best = null;
     cats.forEach(function (k) { var t = (M.honors.titles[k] || [])[0]; if (t) { by[t.id] = by[t.id] || { t: t, n: 0 }; by[t.id].n++; } });
     Object.keys(by).forEach(function (k) { if (!best || by[k].n > best.n) best = by[k]; });
-    if (M.partial.titles) return cap(word(cats.length)) + " title races";   /* the board is still on its way (tbRead): no leader count to state */
+    if (M.partial.titles) return cap(word(cats.length)) + " title races";   /* the board is still on its way (M.readTitles): no leader count to state */
     return best && best.n > 1 ? best.t.tag + " leads " + word(best.n) + " of the " + word(cats.length) + " title races" : cap(word(cats.length)) + " title races, " + word(Object.keys(by).length) + " leaders";
   }
   /* players whose rate would make the board, but who are short of the floor at that position today: one row per player */
@@ -1082,7 +1055,7 @@
     var t = M.team(x.club), row = (M.seasonClose(x.season) || { table: [] }).table.filter(function (r) { return r.club === x.club; })[0], o = M.team(x.over);
     var rec = x.key === "presidents_trophy" && row ? '<span class="d-num">' + row.pts + '</span><span class="lg-ct-pts">points, ' + row.w + "-" + row.l + "-" + row.otl + "</span>"
       : '<span class="d-num">' + esc(t.division) + '</span><span class="lg-ct-pts">over ' + esc(o ? o.city : x.over) + "</span>";
-    return '<a class="lg-ct lg-tr" href="' + esc(t.href) + '" style="--club:' + esc(t.color || "var(--ink-band)") + ";--club-ink:" + inkOn(t.color) + '">' +
+    return '<a class="lg-ct lg-tr" href="' + esc(t.href) + '" style="' + esc(S2.clubBand(t)) + '">' +
       '<span class="lg-ct-top"><span class="lg-ct-rk">' + esc(x.name) + "</span></span>" +
       '<span class="lg-ct-medal" aria-hidden="true">' + M.crest(t.code, "xl") + "</span>" +
       '<span class="lg-ct-name"><span class="lg-ct-city">' + esc(t.city) + '</span><span class="d-2">' + esc(t.name) + "</span></span>" +
@@ -1101,7 +1074,7 @@
       ["Final", (x.l === 0 ? "Swept " : "Beat ") + (o ? o.city : x.over) + ", " + x.w + "-" + x.l]].filter(Boolean);
     /* under the name, the regular season; the playoffs are the rows under it, so no score is said twice */
     var reg = mine ? mine.w + "-" + mine.l + "-" + mine.otl + " and " + mine.pts + " points in the regular season, " + S2.ord(mine.divRank) + " in the " + t.division + "." : line;
-    return '<div class="lg-sc" style="--club:' + esc(t.color || "var(--ink-band)") + ";--club-ink:" + inkOn(t.color) + '">' +
+    return '<div class="lg-sc" style="' + esc(S2.clubBand(t)) + '">' +
       '<div class="lg-sc-a"><a class="lg-sc-id" href="' + esc(t.href) + '"><span class="lg-ct-medal" aria-hidden="true">' + M.crest(t.code, "xl") + "</span>" +
         '<span class="lg-sc-t"><span class="lg-ct-rk">' + esc(x.name) + '</span><span class="d-1">' + esc(t.full) + '</span><span class="lg-sc-l">' + esc(reg) + "</span></span></a>" +
         '<ol class="lg-sc-path" aria-label="' + esc(t.city + "'s run to the Cup") + '">' + path.map(function (r) { return '<li><span class="lg-ct-rk">' + esc(r[0]) + "</span><span>" + esc(r[1]) + "</span></li>"; }).join("") + "</ol></div>" +
@@ -1259,7 +1232,7 @@
       (stars.length ? '<section class="lg-sec" aria-labelledby="hstars">' + secHead({ kicker: "Three Stars", id: "hstars", title: s1 ? s1.tag + " has " + plural(s1.n[0], "first star", "first stars") : "Three Stars board",
         text: "Three Stars are picked for every game with a box score. The board counts three points for a first star, two for a second and one for a third, and runs " + esc(THROUGH_K) + "." }) +
       '<ol class="lg-stars">' + stars.map(function (s, i) {
-        return '<li><span class="lg-rk num">' + (i + 1) + "</span>" + cr(s.club) + '<a href="' + esc(s.href) + '" class="lg-stars-n">' + esc(s.tag) + "</a>" +
+        return '<li><span class="lg-rk num">' + (i + 1) + "</span>" + cr(s.club) + '<a href="' + esc(s.href) + '" class="lg-stars-n" title="' + esc(s.tag) + '">' + esc(s.tag) + "</a>" +   /* QA round 2: the name cuts with an ellipsis on one line, so its full tag is its title */
           '<span class="lg-stars-c" aria-label="' + s.n[0] + " first, " + s.n[1] + " second, " + s.n[2] + ' third stars">' + s.n.map(function (c, k) { return '<span class="lg-st' + (k + 1) + '"><b class="d-num">' + c + '</b><span>' + ["1st", "2nd", "3rd"][k] + "</span></span>"; }).join("") + "</span></li>";
       }).join("") + "</ol></section>" : "");
   }
@@ -1365,7 +1338,6 @@
       if (!M) return fail("Stats");
       sync();
       var t = sxTab(r.q.tab); mapMode = window.innerWidth < 600;
-      tbApply();
       return sxHero(t) + tabsBar("sxSeg", SX_TABS, t, "Stats section") +
         '<div id="sxBody" class="lg-body reveal">' + sxBody(t) + "</div>" + about(sxAbout(t));
     },
@@ -1373,7 +1345,7 @@
       if (!M) return;
       var t = sxTab(r.q.tab); bindSx(root, t); tbLoad(root, t);
       var ctl = S2.segmented(S2.$("#sxSeg", root), function (nt, b) {
-        sync(); tbApply();
+        sync();
         setQ("stats", { tab: nt === "leaders" ? "" : nt });
         heroSwap(root, nt); toTabs(root); intoRow(b);
         swap(S2.$("#sxBody", root), sxBody(nt)); bindSx(root, nt); tbLoad(root, nt);
@@ -1390,7 +1362,7 @@
   /* a club as its colors and crest (imagery is type and crests only): a solid club-color tile, the crest on a white
      medallion so a crest that shares the club color still reads, the record in big condensed numerals */
   function clubTile(t, st) {
-    return '<a class="lg-ct" href="' + esc(t.href) + '" style="--club:' + esc(t.color || "var(--ink-band)") + ";--club-ink:" + inkOn(t.color) + '">' +
+    return '<a class="lg-ct" href="' + esc(t.href) + '" style="' + esc(S2.clubBand(t)) + '">' +
       /* the club page hero's flag, word for word (profile.js clubHero): Clinched or Eliminated from the standings mark */
       (st ? '<span class="lg-ct-top"><span class="lg-ct-rk">' + ord(st.rank) + " " + esc(t.division) + "</span>" +
         (st.mark ? '<span class="lg-ct-flag">' + (st.mark === "e" ? "Eliminated" : "Clinched") + "</span>" : "") + "</span>" : "") +
@@ -1626,7 +1598,9 @@
     var regOpen = ahead(reg), ownOpen = ahead(own);
     /* the draft room's state is the draft's own (draft_state) when Season 2 is on screen, else its date */
     var dst = M.view.season === 2 && M.draft.state ? M.draft.state.status : null, drLive = dst === "live" || dst === "paused";
-    var drState = drLive ? (dst === "paused" ? "Paused" : "Live now") : dst === "complete" ? "Done" : ahead(draft) ? "Opens " + md(draft) : "Held " + md(draft);
+    /* QA round 2 (A6, 2026-11-25): done is the model's one definition (M.draftDone: draft_state, or the market's draft_done) */
+    var drDone = M.view.season === 2 && M.draftDone();
+    var drState = drLive ? (dst === "paused" ? "Paused" : "Live now") : drDone ? "Done" : ahead(draft) ? "Opens " + md(draft) : "Held " + md(draft);
     /* Rule 2.7 (the menu's not: "staff", core.js): a staffer or commissioner applies to neither, so those doors are not theirs */
     var staffer = S2.has("staff");
     return [
@@ -1638,7 +1612,7 @@
         spec: [["Decided by", "A vote of all staff and commissioners, more than half"], ["Committees", "Six, from officiating to draft and bidding"], ["Front offices", "Kept separate (Rule 2.7)"], ["Desk", "Every staffer works all of it"]] },
       /* opens: each door still to come names its own first day (review 2026-11-03: one "open once the draft begins" clause
          put Saturday bidding on draft night, a week before the first bid night) */
-      { k: "draft", state: drState, open: drLive, opens: drLive || dst === "complete" || !ahead(draft) ? "" : "The draft room opens " + (draft ? "on " + M.etLong(draft.at) : "on a date still to be set"), t: "Draft room", line: cap(word(R.draftRounds)) + " rounds, live, " + (draft ? draft.time : "9:00 PM") + " ET. Anyone can watch.",
+      { k: "draft", state: drState, open: drLive, opens: drLive || drDone || !ahead(draft) ? "" : "The draft room opens " + (draft ? "on " + M.etLong(draft.at) : "on a date still to be set"), t: "Draft room", line: cap(word(R.draftRounds)) + " rounds, live, " + (draft ? draft.time : "9:00 PM") + " ET. Anyone can watch.",
         spec: [["Rounds", String(R.draftRounds)], ["Seated first", "Owner and GM, required"], ["Roster", R.limit + " all season"], ["Minimums", R.min.F + " F, " + R.min.D + " D, " + R.min.G + " G"], ["Not drafted", "Joins the camp pool"]] },
       /* commissioner, 2026-11-02: "Only training camp players with at least 6 games played can be bid on at the saturday
          bidding events." and "bids always start at 750k and can only be raised by 250k at a time" */
@@ -1713,7 +1687,7 @@
       return '<section class="band tint lg-band lg-now reveal" aria-labelledby="hnow">' + secHead({ kicker: VIEW.name + " now", id: "hnow", title: VIEW.name + " has not started",
         text: esc((dr ? "The draft " + (ahead(dr) ? "is " : "was ") + M.etLong(dr.at) + (go ? " and puck drop " + M.etLong(go.at) : "") + ". " : go ? "Puck drop " + (ahead(go) ? "is " : "was ") + M.etLong(go.at) + ". " : "") +
           (cup && M.team(cup.club) ? "Season " + PREV + " is complete: the " + M.team(cup.club).full + " won the Stanley Cup." : "")),
-        aside: PREV ? '<a class="arrow" href="' + esc(seasonHref(PREV, "#/standings")) + '"><span>Season ' + PREV + " standings</span>" + S2.ic("chev") + "</a>" : "" }) + "</section>";
+        aside: PREV ? '<a class="arrow" href="' + esc(S2.seasonHref(PREV, "#/standings")) + '"><span>Season ' + PREV + " standings</span>" + S2.ic("chev") + "</a>" : "" }) + "</section>";
     }
     return '<section class="band tint lg-band lg-now reveal" aria-labelledby="hnow">' + secHead({ kicker: VIEW.name + " now", id: "hnow", title: NEXT ? VIEW.name + " is in week " + NEXT.week : VIEW.name + "'s regular season is complete",
       /* QA visual 11 and worst 3 (2026-11-25): a finished schedule is said as played, never "0 of 241 games are left", and a

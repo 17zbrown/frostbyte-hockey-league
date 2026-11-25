@@ -554,6 +554,64 @@ const DESK = {
   A("qa (visual 26): a members series of one reading draws its point, never an empty grid", await until(p, () => !!document.querySelector('[data-cc-draw="members"] svg circle.cc-end'), null, 8000), await p.evaluate(() => (document.querySelector('[data-cc-draw="members"]') || {}).innerHTML.slice(0, 200)));
   await done(p);
 
+  /* QA round 2 (staff, 2026-11-25): the Control Center on core's shared helpers, one definition each */
+  console.log("## QA round 2 (staff): the Control Center on the shared helpers");
+  const ccSrc = fs.readFileSync(path.join(process.env.S2_ROOT, "js/pages/control.js"), "utf8");
+  A("qa2: control.js keeps no copy of the avatar initials; its avatars call S2.initials (js/core.js)", !/function initials\(/.test(ccSrc) && /S2\.initials\(name\)/.test(ccSrc));
+  A("qa2: control.js reads through S2.rd (js/live.js), the one read door, and keeps no copy of it", /function rd\(q\) \{ return S2\.rd\(q\); \}/.test(ccSrc) && !/r\.error\.message \|\| "The league did not answer\."/.test(ccSrc));
+  A("qa2: the Overview's seats and the club editor ask M.draftDone (js/model.js), not the Staff Desk's forwarder", (ccSrc.match(/!Mm\.draftDone\(\)/g) || []).length === 2 && !/S2\.draftDone/.test(ccSrc));
+  p = await page("#/control", { persona: "commissioner", read: baseRead({ "rpc:s2_control": () => ({ data: SC }), "rpc:ops_job_health": () => ({ data: JH }) }) });
+  await until(p, () => /Staff Desk is clear|Reading the Staff Desk/.test((document.getElementById("ccAttn") || {}).textContent || ""), null, 8000);
+  await p.click('[data-cc-tab="growth"]');
+  r = await p.evaluate(() => { const pane = document.getElementById("ccPane"), marks = [...pane.querySelectorAll(".c-bar, .c-draw, .c-area")];
+    return { tab: pane.dataset.tab, marks: marks.length, running: marks.reduce((n, e) => n + e.getAnimations().filter((a) => a.playState === "running").length, 0) }; });
+  A("qa2: a tab switch draws its charts settled, no draw-in replayed: hydrateQuiet is S2.charts.hydrate, then S2.settle (no borrowed Reduce Motion answer)",
+    r.tab === "growth" && r.marks > 0 && r.running === 0 && /function hydrateQuiet\(root\) \{ S2\.charts\.hydrate\(root\); S2\.settle\(root\); \}/.test(ccSrc) && !/S2\.reduce = \{ matches: true \}/.test(ccSrc), r);
+  /* every style rule on the page, with its media (the walk fixround uses for the presses) */
+  const sheetRules = (pg) => pg.evaluate(() => { const out = [], walk = (list, media) => { for (const x of list) { if (x.cssRules && x.media) walk(x.cssRules, x.media.mediaText); else if (x.selectorText) out.push({ sel: x.selectorText, media: media || "",
+    anim: x.style.getPropertyValue("animation") || x.style.animationName || "", t: x.style.transform || "", s: x.style.getPropertyValue("scale"), tr: x.style.getPropertyValue("transition") }); } };
+    for (const sh of document.styleSheets) { try { walk(sh.cssRules, ""); } catch (e) { /* cross-origin font sheet */ } } return out; });
+  const rules = await sheetRules(p);
+  A("qa2: no rule names the old 'pulse' animation (no keyframes carry that name); the live dot's ring is ui.css's live-ring",
+    !rules.some((x) => /(^|,\s*)pulse(\s|,|$)/.test(x.anim)) && rules.some((x) => /\.cc-dot\.live::after/.test(x.sel) && /\blive-ring\b/.test(x.anim)), rules.filter((x) => /cc-dot/.test(x.sel)));
+  const ccPress = rules.filter((x) => /\.cc-[\w-]+:active/.test(x.sel)), ccMoved = [".cc-fx", ".cc-step-b", "a.cc-cr"].map((sel) => (rules.filter((x) => x.sel === sel && !x.media && x.tr)[0] || {}).tr || "");
+  A("qa2: every Control Center press is the scale property (.cc-fx, .cc-step-b, a.cc-cr), none a transform, and the read-only seat card keeps no press transition",
+    ccPress.length >= 3 && ccPress.every((x) => !x.t) && [".cc-fx:active", ".cc-step-b:active", "a.cc-cr:active"].every((sel) => ccPress.some((x) => x.sel === sel && /^0\.9\d*$/.test(x.s))) &&
+    ccMoved.every((tr) => /\bscale\b/.test(tr) && !/\btransform\b/.test(tr)) && !rules.some((x) => x.sel === ".cc-mgr" && /\b(transform|scale)\b/.test(x.tr)), { press: ccPress.map((x) => [x.sel, x.t, x.s]), moved: ccMoved });
+  await done(p);
+  p = await page("#/control?tab=setup", { persona: "commissioner" });
+  await wait(1500);   /* the league reads land and repaint the steps in place; a press on a step they replace reads as no press */
+  const stepAt = await p.$eval('[data-cc-step="2"]', (e) => { e.scrollIntoView({ block: "center" }); const q = e.getBoundingClientRect(); return [q.x + q.width / 2, q.y + q.height / 2]; });
+  await p.mouse.move(stepAt[0], stepAt[1]); await p.mouse.down(); await wait(250);
+  r = await p.$eval('[data-cc-step="2"]', (e) => ({ scale: getComputedStyle(e).scale, transform: getComputedStyle(e).transform }));
+  await p.mouse.up();
+  A("qa2: a setup step presses to .99 on the scale property", r.scale === "0.99" && r.transform === "none", r);
+  await done(p);
+  /* A2's Control Center part: the clubs step and the club editor count the clubs and divisions from the league read, in words */
+  const W = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"], divN = [...new Set(F.teams.map((t) => t.division))];
+  const perDiv = divN.map((d) => F.teams.filter((t) => t.division === d).length), shape = W[F.teams.length].replace(/^./, (c) => c.toUpperCase()) + " clubs in " + W[divN.length] + " divisions" + (perDiv.every((k) => k === perDiv[0]) ? " of " + W[perDiv[0]] : "");
+  p = await page("#/control?tab=setup", { persona: "commissioner" });
+  const clubsStep = await p.$$eval("[data-cc-step]", (xs) => (xs.filter((x) => /Clubs/.test(x.textContent))[0] || {}).dataset.ccStep);
+  await step(p, clubsStep);
+  r = { sheet: await txt(p, ".sheet"), caps: await p.$$eval(".sheet .cc-divs .t-cap", (xs) => xs.map((x) => x.textContent)) };
+  A("qa2: the clubs step says the league's shape from the read (" + shape + "), its divisions from the read, never typed in", r.sheet.indexOf(shape + ", one league, no tiers.") >= 0 && JSON.stringify(r.caps.slice().sort()) === JSON.stringify(divN.slice().sort()) &&
+    !/>Eight clubs in two divisions/.test(ccSrc) && !/\["East", "West"\]\.map/.test(ccSrc), r);
+  await done(p);
+  /* a ninth club approved but not yet placed in a division: the divisions still hold four each, but the league is not
+     "two divisions of four" (QA round 2 review: the even test counted the listed divisions only) */
+  p = await page("#/control?tab=setup", { persona: "commissioner" });
+  await p.evaluate(() => { const t = S2.M.teams[0]; S2.M.teams.push(Object.assign({}, t, { code: "ZZZ", full: "Placeholder Club", division: null })); });
+  await step(p, clubsStep);
+  r = await txt(p, ".sheet");
+  const nine = W[F.teams.length + 1].replace(/^./, (c) => c.toUpperCase()) + " clubs in " + W[divN.length] + " divisions, one league, no tiers.";
+  A("qa2: with a club in no division the clubs step names no per-division count (" + nine + ")", r.indexOf(nine) >= 0 && !/ divisions of /.test(r), r);
+  await done(p);
+  p = await page("#/control?tab=clubs", { persona: "commissioner", read: clubRead });
+  r = await txt(p, "#ccPane .cc-cols");
+  const cap = (w) => w.replace(/^./, (c) => c.toUpperCase());
+  A("qa2: the club editor's league band counts the divisions and the clubs in words, as the clubs step does", (r || "").indexOf("One league, " + W[divN.length] + " divisions" + cap(W[F.teams.length]) + " clubs in the ") >= 0 && !/\d+ clubs/.test(r || ""), (r || "").slice(0, 160));
+  await done(p);
+
   console.log("## a staffer: the Control Center is the commissioners' alone");
   p = await page("#/control?tab=setup", { persona: "staff", read: baseRead() });
   A("the staffer gets the locked page, no Control Center", !(await p.$("#ccPane")) && !(await p.$("[data-cc-step]")));

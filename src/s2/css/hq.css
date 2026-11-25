@@ -86,10 +86,16 @@
 .hqx-band .kicker, .hqx-band .hqx-lede, .hqx-band .hqx-rec { color: inherit; }
 .hqx-band .hqx-lede { opacity: .88; }
 /* the crest on a white medallion: on its own club color a mark like Detroit's wheel would disappear */
-.hqx-medal { flex: none; display: grid; place-items: center; width: clamp(92px, 13vw, 150px); aspect-ratio: 1; border-radius: 50%; background: #fff;
-  box-shadow: 0 0 0 5px color-mix(in srgb, var(--club-ink) 16%, transparent); transition: transform var(--t-press) var(--ease-out); }
+/* QA round 2 (2026-11-25): the medal is a link, so it took the accent as its color, and the site's one ring on a club band
+   (ui.css: currentColor) drew in that accent, 1.99:1 on Pittsburgh's gold; it takes the band's ink, which the crest (an
+   image, or a code tile with its own colors) never reads */
+.hqx-medal { flex: none; display: grid; place-items: center; width: clamp(92px, 13vw, 150px); aspect-ratio: 1; border-radius: 50%; background: #fff; color: inherit;
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--club-ink) 16%, transparent); transition: scale var(--t-press) var(--ease-out); }
 .hqx-medal .crest { width: 70%; height: 70%; }
-.hqx-medal:active { transform: scale(.97); }
+/* every press here is the scale property, never transform (the house rule, ui.css .btn: QA motion 2026-11-25), so the
+   one reduce rule in ui.css (scale: none) takes every press away under Reduce Motion, and no positioning transform (a
+   lineup card's flight, the gauge's mark) is ever touched by a press. QA round 2 moved the last of this file's onto it */
+.hqx-medal:active { scale: .97; }
 .hqx-banner { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; font: 500 .875rem/1.35 var(--font); }
 .hqx-banner > svg { width: 18px; height: 18px; flex: none; }
 .hqx-banner .grow { flex: 1 1 180px; min-width: 0; }
@@ -144,7 +150,7 @@
 }
 @media (hover: hover) and (pointer: fine) {
   .hqx-nav-row:hover { color: var(--ink); }
-  .hqx-plan-r:hover, .hqx-led:hover, .hqx-msg:hover, .hqx-lg:hover { background: var(--fill-2); }
+  button.hqx-plan-r:hover, .hqx-led:hover, .hqx-msg:hover, .hqx-lg:hover { background: var(--fill-2); }   /* a plan row on an archive is a div, not a door */
   .hqx-chip:not(:disabled):hover .hqx-chip-in { border-color: color-mix(in srgb, var(--accent) 45%, var(--hairline)); }
   .hqx-slot.is-full:not(:disabled):hover .hqx-slot-card { box-shadow: var(--shadow-2); }
   .hqx-link:hover > svg { transform: translateX(4px); }
@@ -203,10 +209,10 @@
 .hqx-av { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; border-radius: 13px; background: var(--fill-2); }
 .hqx-av-b { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 12px; border-radius: 10px;
   font: 600 .875rem/1 var(--font); color: var(--ink-2); letter-spacing: -0.01em;
-  transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform var(--t-press) var(--ease-out); }
+  transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease, scale var(--t-press) var(--ease-out); }
 .hqx-av-b svg { width: 16px; height: 16px; opacity: .5; transition: opacity 160ms ease; }
 @media (max-width: 359px) { .hqx-av-b { padding: 0 8px; gap: 4px; white-space: nowrap; } }   /* "Not available" wrapped at 320 */
-.hqx-av-b:active, .hqx-av-b.is-pressing { transform: scale(.96); }
+.hqx-av-b:active, .hqx-av-b.is-pressing { scale: .96; }
 .hqx-av-b[aria-pressed="true"] svg { opacity: 1; }
 .hqx-av-b.yes[aria-pressed="true"] { background: var(--surface); color: var(--win-ink); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--win) 60%, transparent), var(--shadow-1); }
 .hqx-av-b.no[aria-pressed="true"] { background: var(--surface); color: var(--loss-ink); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--loss) 55%, transparent), var(--shadow-1); }
@@ -271,8 +277,8 @@
 .hqx-themes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
 .hqx-theme { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; min-height: 60px; padding: 12px 14px; border-radius: var(--r-sm);
   background: var(--surface); box-shadow: var(--shadow-1); text-align: left; color: var(--ink);
-  transition: box-shadow 160ms ease, transform var(--t-press) var(--ease-out); }
-.hqx-theme:active { transform: scale(.97); }
+  transition: box-shadow 160ms ease, scale var(--t-press) var(--ease-out); }
+.hqx-theme:active { scale: .97; }
 .hqx-theme > svg { width: 22px; height: 22px; color: var(--ink-2); }
 .hqx-theme[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--accent), var(--shadow-1); }
 .hqx-radio { width: 20px; height: 20px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--faint); transition: box-shadow 160ms ease; }
@@ -292,8 +298,8 @@
 .hqx-jhero .hqx-fine { margin-top: 0; }
 /* the clubs' crests are the imagery (ruling: type and crests only), set as a club bar between hairlines */
 .hqx-clubbar { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--separator); border-bottom: 1px solid var(--separator); }
-.hqx-clubbar a { display: grid; place-items: center; min-height: 88px; padding: 14px 0; transition: transform var(--t-press) var(--ease-out); }
-.hqx-clubbar a:active { transform: scale(.95); }
+.hqx-clubbar a { display: grid; place-items: center; min-height: 88px; padding: 14px 0; transition: scale var(--t-press) var(--ease-out); }
+.hqx-clubbar a:active { scale: .95; }
 @media (min-width: 760px) { .hqx-clubbar { grid-template-columns: repeat(8, minmax(0, 1fr)); } .hqx-clubbar a { min-height: 112px; } .hqx-clubbar .crest.lg { width: 64px; height: 64px; } }
 .hqx-jsec, .hqx-jcal { margin-top: clamp(56px, 9vw, 112px); }
 .hqx-jsec + .hqx-jcal { margin-top: clamp(56px, 9vw, 112px); }
@@ -508,8 +514,8 @@
 .hqx-rink-row.d { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 70%; margin: 0 auto; }
 .hqx-rink-row.g { grid-template-columns: minmax(0, 1fr); width: 36%; min-width: 120px; margin: 0 auto; }
 .hqx-slot { position: relative; min-height: 84px; display: grid; place-items: stretch; padding: 0; border-radius: 14px; border: 1.5px dashed var(--faint); background: transparent;
-  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease, transform var(--t-press) var(--ease-out); }
-.hqx-slot:active:not(:disabled) { transform: scale(.97); }
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease, scale var(--t-press) var(--ease-out); }
+.hqx-slot:active:not(:disabled) { scale: .97; }
 .hqx-slot.is-full { border-color: transparent; touch-action: none; }
 .hqx-slot.is-over { border-color: var(--accent); border-style: solid; background: var(--accent-soft); }
 .hqx-slot.is-sel .hqx-slot-card { box-shadow: 0 0 0 2.5px var(--accent), var(--shadow-1); }
@@ -538,8 +544,8 @@
 .hqx-bench-g { display: grid; gap: 7px; }
 .hqx-bench-g h4 { margin: 0; }
 .hqx-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); gap: 6px; }
-.hqx-chip { display: grid; padding: 0; border-radius: 12px; text-align: left; transition: transform var(--t-press) var(--ease-out); }
-.hqx-chip:active:not(:disabled) { transform: scale(.97); }
+.hqx-chip { display: grid; padding: 0; border-radius: 12px; text-align: left; transition: scale var(--t-press) var(--ease-out); }
+.hqx-chip:active:not(:disabled) { scale: .97; }
 .hqx-chip-in, .hqx-ghost { display: grid; grid-template-columns: 22px 22px minmax(0, 1fr) auto; align-items: center; gap: 6px; min-height: 50px; padding: 6px 10px 6px 2px;
   border-radius: 12px; background: var(--surface); border: 1px solid var(--hairline); min-width: 0; transition: border-color 160ms ease, background-color 160ms ease, opacity 160ms ease; }
 .hqx-chip.is-sel .hqx-chip-in { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); }
@@ -662,8 +668,8 @@
 /* the ceiling: minus, the amount, plus; exact $250K steps, no amount box (Rule S2.6) */
 .hqx-step { grid-area: step; display: inline-grid; grid-template-columns: 36px minmax(78px, auto) 36px; align-items: center; justify-self: end; padding: 3px; border-radius: 12px; background: var(--fill-2); }
 .hqx-step-b { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; font: 500 1.25rem/1 var(--font); color: var(--ink); background: var(--surface); box-shadow: var(--shadow-1);
-  transition: transform var(--t-press) var(--ease-out), opacity 160ms ease; }
-.hqx-step-b:active:not(:disabled) { transform: scale(.94); }
+  transition: scale var(--t-press) var(--ease-out), opacity 160ms ease; }
+.hqx-step-b:active:not(:disabled) { scale: .94; }
 .hqx-step-b:disabled { opacity: .35; box-shadow: none; background: transparent; }
 .hqx-step-v { display: grid; justify-items: center; gap: 1px; padding: 0 6px; }
 .hqx-step-v b { font-size: .9375rem; font-weight: 700; color: var(--ink); white-space: nowrap; }
@@ -677,9 +683,9 @@
    the site's own input focus, the accent edge with the soft halo (ui.css .input:focus) */
 .hqx-bd-note:focus-within { box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 0 4px var(--accent-soft); }
 .hqx-bd-acts { display: flex; gap: 2px; flex: none; }
-.hqx-ib { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; color: var(--ink-2); transition: transform var(--t-press) var(--ease-out), background-color 160ms ease, opacity 160ms ease; }
+.hqx-ib { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; color: var(--ink-2); transition: scale var(--t-press) var(--ease-out), background-color 160ms ease, opacity 160ms ease; }
 .hqx-ib svg { width: 18px; height: 18px; }
-.hqx-ib:active:not(:disabled) { transform: scale(.94); background: var(--fill-2); }
+.hqx-ib:active:not(:disabled) { scale: .94; background: var(--fill-2); }
 .hqx-ib:disabled { opacity: .3; }
 @media (pointer: coarse) { .hqx-step { grid-template-columns: 44px minmax(78px, auto) 44px; } .hqx-step-b, .hqx-ib { width: 44px; height: 44px; } .hqx-bd-note { min-height: 44px; } .hqx-bd-note input { font-size: 1rem; } }
 /* a phone: the stepper sits under the player, the note and the moves under that */
@@ -688,7 +694,10 @@
   .hqx-step { justify-self: start; }
 }
 /* the drag: the lifted row rides above the rest with the one soft shadow; the rows it passes spring aside */
-.hqx-bd.is-lifted-row { position: relative; z-index: 3; box-shadow: var(--shadow-2); transition: none; }
+/* the lift is the scale property, so ui.css's reduce rule takes it and the shadow alone lifts the row; the finger's offset
+   is the translate property (hq.js bdMove), which the scale never multiplies (QA round 2 nit, 2026-11-25: one inline
+   transform carried both, and Reduce Motion kept the scale) */
+.hqx-bd.is-lifted-row { position: relative; z-index: 3; box-shadow: var(--shadow-2); transition: none; scale: 1.015; }
 .hqx-bd.is-lifted-row .hqx-bd-h { cursor: grabbing; }
 .hqx-bd.is-flying { position: relative; z-index: 2; will-change: transform; }
 .hqx-bd.is-thrown { z-index: 3; box-shadow: var(--shadow-2); }
@@ -716,9 +725,12 @@
 
 @media (prefers-reduced-motion: reduce) {
   .hqx-bd, .hqx-step-b, .hqx-ib { transition: opacity 160ms ease; }
-  .hqx-step-b:active, .hqx-ib:active { transform: none; }
   .hqx-meter i, .hqx-cell, .hqx-dots i { transition: none; }
-  .hqx-av-b:active, .hqx-av-b.is-pressing, .hqx-slot:active, .hqx-chip:active, .hqx-theme:active, .hqx-medal:active, .hqx-clubbar a:active { transform: none; }
+  /* every press here is the scale property, which ui.css's reduce block sets to none; with nothing in its place a held
+     availability button, slot or chip gave no feedback at all, so each dims instead, the house press (ui.css .btn; QA round 2
+     nit, 2026-11-25). A new press joins this list (hq-market checks every scale press has its dip) */
+  .hqx-medal:active, .hqx-av-b:active, .hqx-av-b.is-pressing, .hqx-theme:active, .hqx-clubbar a:active, .hqx-slot:active:not(:disabled),
+  .hqx-chip:active:not(:disabled), .hqx-step-b:active:not(:disabled), .hqx-ib:active:not(:disabled) { opacity: .7; }
   .hqx-nav-row::before, .hqx-link > svg { transition: none; }
   .hqx-ghost { scale: 1; transition: none; }   /* lifted by its shadow alone */
 }

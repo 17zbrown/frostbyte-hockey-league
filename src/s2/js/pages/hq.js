@@ -135,7 +135,8 @@
     return '<span class="hqx-date" aria-hidden="true"><span>' + esc(d[0] || "") + '</span><b class="d-num">' + esc(d[2] || "") + "</b><span>" + esc(d[1] || "") + "</span></span>";
   }
   /* text on a club color is core's S2.inkOn (QA worst 9, 2026-11-25: this file's copy is folded into it, as core's
-     shortcut marker asked; league.js and today.js still keep theirs) */
+     shortcut marker asked; league.js and today.js still keep theirs), and the band itself is core's S2.clubBand (QA round
+     2 A4: the color, its ink and the ink-band fallback, written here by hand until then) */
   /* a dark-scoped block follows the chosen finish: tokens.css matches [data-theme][data-finish] on the same element */
   function inkAttrs() { return ' data-theme="dark" data-look-scope data-finish="' + esc(S2.state.finish) + '"'; }
 
@@ -266,9 +267,10 @@
   function soft(ws) { var cur = S2.$("#page [data-ws]"); return (SOFT = !!(cur && cur.dataset.ws === ws && LAST && LAST.ws === ws && LAST.role === S2.state.role)); }
   function frame(ws, r, tabs, o) {
     var tab = valid(tabs, r.q.tab), cur = tab || tabs[0][0], rv = soft(ws) ? "" : " reveal", name = tabName(tabs, cur);
-    /* o.band: Team HQ's head is a band in the club's own color (club colors are the imagery; no photos by ruling) */
+    /* o.band: Team HQ's head is a band in the club's own color (club colors are the imagery; no photos by ruling), as
+       S2.clubBand's style declarations */
     return '<div class="hqx" data-ws="' + ws + '" data-root="' + (!tab) + '" data-tab="' + cur + '">' +
-      '<header class="page-head hqx-head' + (o.band ? " band club tight hqx-band" : "") + rv + '"' + (o.band ? ' style="--club:' + esc(o.band.color) + ";--club-ink:" + o.band.ink + '"' : "") + ">" +
+      '<header class="page-head hqx-head' + (o.band ? " band club tight hqx-band" : "") + rv + '"' + (o.band ? ' style="' + esc(o.band) + '"' : "") + ">" +
         '<a class="hqx-back" href="#/' + ws + '" data-back>' + S2.ic("back") + "<span>" + esc(o.title) + "</span></a>" +
         '<div class="hqx-head-in"><div class="hqx-head-copy"><span class="kicker hqx-kick">' + o.kicker + "</span>" +
           '<h1 class="d-1"><span class="hqx-ws">' + esc(o.title) + '</span><span class="hqx-sec">' + esc(name) + "</span></h1>" +
@@ -391,24 +393,35 @@
   /* the viewer's seat at this club; the league office acts as the Owner (v3.76 full control) */
   function mySeat() { return S2.has("commish") ? "office" : (S2.session && S2.session.seat) || null; }
   function isOwnerish() { var s = mySeat(); return s === "owner" || s === "office"; }
-  /* a front-office read through f's client (js/live.js S2.ensureSb), the same shape as js/pages/gamedesk.js rd(): no
-     client is an error, so an empty list here always means the league answered empty, never that nothing was asked.
-     shortcut: a second copy of gamedesk.js's six-line reader, until js/live.js (stream f) exports one read door */
-  function rd(q) {
-    return Promise.resolve().then(function () {
-      var c = S2.ensureSb ? S2.ensureSb() : null;
-      if (!c) throw new Error("Not connected to the league, so the front office can't be read here. Reload the page and try again.");
-      return q(c);
-    }).then(function (r) {
-      if (r && r.error) throw new Error(r.error.message || "The league did not answer.");
-      return r ? r.data : null;
-    });
+  /* a front-office read through the ONE read door, js/live.js S2.rd (QA round 2 A10, 2026-11-25: this page kept its own
+     copy of the six-line reader): no client is an error, so an empty list here always means the league answered empty,
+     never that nothing was asked; the answer is r.data (null when none), a refusal the database's words */
+  function rd(q) { return S2.rd(q, { offline: "Not connected to the league, so the front office can't be read here. Reload the page and try again." }); }
+  /* an archive is read only (QA round 2, 2026-11-25). ?season=1 drew every Team HQ tool over the archive: the block door
+     wrote the season on screen's roster row (a Season 1 row, which RLS does not stop), the lineup sheet's lines and night
+     plans that season's (js/pages/lineups.js), and the front office, the market and the server picks act on the current
+     season whatever the page shows. The test is the trade doors' (js/trade.js seasonId): the season on screen is not the
+     season the site opens on (S2.currentSeason). archErr() is that refusal, code S2_ARCHIVE, or null; on an archive no
+     write control is drawn (ro()) and every door refuses with it before anything is sent */
+  function archErr() {
+    var cur = S2.currentSeason && S2.currentSeason(), v = M.view;
+    if (!cur || !v || v.season === cur.number) return null;
+    /* an earlier season is its archive; a later one (only on an address typed by hand) is named as it is */
+    var name = cur.name || "Season " + cur.number, shown = v.season < cur.number ? v.name + "'s archive" : v.name;
+    return Object.assign(new Error("This page shows " + shown + ", so Team HQ is read only here. Its tools act on " + name + ": open Team HQ without ?season in the address, then try again."), { code: "S2_ARCHIVE", season: name, shown: shown });
   }
+  function ro() { return !!archErr(); }
+  /* the doors act() opens (each one writes, or opens the sheet that writes): refused on an archive with archErr's words */
+  var WRITE_ACTS = { "seat-nominate": 1, "seat-remove": 1, "nom-withdraw": 1, "mv-decide": 1, "mv-withdraw": 1, "perm-save": 1, "perm-reset": 1, "tr-accept": 1, "tr-decline": 1, "tr-withdraw": 1,
+    "tr-reverse": 1, "tr-resend": 1, "rq": 1, "rq-reply": 1, "block-list": 1, "block": 1, claim: 1, badd: 1, ceil: 1, bmove: 1, bremove: 1, sheet: 1, "file-night": 1 };
   /* the season on screen's own row (seat salaries, its id for roster writes) */
   function seasonSettings() { var s = M.control && M.control.season(M.view.season); return (s && s.settings) || {}; }
+  /* done is the model's ONE definition of the draft being complete (M.draftDone, QA round 2 A6, 2026-11-25: this page
+     read draft_state itself, so a draft the market already called done still read as to come here and on the trade
+     page's cards); started adds a draft under way */
   function draftPhase() {
-    var st = M.draft && M.draft.state, s = st && st.status;
-    return { started: s === "live" || s === "paused" || s === "complete", done: s === "complete" };
+    var st = M.draft && M.draft.state, s = st && st.status, done = M.draftDone();
+    return { started: done || s === "live" || s === "paused", done: done };
   }
   /* Rule S2.4's minimums run from the draft through the playoffs: before the draft is complete (and before any final, for a
      season whose draft row is missing) a club at 0 F, 0 D, 0 G is not short of anything (QA visual 35, worst 20, 2026-11-25:
@@ -514,7 +527,7 @@
   /* the classic CG.mgmtApprovalBanner: on a page the Owner approves, the seat is told before it acts that its moves wait
      for the Owner, with its own waiting moves and their Withdraw (a GM or AGM only) */
   function approveNote(code, tab) {
-    var pg = TAB_PAGE[tab]; if (!pg || access(pg) !== "approve") return "";
+    var pg = TAB_PAGE[tab]; if (!pg || access(pg) !== "approve" || ro()) return "";
     var me_ = S2.session && S2.session.profileId, mine = offReady(code) ? OFF.pend.filter(function (m) { return m.page === pg && m.requested_by === me_; }) : [];
     return '<div class="hqx-callout hqx-apnote"><p class="t-sub hqx-ink"><b>The Owner approves ' + esc(pageLabel(pg).toLowerCase()) + " moves.</b> Everything you do on this page is sent to the Owner and takes effect only when they approve it, and you are told either way (Rule 2.6)." +
       (mine.length ? " " + esc(plural(mine.length, "move") + " of yours " + (mine.length === 1 ? "is" : "are") + " waiting: " + mine.map(function (m) { return m.summary; }).join("; ") + ".") : "") + "</p>" +
@@ -538,7 +551,7 @@
         : pend ? "Nominated: " + tagOf(pend.nominee_id, pend.nominee) + ", waiting for the league office's vote" + (pend.seat_block ? ". Held up: " + pend.seat_block : "")
         : agmWaits ? "Named after the draft, " + dr + ", from your active roster (Rule S2.3)"
         : s === "GM" && !ph.started ? "Required before the draft, " + dr + " (Rule S2.3)" : "Open";
-      var btn = s === "Owner" || !boss || !ready ? "" : p ? '<button type="button" class="btn secondary sm" data-act="seat-remove" data-seat="' + s + '">Remove</button>'
+      var btn = s === "Owner" || !boss || !ready || ro() ? "" : p ? '<button type="button" class="btn secondary sm" data-act="seat-remove" data-seat="' + s + '">Remove</button>'
         : pend ? '<button type="button" class="btn plain sm" data-act="nom-withdraw" data-id="' + esc(pend.id) + '" data-seat="' + s + '">Withdraw</button>'
         : agmWaits ? "" : '<button type="button" class="btn sm" data-act="seat-nominate" data-seat="' + s + '">Nominate</button>';
       return '<div class="row hqx-seat" data-seat="' + s + '"><span class="grow"><span class="title">' + esc(SEAT_NAME[s]) + '</span><span class="sub">' + esc(sub) + "</span></span>" + btn + "</div>";
@@ -680,7 +693,7 @@
   function moveRow(code, m, act) {
     var se = seatsOf(code), seat = se.GM && se.GM.id === m.requested_by ? "GM" : se.AGM && se.AGM.id === m.requested_by ? "AGM" : "";
     var st = MV_STATE[m.status] || ["", m.status], me_ = S2.session && S2.session.profileId;
-    var btns = !act || m.status !== "pending" ? "" : isOwnerish()
+    var btns = !act || m.status !== "pending" || ro() ? "" : isOwnerish()
       ? '<span class="hqx-ap-b"><button type="button" class="btn sm" data-act="mv-decide" data-v="1" data-id="' + esc(m.id) + '">Approve</button><button type="button" class="btn secondary sm" data-act="mv-decide" data-v="0" data-id="' + esc(m.id) + '">Deny</button></span>'
       : m.requested_by === me_ ? '<span class="hqx-ap-b"><button type="button" class="btn plain sm" data-act="mv-withdraw" data-id="' + esc(m.id) + '">Withdraw</button></span>' : "";
     return '<div class="row hqx-ap hqx-mv" data-mv="' + esc(m.id) + '"><span class="grow"><span class="title">' + esc(m.summary || "A move") + "</span>" +
@@ -747,7 +760,7 @@
   function permDirty() { return !!(PERM.draft && PERM.base) && JSON.stringify(PERM.draft) !== JSON.stringify(PERM.base); }
   (S2.holds = S2.holds || []).push(function () { return permDirty() && !!S2.$('[data-w="perms"]'); });
   function permsLive(code) {
-    var wait = offWait(code), boss = isOwnerish(), held = seatsOf(code);
+    var wait = offWait(code), boss = isOwnerish() && !ro(), held = seatsOf(code);   /* an archive shows the policy, never its editor */
     if (wait) return head({ k: "Permissions · Rule 2.6", size: "d-2 sec-h-sm", h: "Permissions" }) + wait;
     if (PERM.code !== code || !permDirty()) { PERM.code = code; PERM.base = permFrom(OFF.policy); PERM.draft = JSON.parse(JSON.stringify(PERM.base)); }
     var seats = [["gm", "GM", "General Manager"], ["agm", "AGM", "Assistant GM"]];
@@ -831,7 +844,7 @@
     return '<div class="row hqx-ap hqx-off" data-tr="' + esc(x.id) + '">' + (them ? M.crest(them) : "") + '<span class="grow"><span class="title">' + esc((inn ? "From the " : "To the ") + (them ? team(them).full : "another club")) + "</span>" +
       '<span class="sub"><b class="hqx-ink">You get</b> ' + esc(get) + '</span><span class="sub"><b class="hqx-ink">You send</b> ' + esc(give) + "</span>" +
       (x.note ? '<span class="t-foot hqx-reply">' + esc(x.note) + "</span>" : "") + '<span class="t-foot">' + esc(agoAt(open ? x.created_at : x.updated_at || x.created_at)) + "</span></span>" +
-      (open ? '<span class="hqx-ap-b">' + (inn ? b("accept", "Accept", " ") + b("decline", "Decline") : b("withdraw", "Withdraw")) + "</span>" : '<span class="hqx-ap-done">' + tag(st[0], st[1]) + officeAct(x, b) + "</span>") + "</div>";
+      (open && !ro() ? '<span class="hqx-ap-b">' + (inn ? b("accept", "Accept", " ") + b("decline", "Decline") : b("withdraw", "Withdraw")) + "</span>" : '<span class="hqx-ap-done">' + tag(st[0], st[1]) + (ro() ? "" : officeAct(x, b)) + "</span>") + "</div>";
   }
   /* gaps (2026-11-25): the league office's doors on an answered offer, as the classic Transactions desk offers them (Send
      back on a completed trade, Resend on a declined or withdrawn offer), through the site's one reversal and resend doors
@@ -850,7 +863,7 @@
   }
   function offersLive(code) {
     var wait = offWait(code), tid = tidOf(code);
-    var side = '<button type="button" class="btn" data-flow="trade" data-club="' + esc(code) + '">Build a trade</button>';
+    var side = ro() ? "" : '<button type="button" class="btn" data-flow="trade" data-club="' + esc(code) + '">Build a trade</button>';
     if (wait) return head({ k: "Trade Hub", h: "Trade offers", side: side }) + wait;
     var inn = OFF.open.filter(function (x) { return x.to_team_id === tid; }), out = OFF.open.filter(function (x) { return x.from_team_id === tid; });
     var grp = function (h, list, none) { return '<div class="hqx-tgrp"><h4 class="hqx-group-h">' + esc(h) + ' <span class="num">' + list.length + "</span></h4>" +
@@ -900,7 +913,7 @@
         return '<div class="row hqx-ap hqx-req" data-rq="' + esc(a.id) + '"><span class="grow"><span class="title">' + esc(tagOf(a.profile_id, a.filer)) + '</span><span class="sub">' + esc(a.details || a.subject || "") + "</span>" +
           msgs.map(function (m) { return '<span class="t-foot hqx-reply">' + esc((m.author_id === me_ ? "You" : tagOf(m.author_id, m.author)) + ": " + m.body) + "</span>"; }).join("") +
           (a.response ? '<span class="t-foot hqx-reply">' + esc("Decision: " + a.response) + "</span>" : "") + '<span class="t-foot">' + esc(agoAt(a.created_at)) + "</span></span>" +
-          (rqOpen(a) ? '<span class="hqx-ap-b"><button type="button" class="btn secondary sm" data-act="rq-reply" data-id="' + esc(a.id) + '">Reply</button><button type="button" class="btn sm" data-act="rq" data-v="resolved" data-id="' + esc(a.id) + '">Resolve</button><button type="button" class="btn secondary sm" data-act="rq" data-v="denied" data-id="' + esc(a.id) + '">Deny</button></span>'
+          (rqOpen(a) && !ro() ? '<span class="hqx-ap-b"><button type="button" class="btn secondary sm" data-act="rq-reply" data-id="' + esc(a.id) + '">Reply</button><button type="button" class="btn sm" data-act="rq" data-v="resolved" data-id="' + esc(a.id) + '">Resolve</button><button type="button" class="btn secondary sm" data-act="rq" data-v="denied" data-id="' + esc(a.id) + '">Deny</button></span>'
             : '<span class="hqx-ap-done">' + tag(st[0], st[1]) + "</span>") + "</div>";
       }).join("") + "</div>" : '<p class="t-sub hqx-led-none">A request from one of your players lands here, and every seat in the front office is told.</p>');
   }
@@ -938,7 +951,8 @@
        change; the block gate, the deadline guard and the rest never read a seat), and notify_trade_block posts the
        listing in #trade-block. So this door refuses a manager here, before anything is sent, as the classic site hides
        its door (part6_hub.js "Management contract, protected"). Taking a listed manager off stays open: it corrects */
-    var seat = seatHeld(p);
+    var seat = seatHeld(p), ae = archErr();
+    if (ae) return done(ae);
     if (on && seat) return done(new Error(p.tag + " holds the " + seat + " seat. An Owner, GM or AGM can't be put on the trade block (Rule 2.6)."));
     var sid = seasonSettings().id;
     if (!sid) return done(new Error("The season on screen has no id in the league data, so the trade block can't be changed here."));
@@ -955,7 +969,8 @@
      2026-11-23) with the not-inactive box, and it stays open with the database's sentence on a refusal. It resolves once,
      made or closed; this page says the outcome and repaints the roster widgets in place */
   function waiveLive(p) {
-    var K = S2.market;
+    var K = S2.market, ae = archErr();
+    if (ae) return S2.toast(ae.message, "err");
     if (!K || typeof K.waiveDoor !== "function") { console.error("[hq] S2.market.waiveDoor is not on the page: the market (js/market.js, stream b4) owns the live waiver"); return S2.toast("Waivers can't be placed from this page yet. Nothing was changed.", "err"); }
     mkAnswer(K.waiveDoor(p.id), function (r) {
       if (!r.ok) return;   /* closed: the popup itself said any refusal while it was open */
@@ -966,8 +981,19 @@
   /* ---- Game nights: the club's server picks for the night (Rule 4.2), frozen with the code release; S2.lobby is the
      one model, shared with the Game Center ---- */
   function serversInner(code) {
-    var n = curNight(byNight(weekGames(code))), L = S2.lobby; if (!n || !L) return "";
+    var n = curNight(byNight(weekGames(code))), L = S2.lobby; if (!n || !L || ro()) return "";
     var rel = L.releaseAt(n.games[0]), frozen = now() >= rel, at = nb(M.etTime(new Date(rel).toISOString()) + " ET");
+    /* QA round 2 (2026-11-25): a picks read the league refused was said once in a toast and then drawn as "Not named" on
+       every select, and a pick made over that blank sent the other half of the side as nothing, over the pick on file. The
+       lobby keeps the refusal (S2.lobby.pickErr); until a read lands no select is drawn, and Try again reads the night
+       again (S2.lobby.retryPicks) */
+    var perr = !frozen && L.pickErr ? L.pickErr() : null;
+    /* plain words first and the database's words after them, as You's readSaid says a refused read (QA round 2 nit,
+       2026-11-25: the block opened on "permission denied for table game_vetoes").
+       shortcut: the pattern is written here and in you.js readSaid; fold both into core's shared helper once core adds it */
+    if (perr) return head({ k: "Servers · " + esc(n.label), h: "Picks freeze at " + esc(at) }) +
+      S2.empty("err", "Your server picks could not be read", "The league did not answer as expected. The league said: " + esc(String(perr).replace(/[.\s]+$/, "")) + ". Nothing was changed. Read them again before you pick.",
+        '<button type="button" class="btn secondary sm" data-act="srv-retry" data-g="' + esc(n.games[0].id) + '">Try again</button>');
     var opts = function (cur, none) { return [["", none]].concat(L.SERVERS.map(function (s) { return [s, s]; })).map(function (o) { return '<option value="' + esc(o[0]) + '"' + (cur === o[0] ? " selected" : "") + ">" + esc(o[1]) + "</option>"; }).join(""); };
     var gname = function (g) { return (g.home === code ? "vs " : "at ") + team(opp(g, code)).city + " " + g.time; };
     var sel = function (g, side, key, label, cur, none) {
@@ -994,23 +1020,36 @@
     if (SRV_OWED) { SRV_OWED = false; repaint("servers", function () { return serversInner(club()); }); }
   }
   document.addEventListener("s2:lobby", function () { SRV_OWED = true; paintServers(); });
+  /* an archive says so at the head of Team HQ, with the way to the current season's */
+  function archBanner() {
+    var ae = archErr(); if (!ae) return "";
+    return '<div class="hqx-banner hqx-ro" role="note">' + S2.ic("lock") + '<span class="grow">' + esc(ae.shown.charAt(0).toUpperCase() + ae.shown.slice(1) + ": Team HQ is read only here. Its tools act on " + ae.season + ".") + "</span>" +
+      '<a class="btn sm hqx-ghostbtn" href="' + esc(S2.seasonHref(null, "#/hq")) + '">Open ' + esc(ae.season) + "</a></div>";
+  }
   function hqHtml(r) {
     var code = club(), t = M.team(code), st = standing(code), rv = rosterView(code);
     if (!t || !rv) return '<div class="page-head hqx-head"><h1 class="d-1">Team HQ</h1></div>' + empty("No club to show", "Team HQ opens for the club whose front office you sit in.");
     loadOffice(code);   /* the front office's records arrive after this paint and repaint their widgets in place */
+    /* the market is read when a page asks (js/market.js ensure); Team HQ never asked, so a front office that came straight
+       here drew its Bidding tab, bid board and cap room from no read at all (QA round 2, 2026-11-25). Its answer repaints
+       the market's widgets in place (the market listener below) */
     /* a commissioner's preview club is the market's acting club too (b4's S2.market.setClub), so the Bidding tab, the cap
-       card and a claim all read the club on screen, and this device remembers it (setClub) */
+       card and a claim all read the club on screen, and this device remembers it (setClub). It goes first: setClub's own
+       read is the one ensure then waits on (QA round 2 nit, 2026-11-25: ensure first read the old club, then setClub
+       queued a second read) */
     if (S2.has("commish")) setClub(code);
+    if (S2.market && S2.market.ensure) S2.market.ensure();
     return frame("hq", r, hqTabs(!offReady(code) ? r.q.tab : null), {
       /* QA worst 9 (2026-11-25): teams.color is nullable, and a club without one drew "--club: ;--club-ink: #fff", white type
-         on the light canvas; every other club band falls back to the ink band, as this one does now */
-      title: "Team HQ", kicker: esc(t.full), band: { color: t.color || "var(--ink-band)", ink: S2.inkOn(t.color) },
+         on the light canvas; every other club band falls back to the ink band, as this one does now. QA round 2 A4: the
+         band is core's S2.clubBand, which also spells a short hex out ("#c00" kept its color only there) */
+      title: "Team HQ", kicker: esc(t.full), band: S2.clubBand(t),
       sub: "Lineups, availability and the cap sheet, open only to the club's Owner, GM and AGM (Rule 2.6)." +
         /* each piece is one unit, so a phone breaks only at a middot (review 2026-10-20: "EAST" sat alone on a line) */
         recLine(st),
       /* the crest sits on a white medallion: on its own club color a mark like Detroit's wheel disappears */
       art: '<a class="hqx-medal" href="' + esc(t.href) + '" aria-label="' + esc(t.full) + ' club page">' + M.crest(code, "xl") + "</a>",
-      banner: S2.has("commish") ? '<div class="hqx-banner">' + S2.ic("eye") + '<span class="grow">Viewing ' + esc(t.city) + ' as its Owner, with full control.</span><button class="btn sm hqx-ghostbtn" data-act="view-as">Change club</button></div>' : "",
+      banner: archBanner() + (S2.has("commish") ? '<div class="hqx-banner">' + S2.ic("eye") + '<span class="grow">Viewing ' + esc(t.city) + ' as its Owner, with full control.</span><button class="btn sm hqx-ghostbtn" data-act="view-as">Change club</button></div>' : ""),
       /* the nav lists only working sections (review 2026-10-19: a "Planned" menu of dead rows read as broken navigation);
          the trade forms live in Trades, and Saturday bidding opens from Roster & cap */
       meta: hqMeta(code),
@@ -1154,7 +1193,7 @@
           ": the Owner and GM are seated before it and " + s2.draftRounds + " rounds follow (Rule S2.3); the AGM is then named from the club's own roster (Rule 2.6)." }) +
       '<div data-w="gauge">' + gaugeInner(code) + "</div>" +
       /* the Season 2 moves that fill these limits: the trade page and the club's bid board (Bidding) */
-      '<div class="hqx-actions"><button type="button" class="btn secondary sm" data-flow="trade" data-club="' + code + '">Build a trade</button><a class="btn secondary sm" href="#/hq?tab=bidding">Saturday bidding</a></div></section>';
+      (ro() ? "" : '<div class="hqx-actions"><button type="button" class="btn secondary sm" data-flow="trade" data-club="' + code + '">Build a trade</button><a class="btn secondary sm" href="#/hq?tab=bidding">Saturday bidding</a></div>') + "</section>";
   }
   function gaugeInner(code) {
     var cs = S2.market && S2.market.clubState(code), s2 = M.RULES.s2, lim = s2.limit, n = cs ? cs.active : rosterView(code).n.pro, cells = [], N = Math.max(lim, n.total);
@@ -1212,9 +1251,10 @@
       '<dl class="spec hqx-spec4">' + [["Position", p.posName], ["Games", p.gp], ["Playoff floor", fl.floor ? fl.gp + " of " + fl.floor + atGroup(fl) + (fl.prorated ? "*" : "") : "None"], ["Salary", money(p.salary)]].map(function (c) { return "<div><dt>" + esc(c[0]) + '</dt><dd class="num">' + esc(c[1]) + "</dd></div>"; }).join("") + "</dl>" +
       (fl.prorated ? '<p class="t-foot">*Prorated: placed ' + esc(fl.since) + " with " + fl.leftAtPlacement + " of " + fl.total + " games left.</p>" : "") +
       '<div class="list hqx-list"><a class="row" href="' + esc(p.href) + '"><span class="grow title">Open profile</span>' + S2.chev() + "</a>" +
-        row("block", p.onBlock ? "Take off the trade block" : "Put on the trade block", seat ? "Holds the " + seat + " seat, so they can't be listed (Rule 2.6)" + (p.onBlock ? "; taking them off is open" : "") : p.onBlock ? "Listed: every front office sees it (Rule 2.3)" : "A listing is public to every front office (Rule 2.3)") +
+        (ro() ? "" : row("block", p.onBlock ? "Take off the trade block" : "Put on the trade block", seat ? "Holds the " + seat + " seat, so they can't be listed (Rule 2.6)" + (p.onBlock ? "; taking them off is open" : "") : p.onBlock ? "Listed: every front office sees it (Rule 2.3)" : "A listing is public to every front office (Rule 2.3)") +
         row("trade", "Trade", seat ? "Holds the " + seat + " seat: a manager can't be traded (Rule 2.6)" : "Open until the Season 2 movement deadline, " + calText(2, "movement_deadline_fixed") + " (Rule 2.4)") +
-        row("waive", "Put on waivers", seat ? "Holds the " + seat + " seat: a manager can't be waived (Rule 2.6)" : "Season 2: 24 hours of claims, then the training camp pool (Rule S2.5)") + "</div>";
+        row("waive", "Put on waivers", seat ? "Holds the " + seat + " seat: a manager can't be waived (Rule 2.6)" : "Season 2: 24 hours of claims, then the training camp pool (Rule S2.5)")) + "</div>" +
+      (ro() ? '<p class="hqx-fine">' + esc(archErr().message) + "</p>" : "");
     var sh = sheet({ title: (p.num != null ? "#" + p.num + " " : "") + p.tag, back: ['[data-act="player"][data-pid="' + pid + '"]'], html: '<div class="hqx-ps">' + body + '<p class="hqx-err" role="alert"></p></div>' });
     closeOnLinks(sh);
     var say = function (t) { S2.$(".hqx-err", sh.el).textContent = t; };
@@ -1247,7 +1287,8 @@
      another club instead. market_claim through b4's S2.market.claim: nothing reads as claimed until the database
      confirms it, and every refusal is said in the sheet in the league's words */
   function claimDoor(pid, asClub) {
-    var K = S2.market, w = K && K.waiver(pid), p = M.player(pid);
+    var K = S2.market, w = K && K.waiver(pid), p = M.player(pid), ae = archErr();
+    if (ae) return S2.toast(ae.message, "err");
     if (!S2.has("office")) return S2.locked({ title: "Claim " + (p ? p.tag : "a player") + " off waivers", who: "A club's front office: its Owner, GM and AGM",
       why: "Any club other than the one that placed a player on waivers may claim them within 24 hours, at the salary they carried, if it has an open roster spot and room under the cap (Rule S2.5)." });
     if (!w || !w.claimable) return S2.toast(!w ? (p ? p.tag : "That player") + " is not on waivers." : w.claimedBy ? "The " + team(w.claimedBy).full + " claimed " + w.tag + " first. The first claim wins (Rule S2.5)." : w.tag + "'s 24 hours on waivers ran out, so they joined the training camp pool (Rule S2.5).", "err");
@@ -1289,8 +1330,7 @@
   function refreshAll() {
     var code = club(), p = me();
     repaint("ledger", function () { return ledgerInner(code); });
-    repaint("cap", function () { return capCard(code, !!S2.$('.hqx-two > [data-w="cap"]')); }); repaint("gauge", function () { return gaugeInner(code); });
-    if (S2.$(".hqx-gauge")) placeMark(document);
+    repaintCap(code);
     repaint("grid", gridInner); repaint("gridh", function () { return gridHead(code); });
     repaintTrades();
     afterLineupChange();
@@ -1298,6 +1338,12 @@
     repaint("forfeits", function () { return forfeitInner(code); });   /* a Game desk ruling changes M.games in place */
     repaintBidding();
     paintOffice(code);   /* the seats read the rosters the write just read again */
+  }
+  /* the cap card and the S2.4 gauge read the market (S2.market.clubState, and M.draftDone for the minimums), so a market
+     read repaints them too */
+  function repaintCap(code) {
+    repaint("cap", function () { return capCard(code, !!S2.$('.hqx-two > [data-w="cap"]')); }); repaint("gauge", function () { return gaugeInner(code); });
+    if (S2.$(".hqx-gauge")) placeMark(document);
   }
   /* a new alert (a move sent for the Owner's approval, a decision, a seat change) may change the front office: read it
      again while Team HQ is on screen (loadOffice keeps it to one read in four seconds) */
@@ -1313,7 +1359,7 @@
      widgets and the tab badge in place. A tick only moves the countdowns, which the ticker does; the busy kinds (bids,
      lots, requests) are folded into one repaint a frame */
   var MK_SYNC = { board: 1, claim: 1, waive: 1, expire: 1, restore: 1, clock: 1, room: 1 }, MK_RAF = 0;
-  function marketRepaint() { MK_RAF = 0; repaintBidding(); if (S2.$(".hqx[data-ws]")) refreshNav(); }
+  function marketRepaint() { MK_RAF = 0; repaintBidding(); if (S2.$('.hqx[data-ws="hq"]')) repaintCap(club()); if (S2.$(".hqx[data-ws]")) refreshNav(); }
   if (S2.market) S2.market.on(function (ev) {
     if (ev.type === "tick") return;
     if (MK_SYNC[ev.type]) { if (MK_RAF) { cancelAnimationFrame(MK_RAF); MK_RAF = 0; } return marketRepaint(); }
@@ -1347,7 +1393,7 @@
     var all = listed(), mine = all.filter(function (l) { return l.club === code; }).length;
     return head({ k: "Trade block · public", h: all.length ? plural(all.length, "player") + " on the block" : "Nobody on the block",
       p: "A listing is the one public part of a trade before it is made: every front office sees it, with position, overall, season to date and cap hit. It obliges nobody (Rule 2.3)." + (mine ? " " + plural(mine, "is yours", "are yours").replace(/^1 is/, "One is") + "." : ""),
-      side: '<button class="btn secondary sm" data-act="block-list">List a player</button>' });
+      side: ro() ? "" : '<button class="btn secondary sm" data-act="block-list">List a player</button>' });
   }
   function toDate(p) {
     var L = p.lines && p.lines[p.mainRole]; if (!L) return "no games yet";
@@ -1361,7 +1407,7 @@
       var p = l.player, own = l.club === code, tv = S2.trade.tradeValue(p.id);   /* one rating: the one the value counts */
       return '<div class="row hqx-ap hqx-bl">' + M.crest(l.club) + '<a class="grow hqx-bl-main" href="' + esc(p.href) + '"><span class="title">' + esc(p.tag) + "</span>" +
         '<span class="sub">' + esc(p.posName + " · " + tv.overall + " OVR · " + toDate(p) + " · " + money(p.salary) + " · value " + tv.value) + '</span><span class="t-foot">' + esc(team(l.club).full + (l.at ? " · listed " + M.ago(minsAgo(l.at)) : "")) + "</span></a>" +
-        '<span class="hqx-ap-b">' + (own ? '<button class="btn secondary sm" data-act="block" data-pid="' + p.id + '">Take off the block</button>' : '<button class="btn secondary sm" data-flow="trade" data-club="' + code + '" data-player="' + p.id + '">Add to a trade</button>') + "</span></div>";
+        (ro() ? "" : '<span class="hqx-ap-b">' + (own ? '<button class="btn secondary sm" data-act="block" data-pid="' + p.id + '">Take off the block</button>' : '<button class="btn secondary sm" data-flow="trade" data-club="' + code + '" data-player="' + p.id + '">Add to a trade</button>') + "</span>") + "</div>";
     }).join("") + "</div>";
   }
   function blockSheet(code) {
@@ -1406,12 +1452,38 @@
   /* the tab's line and count: targets on the board that the next bid night could open on (in the pool with six games) */
   function bidMeta(code) {
     var K = S2.market; if (!K) return { sub: "" };
+    /* on an archive the tab says where bidding runs, as its pane does, never the current market's line (QA round 2 nit,
+       2026-11-25: "No bid nights yet" sat under the read-only band beside "Bidding runs in Season 2") */
+    var ae = archErr(); if (ae) return { sub: "Runs in " + ae.season };
     var nb = K.nextBidNight(), b = K.board(code), n = b.filter(function (x) { return x.state === "pool" && x.eligible; }).length;
     return { badge: nb && n ? n : "", badgeLabel: plural(n, "target") + " eligible for " + (nb ? nb.short : "bidding"),
-      sub: !nb ? "No bid nights left this season" : b.length ? plural(n, "eligible target") + " for " + nb.short : "Bid night " + nb.short };
+      sub: !nb ? noRoom(K).sub : b.length ? plural(n, "eligible target") + " for " + nb.short : "Bid night " + nb.short };
+  }
+  /* the Bidding tab with no room to show, in words that hold for the season as it stands (QA round 2, 2026-11-25: with no
+     bid night on record the tab said "No bid nights left this season" and "Saturday bidding runs only before the movement
+     deadline", for a season whose schedule, and so its Saturdays, is not set yet): while the market is read or when it
+     could not be, before any bid night exists, a holiday Saturday with a night after it, and after the last one. h and p
+     are the empty state's, sub the tab's line */
+  /* the one wording of the market after the movement deadline, for noRoom and the bid head (QA round 2 nit, 2026-11-25:
+     the two carried the same sentence twice) */
+  var PAST_DEADLINE = "The movement deadline has passed, so clubs add players only through single-game requests from the training camp pool (Rule S2.5).";
+  function noRoom(K) {
+    var st = K.status(), t = K.now(), dl = K.deadline;
+    if (st.error) return { err: true, h: "The bid nights could not be read", p: "The league did not answer just now (" + st.error + "). Reload the page to try again.", sub: "Could not be read" };
+    if (!st.loaded) return { h: "Reading the bid nights", p: "One moment while the league's market is read.", sub: "Reading the bid nights" };
+    if (!K.bidNights().length) return { h: "No bid nights yet", p: "Bid nights appear once the Season 2 schedule is set (Rule S2.6).", sub: "No bid nights yet" };
+    var nx = K.bidNights().filter(function (x) { return !x.skipped && x.opens > t; })[0];
+    if (nx) return { h: "No bidding this Saturday", p: "Holiday weeks have no games and no bidding. The next bid night is " + nx.label + " (Rule S2.6).", sub: "Next bid night " + nx.short };
+    return { h: "No bid nights left", sub: "No bid nights left this season",
+      p: dl != null && t < dl ? "No Saturday bidding is left before the movement deadline, " + M.etLong(iso(dl)) + ", and waivers and claims run until then (Rule S2.5)."
+        : PAST_DEADLINE };
   }
   function paneBidding(code) {
     if (!S2.market) return empty("Bidding is not available", "The Season 2 market did not load, so there is nothing to plan here. The console names the error.");
+    /* the bid board, the waivers and the bid nights are the current season's market, never the archive's */
+    var ae = archErr();
+    if (ae) return S2.empty("lock", "Bidding runs in " + ae.season, "Saturday bidding, the bid board and waivers belong to " + esc(ae.season) + ". This page shows " + esc(ae.shown) + ".",
+      '<a class="btn secondary sm" href="' + esc(S2.seasonHref(null, "#/hq?tab=bidding")) + '">Open Bidding for ' + esc(ae.season) + "</a>");
     return '<div class="hqx-stack"><div class="hqx-bwrap"><div data-w="bhead">' + bidHeadInner(code) + "</div></div>" +
       '<section class="hqx-block" data-w="bstand">' + standInner(code) + "</section>" +
       '<section class="hqx-block"><div data-w="bboardh">' + boardHead(code) + '</div><div data-w="bboard">' + boardInner(code) + "</div></section>" +
@@ -1423,7 +1495,7 @@
      the big countdown, every Saturday of the window with the holiday ones marked, and the doors to the room and the pool */
   function bidHeadInner(code) {
     var K = S2.market, r = K.room(null, { as: code }), t = K.now(), nights = K.bidNights();
-    if (!r) return empty("No bid nights", "Saturday bidding runs only before the movement deadline.");
+    if (!r) { var nr = noRoom(K); return S2.empty(nr.err ? "err" : "none", nr.h, esc(nr.p)); }
     var st = r.state, b = r.night, onBoard = K.board(code).filter(function (x) { return x.state === "pool" && x.eligible; }).length;
     var off = nights.filter(function (x) { return x.skipped; }).map(function (x) { return x.short; });
     var h = st === "live" ? "Bidding is live" : st === "closing" ? "The last countdowns are running" : st === "closed" ? "Bidding is over for the season" : b.label, early = t < K.deadline;
@@ -1433,7 +1505,7 @@
       /* a closed room is the last bid night; the movement deadline can still be days off, and waivers and claims run until
          it (review 2026-11-02: Jan 17 to 22 said the deadline had passed) */
       early ? "The last bid night was " + b.label + ". No Saturday bidding is left before the movement deadline, " + M.etLong(iso(K.deadline)) + ", and waivers and claims run until then." :
-      "The movement deadline has passed, so clubs find pool players through nightly requests only.";
+      PAST_DEADLINE;
     var big = st === "before" ? mcd(r.opens, "Opening", true) + "<span>until bidding opens</span>" : st === "live" ? mcd(r.newUntil, "10:00 PM", true) + "<span>until new bidding closes</span>" :
       st === "closing" ? '<b class="d-num">' + r.running + "</b><span>" + (r.running === 1 ? "countdown" : "countdowns") + " still running</span>" : '<b class="d-num">Done</b><span>no bid nights left</span>';
     var word = function (x) { return x.skipped ? "Holiday week, no bidding" : x.key === r.key ? (st === "live" ? "Live now" : st === "closing" ? "Closing" : st === "closed" ? "Held" : "Next") : x.newUntil <= t ? "Held" : "9 to 10 PM ET"; };
@@ -1631,7 +1703,7 @@
     });
   }
   function bdDown(e) {
-    var g = e.target.closest("[data-bgrip]"); if (!g || BD || e.button > 0) return;
+    var g = e.target.closest("[data-bgrip]"); if (!g || BD || e.button > 0 || ro()) return;
     var row = g.closest("[data-bpid]"), list = row && row.parentNode; if (!row) return;
     var rows = S2.$$("[data-bpid]", list); if (rows.length < 2) return;
     e.preventDefault();   /* no text selection, no scroll: the grip is touch-action none */
@@ -1651,7 +1723,7 @@
     e.preventDefault();
     var lo = d.tops[0] - d.tops[d.i], hi = d.tops[n - 1] + d.hs[n - 1] - d.tops[d.i] - d.hs[d.i];
     if (dy < lo) dy = lo - S2.rubber(lo - dy, 160); else if (dy > hi) dy = hi + S2.rubber(dy - hi, 160);   /* past the ends: resistance, not a wall */
-    d.dy = dy; d.row.style.transform = "translateY(" + dy.toFixed(2) + "px) scale(1.015)";
+    d.dy = dy; d.row.style.translate = "0 " + dy.toFixed(2) + "px";   /* the lift's scale is hq.css's .is-lifted-row */
     d.hist.push({ y: e.clientY, t: performance.now() }); if (d.hist.length > 6) d.hist.shift();
     var c = d.tops[d.i] + d.hs[d.i] / 2 + dy, to = 0;
     for (var k = 0; k < n; k++) if (k !== d.i && d.tops[k] + d.hs[k] / 2 < c) to++;
@@ -1682,9 +1754,11 @@
     var lost = st !== "open" && !L.filed && g.stage !== "playoff";
     var state = lost ? tag("loss", "Forfeit: no lineup") : st === "underway" ? tag("", "Under way") : L.filed ? tag("win", st === "locked" ? "Published" : "Filed") : f ? tag("warn", "Draft " + f + "/6") : tag("loss", "Not filed");
     var when = lost ? "No lineup by the " + esc(clock(k.lock)) + " lock, so the game is forfeited (Rule 3.2)" : st === "open" ? "Locks in " + cd(k.lock) + (L.filed ? "" : " · file it by then or forfeit") : st === "locked" ? "Published to " + esc(o) + " · changes free until " + esc(clock(k.close)) : "Who played comes from the box score";
-    return '<button class="row hqx-plan-r" data-act="sheet" data-g="' + g.id + '">' + timeHtml(g) + M.crest(o) +
+    /* on an archive (or a later season) the row is the record, not a door to the sheet (QA round 2 nit, 2026-11-25) */
+    var el = ro() ? "div" : "button";
+    return "<" + el + ' class="row hqx-plan-r"' + (ro() ? "" : ' data-act="sheet" data-g="' + g.id + '"') + ">" + timeHtml(g) + M.crest(o) +
       '<span class="grow"><span class="title">' + (g.gameNo ? "Game " + g.gameNo + " · " : "") + vsHtml(g, code) + '</span><span class="sub">' + when + "</span></span>" +
-      '<span class="hqx-plan-s">' + state + '<span class="hqx-dots" role="img" aria-label="' + f + ' of 6 spots filled">' + SLOTS.map(function (s) { return '<i class="' + (L.slots[s] ? "on" : "") + '"></i>'; }).join("") + "</span></span>" + S2.chev() + "</button>";
+      '<span class="hqx-plan-s">' + state + '<span class="hqx-dots" role="img" aria-label="' + f + ' of 6 spots filled">' + SLOTS.map(function (s) { return '<i class="' + (L.slots[s] ? "on" : "") + '"></i>'; }).join("") + "</span></span>" + (ro() ? "" : S2.chev()) + "</" + el + ">";
   }
 
   /* ---- Game nights: the availability grid for one night ---- */
@@ -1776,7 +1850,8 @@
     /* a board note is kept when it is committed (change: Enter or leaving the field), never per keystroke, so the board
        is not redrawn under the typing; a repaint that waited for the field runs once focus has moved on */
     host.addEventListener("change", function (e) {
-      var sv = e.target.dataset && e.target.dataset.srv;
+      var sv = e.target.dataset && e.target.dataset.srv, ae = archErr();
+      if (ae && (sv || (e.target.dataset && e.target.dataset.bnote))) { S2.toast(ae.message, "err"); return repaint(sv ? "servers" : "bboard", function () { return sv ? serversInner(club()) : boardInner(club()); }); }
       if (sv) {   /* a server pick is kept the moment it changes; the select stays under the finger, nothing repaints (Rule 4.2) */
         var g = gameById(sv), d = e.target.dataset, v = e.target.value, label = { first: "First choice", second: "Second choice", veto: "Veto", prefer: "Preferred server" }[d.key];
         var said = function () { return label + ", " + (g.home === club() ? "vs " : "at ") + team(g.home === club() ? g.away : g.home).city + ": " + (v || "none"); };
@@ -1806,7 +1881,8 @@
     requestAnimationFrame(function () { placeMark(host); });
   }
   function act(name, a, ws, ev) {
-    var p = me(), code = club();
+    var p = me(), code = club(), ae = ws === "hq" && WRITE_ACTS[name] ? archErr() : null;
+    if (ae) return S2.toast(ae.message, "err");
     if (name === "msg") return openMsg(p, a.dataset.id);
     /* QA function 21 (2026-11-25): Mark all read is the bell's persisted door (S2.notifs.seen, js/live.js), so marked alerts
        stay read after a reload; the reader's own overrides then give way to what the league holds (read, or still unread
@@ -1827,6 +1903,7 @@
     if (name === "perm-save") return savePerms(code, a);
     if (name === "perm-reset") { PERM.draft = JSON.parse(JSON.stringify(PERM.base)); PERM.said = "Changes discarded."; return paintPerms(code); }
     if (name === "off-retry") return reloadOffice(code);
+    if (name === "srv-retry") { var sg = gameById(a.dataset.g); if (!sg || !S2.lobby || !S2.lobby.retryPicks) return S2.toast("The server picks can't be read again from here. Reload the page.", "err"); a.disabled = true; return S2.lobby.retryPicks(sg); }
     if (name === "tr-accept" || name === "tr-decline" || name === "tr-withdraw") return tradeAnswer(code, a.dataset.id, name.slice(3));
     if (name === "tr-reverse" || name === "tr-resend") return officeTrade(code, a.dataset.id, name.slice(3));
     if (name === "app-withdraw") return withdrawSheet(a.dataset.app);
@@ -1876,7 +1953,9 @@
 
   /* ---------- pages ---------- */
   S2.page("hq", {
-    title: function (r) { var t = valid(HQ_TABS, r.q.tab); return t ? tabName(HQ_TABS, t) : "Team HQ"; },
+    /* "<section> · Team HQ", which the router gives S2.setTitle (QA round 2 A1, 2026-11-25: a tab named itself alone,
+       "Roster & cap · CGHL", with no word of the workspace it is in) */
+    title: function (r) { var t = valid(HQ_TABS, r.q.tab); return t ? tabName(HQ_TABS, t) + " · Team HQ" : "Team HQ"; },
     tab: "hq", views: HQ_TABS,   /* the header's Workspaces menu lists these (js/core.js navTabs) */
     render: function (r) { try { if (!M) throw new Error("S2.M is missing"); return hqHtml(r); } catch (e) { return fail("Team HQ", e); } },
     after: function (root, r) { try { after(root, r, "hq"); } catch (e) { console.error("[hq] Team HQ failed to wire up", e); } }
@@ -1903,7 +1982,7 @@
   function setAvail() { return S2._you.setAvail.apply(this, arguments); }
   function withdrawSheet() { return S2._you.withdrawSheet.apply(this, arguments); }
   function youMeta() { return S2._you.youMeta.apply(this, arguments); }
-  S2._hq = { M: M, SLOTS: SLOTS, ST: ST, about: about, after: after, atGroup: atGroup, availOf: availOf, minsInForce: minsInForce,
+  S2._hq = { M: M, SLOTS: SLOTS, ST: ST, about: about, after: after, archErr: archErr, atGroup: atGroup, availOf: availOf, minsInForce: minsInForce,
     availWord: availWord, blockLive: blockLive, blockSaid: blockSaid, byNight: byNight, cal: cal, calText: calText, cd: cd, clock: clock,
     closeOnLinks: closeOnLinks, club: club, clubGames: clubGames, curNight: curNight, dateBlock: dateBlock,
     dueOf: dueOf, empty: empty, esc: esc, fail: fail, filledN: filledN,

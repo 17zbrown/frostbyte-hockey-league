@@ -1,10 +1,13 @@
 <!doctype html>
-<html lang="en" data-theme="light" data-finish="glacier">
+<html lang="en" data-theme="light" data-finish="glacier" data-mode="site">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-<!-- one status-bar color, set by S2.applyLook from the theme chosen in You, Settings (not only the system setting) -->
-<meta name="theme-color" content="#f5f5f7">
+<!-- one status-bar color, set by S2.applyLook from the theme chosen in You, Settings (not only the system setting).
+     data-mode starts at site (loader, review 2026-11-25): most visits land on a public page, a white website, so the boot
+     screen is drawn on that page's canvas and bar instead of the app gray that turned white when S2.route set the mode;
+     S2.route still sets it on every page (app for the workspaces) -->
+<meta name="theme-color" content="#ffffff">
 <title>CGHL · Season 2</title>
 <meta name="description" content="The Chel Gaming Hockey League site, as the suites serve it (the site build puts the real head, src/s2/head.html, here).">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -31,6 +34,18 @@
 <link rel="stylesheet" href="css/camp.css">
 <link rel="stylesheet" href="css/office.css">
 <link rel="stylesheet" href="css/abbr.css">
+<!-- the look before the first paint (loader, 2026-11-25): the theme chosen in You, Settings (s2.theme), else the system's.
+     Set on <html> before the body draws, so a dark visit never shows the light canvas while the league loads (it did, then
+     cross-faded to dark at S2.boot); window.S2_START adopts it, so this is the one decision. The status bar takes that
+     look's bar color until S2.applyLook syncs it with the page -->
+<script>
+  (function () {
+    var r = document.documentElement, m = document.querySelector('meta[name="theme-color"]'), t = null;
+    try { t = JSON.parse(localStorage.getItem("s2.theme")); } catch (e) { console.warn("S2: the stored theme could not be read, so the system's is used", e); }
+    r.setAttribute("data-theme", t === "dark" || t === "light" ? t : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    if (m) m.setAttribute("content", getComputedStyle(r).getPropertyValue("--bar").trim());
+  })();
+</script>
 </head>
 <body>
 <div id="app" class="shell"></div>
@@ -68,10 +83,11 @@
 <script src="js/search.js"></script>
 </template>
 <script>
-  /* run by js/load.js once every script above is in: a first visit follows the system theme (You, Settings remembers a
-     chosen one), then the first page is drawn. i3f (2026-11-25): the shared copy's claude.ai theme is gone with it */
+  /* run by js/load.js once every script above is in: the page keeps the look the head chose before the first paint (a
+     first visit follows the system theme; You, Settings remembers a chosen one), then the first page is drawn. i3f
+     (2026-11-25): the shared copy's claude.ai theme is gone with it */
   window.S2_START = function () {
-    if (S2.store.get("theme", null) == null) S2.state.theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    S2.state.theme = document.documentElement.getAttribute("data-theme");
     S2.boot();
   };
 </script>

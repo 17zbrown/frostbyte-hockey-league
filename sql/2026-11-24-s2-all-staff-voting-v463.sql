@@ -174,3 +174,4 @@ begin
     (select count(*) from public.staff_applications where status = 'pending'),
     (select count(*) from public.management_applications where status = 'pending');
 end $chk$;
+-- Applied as migration v463b_s2_all_staff_voting on 2026-11-25 (re-rehearsed on production that morning, rolled back, then applied after the v4.63 deploy); tools/sql/grant-audit.sql returned zero rows.

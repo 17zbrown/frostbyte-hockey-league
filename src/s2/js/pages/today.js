@@ -561,14 +561,27 @@
         '<dl class="td-lead-n">' + top.races.map(function (x) { return "<div><dt>" + esc(cap(x.t[1])) + '</dt><dd class="d-num">' + esc(rate(x.r)) + "</dd></div>"; }).join("") + "</dl></div>" +
       (more ? '<ul class="td-lead-more">' + more + "</ul>" : "");
   }
+  /* v5.00 swap (e7): live, the race board (statistical_title_board) is not in s2_league and M.partial.titles says so;
+     "not loaded" must never read as "nobody has reached the floor". QA round 2 (A7, 2026-11-25): the section was simply
+     left out, so Today never told the race. The board is the model's one read now (M.readTitles, which Stats and the
+     profile share): Today asks for it after it draws (titlesIn) and the section takes its place in place when it lands.
+     Until then the section is an unseen placeholder (#tdLeaders), and a failed read is said in plain words with Try again
+     (fail loud). Before the season's first final there is no race to tell, and nothing is read for it */
   function leadersSection() {
-    /* v5.00 swap (e7): live, the race board (statistical_title_board) is not in s2_league and M.partial.titles says so;
-       "not loaded" must never read as "nobody has reached the floor", so the section is left out and Stats > Leaders,
-       which reads the board, keeps it */
-    if (M.partial.titles) return "";
+    if (!M.view.finals) return "";
+    var head = { kicker: "Title leaders", id: "tdLdH", href: "#/stats?tab=leaders", link: "All leaders" };
+    if (M.partial.titles) {
+      var err = M.titlesErr();
+      return err ? '<section class="band tint td-leaders reveal" id="tdLeaders" aria-labelledby="tdLdH">' + S2.secHead(Object.assign(head, { h: "The title race", p: "" })) +
+          /* QA round 2 review: "reported a problem", since the league's own words follow (it said "did not answer" and then
+             quoted it), and no pointer to Stats, which reads the same board and fails the same way */
+          S2.empty("err", "The title race did not load", "The league's data service reported a problem, so the race cannot be shown here. Try again in a moment." +
+            (err.message ? '<span class="td-why">The league said: “' + esc(err.message) + "”</span>" : ""), { t: "Try again", data: { tdtitles: "retry" } }) + "</section>"
+        : '<section id="tdLeaders" hidden></section>';
+    }
     var tg = titleGroups(function (c) { var rows = M.titles(c); return rows[0] ? { r: rows[0], next: rows[1] } : null; }), groups = tg.groups, none = tg.none;
-    var top = groups[0], head = { kicker: "Title leaders", id: "tdLdH", href: "#/stats?tab=leaders", link: "All leaders" };
-    if (!top) return '<section class="band tint td-leaders reveal" aria-labelledby="tdLdH">' + S2.secHead(Object.assign(head, { h: "No title leaders yet", p: "Nobody has reached the games-played floor yet." })) + "</section>";
+    var top = groups[0];
+    if (!top) return '<section class="band tint td-leaders reveal" id="tdLeaders" aria-labelledby="tdLdH">' + S2.secHead(Object.assign(head, { h: "No title leaders yet", p: "Nobody has reached the games-played floor yet." })) + "</section>";
     /* numbers in sentences first: the leader's total, then who chases them in which race */
     var first = top.races[0], low = first.t[0] === "goaltending_title";
     var lede = first.r.tag + (low ? " has allowed " + first.r.total + " goals in " : " has " + first.r.total + " " + first.t[2] + " in ") + first.r.gp + " games.";
@@ -577,18 +590,32 @@
     lede += order.map(function (k) { return " " + k + " is next in " + list(nextIn[k]) + "."; }).join("");
     if (none.length) lede += " Nobody has reached the games-played floor in " + list(none) + " yet.";
     var h = top.races.length > 1 ? top.r.tag + " leads " + words(top.races.length) + " title races" : cap(words(TITLES.length - none.length)) + " title races, " + words(groups.length) + " leaders";
-    return '<section class="band tint td-leaders reveal" aria-labelledby="tdLdH">' + S2.secHead(Object.assign(head, { h: h, p: esc(lede) })) +
+    return '<section class="band tint td-leaders reveal" id="tdLeaders" aria-labelledby="tdLdH">' + S2.secHead(Object.assign(head, { h: h, p: esc(lede) })) +
       leadBoard(groups) + "</section>";
+  }
+  /* the title race, read by the model after the page draws: the section repaints in place when the read settles (the
+     first landing enters as a section does; a refresh of a board on screen is quiet), never the page. again: Try again */
+  function titlesIn(root, again) {
+    var host = S2.$("#tdLeaders", root); if (!host) return;
+    var retry = S2.$('[data-tdtitles="retry"]', host);
+    if (retry) retry.addEventListener("click", function () { titlesIn(root, true); });
+    if (!again && !M.titlesNeeded()) return;
+    var read = M.readTitles(again);
+    if (again) { host.outerHTML = leadersSection(); }   /* the failure is cleared by the ask: the placeholder holds the place */
+    read.then(function () {
+      var h = S2.$("#tdLeaders", root); if (!h || !root.isConnected || S2.parse().name !== "today") return;   /* the reader has moved on */
+      var first = h.hasAttribute("hidden");
+      h.outerHTML = leadersSection();
+      var n = S2.$("#tdLeaders", root); if (!n) return;
+      if (first) S2.reveal(n.parentNode); else S2.settle(n);
+      titlesIn(root);   /* binds a Try again the new section brought; the board is read, so nothing is asked */
+    });
   }
 
   /* ---------- the clubs: the Clubs page's own tile (review 2026-10-19: one object, one design). Solid club color, the
      crest on a white disc, the name and the record in condensed type; the race table above stays the place for form. ---------- */
-  /* shortcut: a copy of league.js inkOn() (the WCAG luminance split the Clubs tile uses); move both into the kit when it takes shared league pieces */
-  function inkOn(hex) {
-    var m = /^#?([0-9a-f]{6})$/i.exec(hex || ""); if (!m) return "var(--on-dark)";
-    var n = parseInt(m[1], 16), c = [n >> 16 & 255, n >> 8 & 255, n & 255].map(function (v) { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
-    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2] > 0.179 ? "var(--on-light)" : "var(--on-dark)";
-  }
+  /* the tile's color and ink are core's one S2.clubBand (QA round 2, 2026-11-25: the copy of league.js inkOn kept here as a
+     shortcut is gone with it) */
   function clubsSection(withMap) {
     var po = viewDate("playoffs_start_at"), per = M.playoffFormat.perDiv, nd = M.league.divisions.length;
     var rows = M.standings("division").reduce(function (a, d) { return a.concat(d.rows); }, []);
@@ -602,8 +629,7 @@
         p: esc(cap(words(M.teams.length / nd)) + " clubs in each division. The top " + words(per) + " in each make the playoffs" + (po ? ", which begin " + M.etLong(po.at) : "") + "."), href: "#/clubs", link: "All clubs" }) +
       (withMap ? '<div class="td-mapwrap">' + leagueMap({ bare: bare }) + "</div>" : "") +
       '<div class="lg-tiles">' + rows.map(function (r) {
-        var c = clubColor(r.code);
-        return '<a class="lg-ct" href="' + esc(r.href) + '" style="--club:' + (c || "var(--ink-band)") + ";--club-ink:" + inkOn(c) + '">' +
+        return '<a class="lg-ct" href="' + esc(r.href) + '" style="' + esc(S2.clubBand(M.team(r.code))) + '">' +
           (bare ? "" : '<span class="lg-ct-rk">' + esc(ord(r.rank) + " " + r.division) + "</span>") +
           '<span class="lg-ct-medal" aria-hidden="true">' + M.crest(r.code, "xl") + "</span>" +
           '<span class="lg-ct-name"><span class="lg-ct-city">' + esc(city(r.code)) + '</span><span class="d-2">' + esc(teamName(r.code)) + "</span></span>" +
@@ -675,7 +701,7 @@
   function s2Phase() {
     if (M.view.season !== 2 || M.view.games) return null;
     if (M.view.empty.rosters) return "offseason";
-    return M.draft.state && M.draft.state.status === "complete" ? "schedule" : "draft";
+    return M.draftDone() ? "schedule" : "draft";   /* QA round 2 (A6): the model's one "the draft is complete" */
   }
   /* the clubs with someone on their roster this season, west to east as the map draws them */
   function seated() { var c = []; M.players.forEach(function (p) { if (p.rostered && p.club && c.indexOf(p.club) < 0) c.push(p.club); }); return c; }
@@ -817,7 +843,7 @@
       var state = autoState();
       return '<div class="td" data-state="' + state + '"><div class="td-body" id="tdBody">' + todayBody(state) + "</div></div>";
     },
-    after: function (root) { bindRail(root); tick(root); }
+    after: function (root) { bindRail(root); tick(root); titlesIn(root); }
   });
 
   /* ======================================================================================================
@@ -875,10 +901,10 @@
     if (f.week === "playoffs" && !nights.length) {
       var po = viewDate("playoffs_start_at");
       return gEmpty("No playoff games yet", (po ? "The playoffs begin " + esc(M.etLong(po.at)) + " at " + esc(po.time) + " ET. " : "") + "The bracket and its games appear here once the regular season ends.",
-        '<a class="btn site outline" href="#/standings?view=playoffs">Projected bracket</a>');
+        { t: "Projected bracket", href: "#/standings?view=playoffs" });   /* S2.empty draws the website button itself (QA round 2) */
     }
     if (M.view.empty.games) return gEmpty(M.view.name + " has no games yet", "Each game night appears here once the schedule is set.");
-    if (!nights.length) return gEmpty("No games match", "Nothing is scheduled for these filters.", '<button type="button" class="btn site outline" data-clear>Clear filters</button>');
+    if (!nights.length) return gEmpty("No games match", "Nothing is scheduled for these filters.", { t: "Clear filters", data: { clear: "" } });
     return nights.map(function (x) {
         var n = x.n, isNext = nn && nn.date === n.date, lab = n.label.split(", "), md = (lab[1] || "").split(" "), meta = [];
         meta.push(nb("Week " + n.week), nb(S2.plural(x.games.length, "game")));

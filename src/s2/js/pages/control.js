@@ -214,8 +214,10 @@
     return { J: J, all: all, ok: ok, missing: missing, healthy: !missing.length && ok === all };
   }
   /* bind the kit's charts (and their binders) without replaying their entrance: used for repaints that are not page
-     entrances. S2.charts.hydrate skips its animations when S2.reduce matches, so we lend it that answer for one call. */
-  function hydrateQuiet(root) { var r = S2.reduce; S2.reduce = { matches: true }; try { S2.charts.hydrate(root); } finally { S2.reduce = r; } }
+     entrances. QA round 2 (2026-11-25): S2.settle (js/core.js), the one way a repainted region skips its entrances, shows
+     its reveals and finishes the draw-ins hydrate starts in this same frame (it once lent hydrate a Reduce Motion answer
+     for one call, a second way to do the same) */
+  function hydrateQuiet(root) { S2.charts.hydrate(root); S2.settle(root); }
 
   /* ---------- monotone cubic path: smooth, but never overshoots the data (a member count cannot dip below a real value) */
   function curve(pts) {
@@ -410,7 +412,7 @@
        filled (Rule 2.6): an Owner comes from an approved owner application, the Owner nominates the GM, and the AGM is
        named after the draft from the club's own roster (RULING 2026-11-23), so before the draft an empty AGM seat is no
        gap. Twenty-four rows of three seats each buried the real work; the tab's count follows this list */
-    var preDraft = !S2.draftDone();
+    var preDraft = !Mm.draftDone();   /* the one definition, js/model.js (QA round 2) */
     Mm.teams.forEach(function (t) {
       var r = Mm.roster(t.code); if (!r) return;
       if (!r.seats.Owner) { mine.push({ icon: "people", label: t.full + ": no Owner", meta: "Owners come from the owner applications on the Staff Desk; the Owner then nominates the GM (Rule 2.6).", href: "#/desk?tab=applications" }); return; }
@@ -861,20 +863,12 @@
     if (out.refused) { out.rows = []; out.patch = null; }
     return out;
   }
-  /* the league's read client (js/live.js S2.ensureSb, live mode only). Without one the page reads the model and every
-     write is refused by S2.write, so an empty answer here always means the league answered empty.
-     shortcut: the same ten lines as gamedesk.js rd(); move both to one S2 read helper when f adds one */
+  /* the league's read client (js/live.js S2.ensureSb, live mode only), the page's test for whether it can read the league
+     at all. Without one the page reads the model and every write is refused by S2.write. Every read goes through S2.rd
+     (js/live.js), the one read door (QA round 2, A10: this kept the same ten lines as gamedesk.js), so an empty answer
+     always means the league answered empty */
   function client() { return S2.ensureSb ? S2.ensureSb() : null; }
-  function rd(q) {
-    return Promise.resolve().then(function () {
-      var c = client();
-      if (!c) throw new Error("Not connected to the league, so this can't be read here. Reload the page and try again.");
-      return q(c);
-    }).then(function (r) {
-      if (r && r.error) { var e = new Error(r.error.message || "The league did not answer."); e.code = r.error.code; throw e; }
-      return r ? r.data : null;
-    });
-  }
+  function rd(q) { return S2.rd(q); }
   /* what the generator reads: fresh from the league when there is a read client (two tabs must never both see "no schedule
      yet"), else the model's (the fixture: the preview works, and S2.write refuses the write) */
   function genInputs(n) {
@@ -1056,6 +1050,16 @@
       : (undated.length ? "Of the holidays this page can date, none falls" : "None of these falls") + span + ", so Season 2 loses no game week to them.") +
       (undated.length ? " " + esc(undated.join(", ")) + " could not be dated here." : "") + "</p>";
   }
+  /* the league's shape in words, from the league read: "Eight clubs in two divisions of four" (QA round 2, 2026-11-25: it was
+     typed in, and would have outlived an added franchise); "of four" only while every division holds the same number AND
+     every club sits in one (QA round 2 review: nine clubs, one just approved and not yet placed, are not "two divisions of
+     four") */
+  function clubsSay(n) { var w = S2.words(n); return w.charAt(0).toUpperCase() + w.slice(1) + (n === 1 ? " club" : " clubs"); }
+  function leagueShape(Mm) {
+    var divs = Mm.league.divisions, n = Mm.teams.length, per = divs.map(function (d) { return Mm.teams.filter(function (t) { return t.division === d; }).length; });
+    var even = per.length && per.every(function (k) { return k === per[0]; }) && per[0] > 0 && per[0] * per.length === n;
+    return clubsSay(n) + " in " + S2.words(divs.length) + (divs.length === 1 ? " division" : " divisions") + (even ? " of " + S2.words(per[0]) : "");
+  }
   /* step details come from the model; a changelog number such as "(v4.19)" is engineering, never copy the commissioner reads */
   function detailOf(s) { return String(s.detail || "").replace(/(\d+)-man\b/g, "$1-player").replace(/\s*\((?:ruling )?v\d+\.\d+\)/g, ""); }
   function stateLine(s) {   /* the pool sheet says its blocked detail in a callout, so its state line is the chip alone */
@@ -1084,8 +1088,8 @@
         '<div class="cc-sh-acts"><a class="btn" href="#/desk?tab=applications">Open applications</a></div>';
     }
     else if (s.key === "clubs") {
-      h += '<div class="cc-divs">' + ["East", "West"].map(function (d) { return '<div><span class="t-cap">' + d + '</span><div class="cc-crests">' + Mm.teams.filter(function (t) { return t.division === d; }).map(function (t) { return '<span class="cc-cr">' + Mm.crest(t.code) + '<span class="t-foot">' + esc(t.code) + "</span></span>"; }).join("") + "</div></div>"; }).join("") + "</div>" +
-        '<p class="t-sub">Eight clubs in two divisions of four, one league, no tiers. A franchise added from the owner applications appears here once you approve it.</p><div class="cc-sh-acts"><button class="btn" data-cc-go-close="clubs">Open the club editor</button></div>';
+      h += '<div class="cc-divs">' + Mm.league.divisions.map(function (d) { return '<div><span class="t-cap">' + esc(d) + '</span><div class="cc-crests">' + Mm.teams.filter(function (t) { return t.division === d; }).map(function (t) { return '<span class="cc-cr">' + Mm.crest(t.code) + '<span class="t-foot">' + esc(t.code) + "</span></span>"; }).join("") + "</div></div>"; }).join("") + "</div>" +
+        '<p class="t-sub">' + leagueShape(Mm) + ', one league, no tiers. A franchise added from the owner applications appears here once you approve it.</p><div class="cc-sh-acts"><button class="btn" data-cc-go-close="clubs">Open the club editor</button></div>';
     }
     else if (s.key === "signups") {
       var sr = C.seasonReturn, s1s = C.signups.filter(function (x) { return x.season === 1; })[0];
@@ -1476,7 +1480,7 @@
     });
   }
   function clubData() {
-    var Mm = M(), rows = {}, tx = teamRows(), pre = !S2.draftDone();
+    var Mm = M(), rows = {}, tx = teamRows(), pre = !Mm.draftDone();
     Mm.standings("league").forEach(function (r) { rows[r.code] = r; });
     return Mm.teams.map(function (t) {
       var r = Mm.roster(t.code), s = rows[t.code] || {}, x = tx && tx[t.code], seats = {};
@@ -1517,7 +1521,7 @@
             '<span class="cc-club-c' + (c.vacant.length ? "" : " is-ok") + '">' + dot(c.vacant.length ? "warn" : "ok") + '<span class="cc-ml">Seats </span>' + (c.vacant.length ? '<span class="cc-warn">' + esc(c.vacant.join(", ")) + " empty</span>" : c.pre && !c.seats.AGM ? "Owner and GM" : "3 of 3") + "</span>" +
             '<span class="cc-club-c t-foot">' + (c.lastBox ? '<span class="cc-ml">Last box score </span>' + esc(c.lastBox) : "No box score yet") + "</span></span>" + S2.chev() + "</button>";
         }).join("") + "</div>", first) +
-      band("w", '<div class="cc-cols"><div>' + lead("One league, " + (divs.length === 2 ? "two" : divs.length) + " divisions", list.length + " clubs in the " + esc(divs.join(" and ")) + " divisions of the " + esc(Mm.league.name) + ". Tiers are not in use.") +
+      band("w", '<div class="cc-cols"><div>' + lead("One league, " + S2.words(divs.length) + (divs.length === 1 ? " division" : " divisions"), clubsSay(list.length) + " in the " + esc(divs.join(" and ")) + (divs.length === 1 ? " division" : " divisions") + " of the " + esc(Mm.league.name) + ". Tiers are not in use.") +
           '<div class="cc-divs cc-divs-lg">' + divs.map(function (d) { return '<div><span class="cc-col-h">' + esc(d) + '</span><div class="cc-crests">' + Mm.teams.filter(function (t) { return t.division === d; }).map(function (t) {
             return '<a class="cc-cr" href="' + esc(t.href) + '">' + Mm.crest(t.code, "lg") + '<span class="t-foot">' + esc(t.code) + "</span></a>"; }).join("") + "</div></div>"; }).join("") + "</div></div>" +
         "<div>" + lead("New clubs", "A franchise chosen in an approved owner application is added by your go-ahead on that application, which also seats its Owner (Staff Desk, Applications).") + "</div></div>", first) +
@@ -1898,8 +1902,7 @@
   /* what waits in a committee's topic right now: the Staff Desk's own queue, each item tagged with its committee. Trade
      requests are never in it: Rule 2.3 sends them to the club's front office, not the staff. */
   function queueOf(key) { return deskNow().filter(function (a) { return a.c === key; }).map(function (a) { return a.label; }); }
-  function initials(name) { var c = String(name || "").replace(/[^\p{L}\p{N}]/gu, ""); return (c.slice(0, 2) || "?").toUpperCase(); }
-  function avatar(name) { return name ? '<span class="avatar cc-av" aria-hidden="true">' + esc(initials(name)) + "</span>" : '<span class="avatar cc-av empty" aria-hidden="true"></span>'; }
+  function avatar(name) { return name ? '<span class="avatar cc-av" aria-hidden="true">' + esc(S2.initials(name)) + "</span>" : '<span class="avatar cc-av empty" aria-hidden="true"></span>'; }
   function committeesHtml() {
     var m = managers(), ready = !!deskLV();
     return '<ul class="cc-cmts" id="ccCmts">' + COMMITTEES.map(function (c) {
@@ -2309,8 +2312,7 @@
     pane.innerHTML = paneHtml(pane.dataset.tab, false);
     if (opened.length) S2.$$("details", pane).forEach(function (d) { if (opened.indexOf(key(d)) >= 0) d.open = true; });
     bindPane(root, pane, false);
-    hydrateQuiet(pane);
-    S2.$$(".reveal", pane).forEach(function (e) { e.classList.add("in"); });
+    hydrateQuiet(pane);   /* its reveals show with it (S2.settle) */
     sideCounts(root);
     window.scrollTo(0, y);
     var b = hook && S2.$(hook, pane); if (b) b.focus({ preventScroll: true });

@@ -105,7 +105,7 @@
      (review 2026-11-02: from Sun, Jan 17 to Fri, Jan 22 the page said the deadline had passed) */
   function noBidLeft() {
     if (K.deadline == null) return ". The bid nights follow the Season 2 schedule, which is not set yet.";
-    if (K.now() >= K.deadline) return ". Bidding ended at the movement deadline, so clubs now add pool players by nightly request only.";
+    if (K.now() >= K.deadline) return ". Bidding ended at the movement deadline, so clubs now add players only through single-game requests from the training camp pool (Rule S2.5).";
     var held = K.bidNights().filter(function (b) { return !b.skipped && b.newUntil <= K.now(); }).pop();
     return "." + (held ? " The last bid night was " + esc(held.label) + "." : "") + " No Saturday bidding is left before the movement deadline, " + esc(M.etLong(iso(K.deadline))) + ".";
   }

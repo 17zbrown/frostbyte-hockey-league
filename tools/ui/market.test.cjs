@@ -66,8 +66,12 @@ async function realMarket(b) {
       "requests", "gamePlayers", "fillIns", "board", "boardAdd", "boardSet", "boardRemove", "boardMove", "onBoard", "clubState", "room", "onLot", "bid", "recap", "bidNights", "nextBidNight",
       "tonight", "gameNights", "pauseBidding", "resumeBidding", "bidPause", "lineupProblems", "waive", "waiveDoor", "voidLot", "clubGames", "ensure", "reload", "watchRoom", "status", "club", "setClub"].filter((n) => typeof K[n] !== "function"),
       gone: ["clock", "setClock", "skip", "available", "setAvailable", "setPoolMe", "discordFor", "live"].filter((n) => n in K), discord: "discord" in S2,
-      inert: (() => { const el = document.createElement("div"), before = JSON.stringify(K.waivers()); const out = [K.mountClock(el), K._due(), K._waived({ pid: "x", from: "DET", salary: 750000, at: 0, until: 1 })];
-        return { hidden: el.hidden, empty: el.childNodes.length === 0, none: out.every((x) => x === undefined), same: JSON.stringify(K.waivers()) === before }; })(),
+      /* QA round 2 integration (2026-11-25): "same" compares every field the database sets on a waiver, never `left`,
+         the live countdown (expires_at minus Date.now()): the whole view raced the clock, and the commissioner persona's
+         run failed once when the two reads straddled a millisecond with an open waiver in the world */
+      inert: (() => { const rows = () => JSON.stringify(K.waivers().map((w) => [w.id, w.pid, w.from, w.salary, w.at, w.until, w.claimedBy, w.voided]));
+        const el = document.createElement("div"), before = rows(); const out = [K.mountClock(el), K._due(), K._waived({ pid: "x", from: "DET", salary: 750000, at: 0, until: 1 })];
+        return { hidden: el.hidden, empty: el.childNodes.length === 0, none: out.every((x) => x === undefined), same: rows() === before }; })(),
       ladder: [K.MIN, K.STEP, K.SIX, K.LOT_MS, K.WAIVER_MS], clock: !!document.querySelector("#cpClock"), sample: document.querySelectorAll("#cpRoot .chip.sample").length,
       cards: document.querySelectorAll("#cpRoot .dc").length, h1: t("#cpHeroIn h1"), wv: t("#cpWvH"), tn: t("#cpTnH"), pool: K.pool().length, el: K.pool().filter((x) => x.eligible).length,
       mineRow: t('#cpWv li[data-row] .cp-act'), claims: document.querySelectorAll('#cpWv [data-cp="claim"]').length, deadline: K.deadline, next: (K.nextBidNight() || {}).key,

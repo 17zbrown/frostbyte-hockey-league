@@ -123,6 +123,8 @@ const CUP = ["eefd9d4e-cd51-4747-8251-90244e1d9379", "a367a693-c97b-4d8d-98fa-45
       note: t(".lg-rec-note"), sample: all(".lg-sec .chip.sample").length,
       through: (() => { const n = S2.M.nights({ when: "past" })[0]; return n ? "runs through " + S2.M.etMonthDay(n.games[0].at) + "." : null; })(),
       star1: (() => { const li = q(".lg-stars li"); return li ? [li.querySelector(".lg-stars-n").textContent, +li.querySelector(".lg-st1 b").textContent] : null; })(),
+      /* QA round 2 (2026-11-25): a Three Stars name cuts with an ellipsis on one line, so each carries its full tag as its title */
+      starsTitled: all(".lg-stars .lg-stars-n").length > 0 && all(".lg-stars .lg-stars-n").every((a) => a.getAttribute("title") === a.textContent),
       stale: /Leading today|Four by vote, four by the record|Voted after the regular season/.test(document.body.textContent),
       cols: (() => { const xs = new Set(all(".lg-sc-n li").map((li) => Math.round(li.getBoundingClientRect().left))); return xs.size; })() };
   });
@@ -134,6 +136,7 @@ const CUP = ["eefd9d4e-cd51-4747-8251-90244e1d9379", "a367a693-c97b-4d8d-98fa-45
   A("Players of the Week run all six weeks, newest first; the Three Stars board says the last game night it counts", JSON.stringify(r.weeks) === JSON.stringify(["Week 6", "Week 5", "Week 4", "Week 3", "Week 2", "Week 1"]) && /All six weeks of the regular season\.$/.test(r.potwP) && !!r.through && r.starsP.endsWith(r.through), { weeks: r.weeks, through: r.through });
   A("each section states its finding (the Three Stars headline is the board's leader and their first stars)", JSON.stringify(r.heads.slice(0, 3)) === JSON.stringify(["Two for Boston, two for Vancouver", T.scorer + " takes four of the seven", T.scorer + ", three times"]) &&
     !!r.star1 && r.heads[3] === r.star1[0] + " has " + r.star1[1] + " first star" + (r.star1[1] === 1 ? "" : "s"), r.heads.slice(0, 2).length);
+  A("every Three Stars name carries its full tag as its title (the name cuts with an ellipsis)", r.starsTitled, r.starsTitled);
   A("the Cup panel: the trophy, the club, its regular season, linked to the club", r.cupKick === "Stanley Cup" && r.cupName === "Boston Bruins" && r.cupReg === "26-22-6 and 58 points in the regular season, 1st in the East." && r.cupHref === "#/club/BOS", r);
   A("the run to the Cup, round by round, the final's score said once", JSON.stringify(r.path) === JSON.stringify([["Opening round", "A bye, first in the East"], ["East Division final", "Swept New York, 4-0"], ["Final", "Swept Vancouver, 4-0"]]), r.path);
   A("twenty names on the Cup, each a link to the player", r.namesH === "On the Cup, 20 names" && r.names.length === 20 && r.names.every((n) => /^#\/player\/[0-9a-f-]{36}$/.test(n[1])), r.names.length);
@@ -225,14 +228,20 @@ const CUP = ["eefd9d4e-cd51-4747-8251-90244e1d9379", "a367a693-c97b-4d8d-98fa-45
     const find = (sel, media) => rules.filter((x) => x[1].split(",").map((s) => s.trim()).indexOf(sel) >= 0 && (media == null ? !x[0] : x[0].indexOf(media) >= 0));
     const press = [".lg-sc-id:active", ".lg-rec-c > a:active"].map((s) => (find(s)[0] || [])[2] || "");
     const hover = rules.filter((x) => /:hover/.test(x[1]) && /lg-sc|lg-rec/.test(x[1]) && !/reduced-motion/.test(x[0])).map((x) => x[0]);
-    const rm = [".lg-sc-id:active", ".lg-rec-c > a:active", ".lg-sc-id:hover .lg-ct-medal"].map((s) => (find(s, "reduce")[0] || [])[2] || "");
+    const rm = [".lg-sc-id:hover .lg-ct-medal"].map((s) => (find(s, "reduce")[0] || [])[2] || "");
     const tr = [".lg-sc-id", ".lg-rec-c > a"].map((s) => (find(s)[0] || [])[2] || "");
-    return { press, hover, rm, tr };
+    /* QA round 2: a press is the scale property, which the kit's ONE reduce rule removes everywhere (ui.css) */
+    const kit = rules.some((x) => /reduce/.test(x[0]) && /^\*, (\*)?::before, (\*)?::after$/.test(x[1]) && /scale: none !important/.test(x[2]));
+    const undo = [".lg-sc-id:active", ".lg-rec-c > a:active"].filter((s) => find(s, "reduce").length);
+    return { press, hover, rm, tr, kit, undo };
   });
-  A("the Cup link and the board's links press in, never from or to nothing", r.press.every((x) => /transform: scale\(0\.985\)/.test(x)), r.press);
-  A("their transitions name the property (transform), never all", r.tr.every((x) => /transition: transform/.test(x) && !/transition: all/.test(x)), r.tr);
+  /* QA round 2 (2026-11-25): these three are rewritten. They pinned the press on transform (and its hand-written Reduce
+     Motion undo); every press is the independent scale property now, as ui.css's .btn, and the kit's one reduce rule
+     (scale: none) removes it */
+  A("the Cup link and the board's links press in (the scale property, .985), never from or to nothing", r.press.every((x) => /(^|; )scale: 0\.985;/.test(x) && !/transform/.test(x)), r.press);
+  A("their transitions name the property (scale), never all", r.tr.every((x) => /transition: scale/.test(x) && !/transition: all/.test(x)), r.tr);
   A("every new hover sits behind (hover: hover) and (pointer: fine)", r.hover.length >= 2 && r.hover.every((m) => /hover: hover/.test(m) && /pointer: fine/.test(m)), r.hover);
-  A("reduced motion keeps the states without the movement", r.rm.every((x) => /transform: none/.test(x)), r.rm);
+  A("reduced motion keeps the states without the movement (the medal's hover lift undone here, every press by the kit's one rule)", r.rm.every((x) => /transform: none/.test(x)) && r.kit && !r.undo.length, { rm: r.rm, kit: r.kit, undo: r.undo });
   await done(p);
 
   console.log("## a profile: the honors column and the hero's one flag");

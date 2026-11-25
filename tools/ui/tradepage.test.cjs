@@ -75,7 +75,8 @@ const TRADES = [{ id: PEND, from: "DET", to: "BOS", note: NOTE }, { id: INC, fro
       rpcs: { s2_league: (a) => { const lb = mock.league(a); if (o.season !== 2) (lb.seasons || []).forEach((x) => { if (x.number === 1) x.status = "active"; }); return mock.ok(lb); } } });
     /* main session 2026-11-25 (release check): only while Season 1 is the season on screen. The Season 2 check (qa-club,
        open(..., {season: 2})) needs Season 1 closed as it is on production, or the world has two current seasons, Season 1
-       has no off-season, and Today says loudly that Season 2 has no titles to show (it failed "no console errors"). */
+       has no off-season, and Today says loudly that Season 2 has no titles to show (it failed "no console errors"). QA round 2
+       club: with Season 1 active there, the trade page also read Season 2 as not the current season. */
     await ctx.addInitScript((q) => { try { localStorage.setItem("s2.introSeen", "true"); localStorage.setItem("s2.survey", JSON.stringify({ done: "2026-11-24T00:00:00.000Z", from: "daily" }));
       if (q.preview) localStorage.setItem("s2.previewClub", JSON.stringify(q.preview)); } catch (e) {} }, { preview: who === "commissioner" ? c : null });
     const p = await ctx.newPage();
@@ -274,6 +275,20 @@ const TRADES = [{ id: PEND, from: "DET", to: "BOS", note: NOTE }, { id: INC, fro
     try { await S2.trade.door.block(pid, false); return { sent: true }; } catch (e) { return { code: e.code, msg: e.message }; } finally { s1.status = was; }
   }, meIds[1]);
   A("on an archive the trade block door refuses with what to do, and nothing is written", r.code === "S2_ARCHIVE" && /open it without \?season/.test(r.msg) && calls().length === before, JSON.stringify(r));
+  /* QA round 2 (2026-11-25): on an archive the page drew the whole builder, whose every door then refused; it still reads,
+     but draws no door, and its send section leads to the current season's trade page */
+  r = await x.p.evaluate(async () => {
+    const s1 = S2.M.control.seasons.filter((s) => s.number === 1)[0].settings, was = s1.status; s1.status = "complete";
+    try { S2.route(true); await new Promise((res) => setTimeout(res, 300));
+      const ticks = [...document.querySelectorAll(".tp-tick")];
+      return { send: ((S2.$("#tpSend") || {}).textContent || "").replace(/\s+/g, " "), ticks: ticks.length, live: ticks.filter((t) => t.getAttribute("aria-disabled") !== "true").length,
+        acts: document.querySelectorAll('#tpSend [data-act], #tpNote, .tp [data-act="block"], [data-act="jump"]').length, go: (S2.$("#tpSend a.btn") || { getAttribute: () => "" }).getAttribute("href") };
+    } finally { s1.status = was; S2.route(true); }
+  });
+  /* QA round 2 nit (2026-11-25): rewritten; it pinned "so Team HQ is read only here", Team HQ's sentence cut by a regex */
+  A("on an archive the trade page still reads both rosters, but no tick picks, no block or send door is drawn, and the send section leads to the current season's",
+    r.ticks > 0 && r.live === 0 && r.acts === 0 && /Trades run in Season 2/.test(r.send) && /This page shows Season 1's archive, so no trade can be sent from it\. Trades act on Season 2\./.test(r.send) && !/Team HQ|\?season/.test(r.send) && /#\/trade$/.test(r.go) && !/season=/.test(r.go), JSON.stringify(r));
+  await wait(300);
   /* audit 2026-11-09: a counter link for an offer this club sent (not one sent to it) opens a new trade, never the offer */
   await go(x, "#/trade?counter=" + PEND);
   r = await x.p.evaluate(() => ({ h1: (document.querySelector(".tp h1") || {}).textContent, flash: document.body.textContent.indexOf("That counter link is for another club's offer") >= 0, hash: location.hash, picks: document.querySelectorAll('.tp-tick[aria-pressed="true"]').length }));
@@ -287,6 +302,29 @@ const TRADES = [{ id: PEND, from: "DET", to: "BOS", note: NOTE }, { id: INC, fro
   A("the offer's players are ticked and nothing can be ticked", r.ticks === [H.ids.DET[1], H.ids.BOS[1]].sort().join() && r.dis && r.rail, JSON.stringify(r));
   r = await x.p.evaluate(() => { const els = [...document.querySelectorAll("#page .reveal")]; return { n: els.length, shown: els.filter((e) => e.classList.contains("in")).length }; });
   A("the offer drawn after its read is shown, not left hidden behind the entrance", r.n > 2 && r.shown === r.n, JSON.stringify(r));
+  /* QA round 2 A1 (2026-11-25): the offer landed after its read wrote only the bar's title, so the tab kept "Offer" */
+  r = await x.p.evaluate(() => ({ doc: document.title, bar: (S2.$("#inlineTitle") || {}).textContent, h1: (S2.$('.tp [data-w="title"]') || {}).textContent }));
+  A("once the offer lands the tab and the bar name it, as the heading does, in Team HQ", /^Offer from the /.test(r.h1) && r.doc === r.h1 + " · Team HQ · CGHL" && r.bar === r.h1 + " · Team HQ", JSON.stringify(r));
+  /* QA round 2 (2026-11-25): .tp-club, .tp-m-x and .tp-tick pressed through transform, which Reduce Motion only made
+     instant; a press is the scale property, which ui.css's one reduce rule takes away */
+  /* QA round 2 A4: the trade page's band is core's S2.clubBand (it wrote the color and the ink-band fallback by hand) */
+  r = await x.p.evaluate(() => { const h = S2.$(".tp-head"); return { band: h ? "--club:" + h.style.getPropertyValue("--club").trim() + ";--club-ink:" + h.style.getPropertyValue("--club-ink").trim() : null,
+    want: S2.clubBand(S2.M.team(S2._hq.club())), club: S2._hq.club() }; });
+  A("the trade page's band is S2.clubBand's for the acting club", r.club === "BOS" && r.band === r.want && /^--club:#[0-9a-f]{6};--club-ink:#(000|fff)$/.test(r.band), JSON.stringify(r));
+  r = await x.p.evaluate((f) => { const out = [], sheets = [...document.styleSheets].filter((sh) => (sh.href || "").split("?")[0].endsWith("/" + f));
+    const walk = (rules) => { for (const r of rules) { if (r.selectorText && /:active|is-pressing/.test(r.selectorText)) out.push({ sel: r.selectorText, transform: r.style.transform, scale: r.style.scale }); else if (r.cssRules) walk(r.cssRules); } };
+    sheets.forEach((sh) => walk(sh.cssRules)); return { n: sheets.length, presses: out }; }, "tradebuild.css");
+  A("every press in tradebuild.css is the scale property, none a transform", r.n === 1 && r.presses.length >= 4 && r.presses.every((q) => !/scale/.test(q.transform || "")) &&
+    ["tp-club", "tp-m-x", "tp-tick"].every((c) => r.presses.some((q) => q.sel.indexOf("." + c + ":active") === 0 && q.scale)), JSON.stringify(r));
+  /* QA round 2 nit (2026-11-25): under Reduce Motion ui.css takes the scale away and nothing marked the press; each dims */
+  r = await x.p.evaluate((f) => { const presses = [], dips = [], sheets = [...document.styleSheets].filter((sh) => (sh.href || "").split("?")[0].endsWith("/" + f));
+    const walk = (rules, red) => { for (const q of rules) {
+      if (q.media && /prefers-reduced-motion:\s*reduce/.test(q.media.mediaText)) walk(q.cssRules, true);
+      else if (q.cssRules && !q.selectorText) walk(q.cssRules, red);
+      else if (q.selectorText) { const sels = q.selectorText.split(",").map((y) => y.trim()), pr = sels.filter((y) => /:active|is-pressing/.test(y));
+        if (!red && q.style.scale && pr.length) presses.push(...pr); if (red && q.style.opacity) dips.push(...sels); } } };
+    sheets.forEach((sh) => walk(sh.cssRules, false)); return { n: sheets.length, presses, missing: presses.filter((y) => dips.indexOf(y) < 0) }; }, "tradebuild.css");
+  A("under Reduce Motion every scale press in tradebuild.css dims instead (the house press)", r.n === 1 && r.presses.length >= 3 && r.missing.length === 0, r);
   script("accept_trade", mock.fail("23514", MINIMUM, "below_minimum"));
   await x.p.click('#tpSend [data-act="accept"]'); await confirmSheet(x); await wait(500);
   r = { err: await sheetErr(x), open: await x.p.evaluate(() => !!document.querySelector(".sheet")), h: await h(x) };
@@ -379,6 +417,10 @@ const TRADES = [{ id: PEND, from: "DET", to: "BOS", note: NOTE }, { id: INC, fro
   r = await x.p.evaluate(() => ({ view: S2.M.view.season, none: S2.M.view.empty.finals, nullPp: S2.M.standings("league").every((s) => s.pp_pct == null), send: (S2.$("#tpSend") || {}).textContent || "" }));
   const send0 = r.send;
   A("the recorded Season 2 is on screen, with no final and no power play yet", r.view === 2 && r.none && r.nullPp, JSON.stringify(r).slice(0, 300));
+  /* QA round 2 (2026-11-25): reached straight from its address the page never asked the market to read, so its cap room
+     was the model's and M.draftDone knew only the league read */
+  r = await x.p.waitForFunction(() => S2.market.status().loaded, null, { timeout: 5000 }).then(() => true, () => false);
+  A("the trade page asks the market to read itself", r);
   await x.p.click('[data-act="partner"][data-v="BOS"]'); await wait(600);
   r = await x.p.evaluate(() => ({ clubs: ((S2.$('[data-w="clubs"]') || {}).textContent || "").replace(/\s+/g, " "), send: (S2.$("#tpSend") || {}).textContent || "",
     rail: [...document.querySelectorAll(".tp-club-r")].map((e) => e.textContent), bold: document.querySelectorAll('[data-w="clubs"] td.lead').length, want: "Note to the " + S2.M.team("BOS").name }));

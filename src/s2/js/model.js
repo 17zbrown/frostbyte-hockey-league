@@ -316,10 +316,18 @@ window.S2.fillModel = function (D) {
   M.careerGames = obj(D.career);
   /* games a member played in seasons other than the one on screen (QA functional 2026-11-25: on Season 2 a Season 1
      veteran's profile read "No league games yet" beside a rating earned in 14 games). careerGames is every season's
-     total; the season on screen's lines are taken off.
-     shortcut: exact while the season on screen has no two-role game (a game in both roles counts once in careerGames and
-     in both lines); s2_league carrying per-season career lines is the durable fix (QA core report) */
-  M.careerEarlier = (pid) => { const p = P[pid], here = p ? Math.max.apply(null, [0].concat(p.roles.map((r) => num(p.lines[r].gp)))) : 0; return Math.max(0, num(M.careerGames[pid]) - here); };
+     total; the season on screen's games are taken off.
+     QA round 2 (league, 2026-11-25): "the season on screen's games" are counted the way careerGames is
+     (career_games_played: distinct final, unvoided games, every stage): the games in this season's box scores with a
+     line of theirs. It took the larger of the two season lines before, which is regular season only and folds a
+     two-role player's games in goal into their skater games, so on the Season 1 archive a skater who also played in
+     goal read "3 games in other seasons", and every playoff game counted as another season's.
+     shortcut: the seasons themselves are not named (careerGames is one total); s2_league carrying per-season career
+     lines is the durable fix (QA core report), and then the profile can list each season's games */
+  M.careerEarlier = (pid) => {
+    const here = gamesOf(pid).filter((gid) => GAME[gid] && GAME[gid].isFinal && !GAME[gid].voided).length;
+    return Math.max(0, num(M.careerGames[pid]) - here);
+  };
   /* every member the league read lists (body.people), for a form that picks a member by name: M.players holds only the
      members with a roster spot, a line, a rating or a sign-up (QA nits 2026-11-25: six could not be written to) */
   M.members = arr(D.people).map((x) => ({ id: x.id, tag: x.gamertag || x.display_name || null, role: x.role || null })).filter((x) => x.id && x.tag)

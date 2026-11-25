@@ -59,6 +59,10 @@ function body(args, o, seats) {
     if (b.box && b.box.byGame) AHEAD.forEach((id) => { delete b.box.byGame[id]; });
   }
   if (b.draft) b.draft.state = o.draft ? Object.assign({}, b.draft.state, { status: o.draft }) : null;
+  /* QA round 2 (2026-11-25): an archive is read only (hq.js archErr: the season on screen is not the season the site opens
+     on). These checks drive Team HQ's tools on the recorded Season 1, so Season 1 is the current season here, as the trade
+     and tradepage suites hold it; o.archive keeps it complete, an archive beside Season 2 (the recording as it stands) */
+  (b.seasons || []).forEach((x) => { if (x.number === 1) x.status = o.archive ? "complete" : "active"; });
   /* the Season 2 cap as production holds it since v4.58 ($30M, the commissioner's ruling of 2026-11-09); the recorded
      league read predates v4.58 and still says $50M */
   (b.seasons || []).forEach((x) => { if (x.number === 2) x.salary_cap = 30000000; });
@@ -68,6 +72,8 @@ function body(args, o, seats) {
   if (o.bosGm) (b.teams || []).forEach((t) => { if (t.code === "BOS") t.gm_profile_id = o.bosGm; });
   if (o.noGames) { b.games = []; if (b.box) b.box.byGame = {}; }
   if (o.noColor) (b.teams || []).forEach((t) => { if (t.code === o.noColor) t.color = null; });
+  /* QA round 2 A4: o.color = [code, color] stores that club's color as given (a short hex, say) */
+  if (o.color) (b.teams || []).forEach((t) => { if (t.code === o.color[0]) t.color = o.color[1]; });
   return b;
 }
 /* each table's columns, so a row that leaves one out still answers the page's select (the mock answers 42703 otherwise) */
@@ -93,6 +99,8 @@ function pageSetup() {
     window.__calls.push({ rpc, args: JSON.parse(JSON.stringify(args || {})), approval: o.approval || null, action: o.action || null, queueArgs: o.queueArgs ? JSON.parse(JSON.stringify(o.queueArgs)) : null, sections: o.sections || [] });
     return w0.apply(this, arguments).then((res) => { window.__rereads.push((o.sections || []).join(",")); return res; }); };
   window.__idOf = (code) => (S2.data.body.teams.filter((t) => t.code === code)[0] || {}).id;
+  /* QA round 2 A10: every front-office read is counted at the site's one read door (S2.rd) */
+  const rd0 = S2.rd; window.__rd = 0; S2.rd = function () { window.__rd++; return rd0.apply(this, arguments); };
   if (S2.market) {
     const later = (v) => new Promise((res) => setTimeout(() => res(v), 200));
     S2.market.waiveDoor = (pid) => { window.__waive.push(["waive", pid]); return later(window.__waiveAns || { ok: true, queued: false, problems: [] }); };
@@ -116,18 +124,23 @@ async function liveSuite(b, errors) {
       x.requested_by === "@gm" ? { requested_by: seats.gm } : x.requested_by === "@me" ? { requested_by: me } : {},
       x.nominee_id === "@roster0" ? { nominee_id: R0, nominee: { gamertag: TAG[R0] } } : {}));
     const pick = (code) => spotsOf(code).filter((id) => [seats.owner, seats.gm, seats.agm].indexOf(id) < 0)[0];
+    const H0 = Date.now();
     H = { ctx, seats, delay: o.delay || 0, reads: [], fail: Object.assign({}, o.fail), T: {
       team_mgmt_policy: o.policy ? [{ team_id: TIDS.DET, policy: o.policy, updated_at: "2026-11-20T12:00:00Z" }] : [],
       team_mgmt_moves: fill(o.moves), management_applications: fill(o.apps), club_notices: fill(o.notices),
       action_requests: (o.reqs || []).map((x) => Object.assign({ team_id: TIDS.DET, route: "manager", type: "trade_request", created_at: new Date(Date.now() - 7200000).toISOString() }, x, x.profile_id === "@roster0" ? { profile_id: R0 } : {})),
       action_messages: (o.msgs || []).map((x) => Object.assign({ created_at: new Date(Date.now() - 3600000).toISOString(), deleted_at: null }, x)),
-      trades: (o.trades || []).map((x) => { const mine = x.dir === "in";
-        return { id: x.id, season_id: SID, status: x.status || "proposed", note: x.note || null, created_at: new Date(Date.now() - 5400000).toISOString(), updated_at: new Date(Date.now() - 3600000).toISOString(),
+      /* each listed offer a second older than the one before it, so "newest first" is the list's own order (two rows stamped
+         by two Date.now() calls could tie or flip by a millisecond, and the answered list came back either way) */
+      trades: (o.trades || []).map((x, i) => { const mine = x.dir === "in", t0 = H0 - i * 1000;
+        return { id: x.id, season_id: SID, status: x.status || "proposed", note: x.note || null, created_at: new Date(t0 - 5400000).toISOString(), updated_at: new Date(t0 - 3600000).toISOString(),
           from_team_id: mine ? TIDS[x.with] : TIDS.DET, to_team_id: mine ? TIDS.DET : TIDS[x.with], offered_profile_ids: [mine ? pick(x.with) : pick("DET")], requested_profile_ids: [mine ? pick("DET") : pick(x.with)],
           offered_pick_ids: [], requested_pick_ids: [] }; }) } };
-    const tables = { game_lineups: [], availability: [], market_pool_requests: [], team_lines: [], team_line_plan: [], game_vetoes: [], games_public: [] };
+    /* game_vetoes answers o.fail.game_vetoes's refusal while it is set (QA round 2: the servers block's failed read) */
+    const tables = { game_lineups: [], availability: [], market_pool_requests: [], team_lines: [], team_line_plan: [], games_public: [],
+      game_vetoes: () => (H.fail.game_vetoes ? mock.fail("42501", H.fail.game_vetoes) : []) };
     Object.keys(COLS).forEach((t) => { tables[t] = (q) => { H.reads.push({ t, f: filtersOf(q.url) }); return H.fail[t] ? mock.fail("42501", H.fail[t]) : shaped(t, H.T[t] || []); }; });
-    await mock.install(ctx, { live: true, persona: PERSONA[who][0], session: PERSONA[who][1], writes: mockWrites(o.answers, o.delay), tables, rpcs: { s2_league: (a) => mock.ok(body(a, o, seats)) } });
+    await mock.install(ctx, { live: true, persona: PERSONA[who][0], session: PERSONA[who][1], writes: mockWrites(o.answers, o.delay), tables, rpcs: Object.assign({ s2_league: (a) => mock.ok(body(a, o, seats)) }, o.rpcs) });
     await ctx.addInitScript((q) => { try { localStorage.setItem("s2.introSeen", "true"); localStorage.setItem("s2.survey", JSON.stringify({ done: "2026-11-24T00:00:00.000Z", from: "daily" }));
       if (q.preview) localStorage.setItem("s2.previewClub", JSON.stringify(q.preview)); } catch (e) {}
       if (q.now) { window.__now = q.now; Date.now = () => window.__now; } }, { preview: who === "commissioner" ? o.preview || "DET" : null, now: o.eve ? AT1 - 2 * 3600e3 : null });
@@ -162,7 +175,8 @@ async function liveSuite(b, errors) {
     r = await x.p.evaluate(() => ({ pane: S2.$(".hqx-pane").textContent, sample: !!S2.$(".hqx-pane .chip.sample"), tid: window.__idOf("DET"),
       seats: [...document.querySelectorAll('[data-w="seats"] .hqx-seat')].map((e) => e.dataset.seat + ":" + [...e.querySelectorAll("button")].map((b) => b.dataset.act).join("+")),
       ap: [...document.querySelectorAll('[data-w="approvals"] [data-act="mv-decide"]')].map((b) => b.dataset.id + b.dataset.v), seg: document.querySelectorAll('[data-w="perms"] .hqx-perm-seg').length }));
-    r.reads = reads(x);
+    r.reads = reads(x); r.rd = await x.p.evaluate(() => window.__rd);
+    A("the front office's reads go through the site's one read door, S2.rd (QA round 2 A10)", r.rd >= 8, r.rd);
     A("the front office reads the club's own records: policy, pending and decided moves, nominations, notices, each by its team id",
       ["team_mgmt_policy", "team_mgmt_moves", "management_applications", "club_notices"].every((t) => r.reads.some((q) => q.indexOf(t + "|eq:team_id:" + r.tid) === 0)) &&
       r.reads.some((q) => /team_mgmt_moves\|.*eq:status:pending/.test(q)) && r.reads.some((q) => /team_mgmt_moves\|.*neq:status:pending/.test(q)), r.reads);
@@ -471,6 +485,22 @@ async function liveSuite(b, errors) {
     }
     await close(x);
 
+    /* QA round 2 (2026-11-25): a refused picks read was a toast, then "Not named" on every select, where a pick would have
+       saved the other half of the side as nothing; the block says the refusal and offers Try again (S2.lobby.retryPicks) */
+    console.log("## live: a server picks read the league refuses is said in the block, with Try again");
+    x = await open("owner", "#/hq?tab=nights", { draft: "complete", eve: true, fail: { game_vetoes: "permission denied for table game_vetoes" } });
+    await wait(400);
+    r = await x.p.evaluate(() => ({ t: ((S2.$('[data-w="servers"]') || {}).textContent || "").replace(/\s+/g, " "), sel: document.querySelectorAll('[data-w="servers"] select[data-srv]').length, retry: !!S2.$('[data-w="servers"] [data-act="srv-retry"]'), err: S2.lobby.pickErr() }));
+    A("a refused picks read is said in the servers block with the league's words and Try again, and no select is drawn over it",
+      /Your server picks could not be read/.test(r.t) && /permission denied for table game_vetoes\. Nothing was changed/.test(r.t) && r.retry && r.sel === 0 && !!r.err, r);
+    /* QA round 2 nit (2026-11-25): the body opened on the database's lowercase sentence; plain words lead now */
+    A("...in plain words first, the database's words kept after them", /could not be read\s*The league did not answer as expected\. The league said: permission denied for table game_vetoes\. Nothing was changed\./.test(r.t), r);
+    delete H.fail.game_vetoes;
+    await x.p.evaluate(() => { window.__secN = S2.$('[data-w="servers"]'); S2.$('[data-act="srv-retry"]').click(); }); await wait(600);
+    r = await x.p.evaluate(() => ({ sel: document.querySelectorAll('[data-w="servers"] select[data-srv]').length, err: S2.lobby.pickErr(), same: window.__secN === S2.$('[data-w="servers"]'), t: ((S2.$('[data-w="servers"]') || {}).textContent || "") }));
+    A("Try again reads the picks again and the selects come back in place", r.sel >= 2 && !r.err && r.same && !/could not be read/.test(r.t), r);
+    await close(x);
+
     console.log("## live: server picks are the database's (S2.lobby.savePick), and the lobby repaints the block in place");
     x = await open("owner", "#/hq?tab=nights", { draft: "complete", eve: true });
     await x.p.evaluate(() => {
@@ -543,6 +573,14 @@ async function liveSuite(b, errors) {
     await x.p.evaluate(() => [...document.querySelectorAll('.sheet [data-x="DET"]')].pop().click()); await wait(900);
     r = await x.p.evaluate(() => ({ hq: S2._hq.club(), market: S2.market.club(), kept: JSON.parse(localStorage.getItem("s2.previewClub")), banner: (S2.$(".hqx-banner") || {}).textContent || "" }));
     A("View as Detroit: Team HQ, the market and the remembered club all act for Detroit", r.hq === "DET" && r.market === "DET" && r.kept === "DET" && /Viewing Detroit as its Owner/.test(r.banner), r);
+    await close(x);
+    /* QA round 2 nit (2026-11-25): Team HQ asked the market to read before it set the preview club, so a commissioner's
+       first visit read the market for no club, then again for the club on screen */
+    const MC = [];
+    x = await open("commissioner", "#/hq?tab=overview", { draft: "complete", preview: "BOS", rpcs: { market_calendar: () => { MC.push(1); return mock.ok({}); } } });
+    await x.p.waitForFunction(() => S2.market.status().loaded, null, { timeout: 5000 }).catch(() => {}); await wait(700);
+    r = { reads: MC.length, market: await x.p.evaluate(() => S2.market.club()) };
+    A("a commissioner's first Team HQ visit reads the market once, for the club on screen", r.reads === 1 && r.market === "BOS", r);
     await close(x);
 
     console.log("## live: a claim is the market's (S2.market.claim), said only once the database confirms it");
@@ -673,9 +711,23 @@ async function liveSuite(b, errors) {
   A("the playoff picture waits for the first final: no place, magic number, games left or empty form row", /The race starts at puck drop/.test(r.po) && !/Magic number|games? left|\d(st|nd|rd|th) in the/i.test(r.po) && !r.last5, r.po);
   A("the forfeits claim nothing before a game", /No games played yet/.test(r.ff) && !/so far|went ahead|Not one/.test(r.ff), r.ff);
   A("About this data is core's one disclosure (S2.about), not Team HQ's own", r.about && !r.old, r);
+  const titles = () => x.p.evaluate(() => ({ doc: document.title, bar: (S2.$("#inlineTitle") || {}).textContent }));
+  r = await titles();
+  A("Team HQ's root names the workspace through S2.setTitle (QA round 2 A1)", r.doc === "Team HQ · CGHL" && r.bar === "Team HQ", r);
   await x.p.evaluate((h) => { location.hash = h; }, "#/hq?tab=roster"); await wait(500);
+  r = await titles();
+  A("a Team HQ tab names its section and the workspace: \"Roster & cap · Team HQ · CGHL\"", r.doc === "Roster & cap · Team HQ · CGHL" && r.bar === "Roster & cap · Team HQ", r);
   r = await x.p.evaluate(() => ({ pre: document.querySelectorAll(".hqx-min.pre").length, short: document.querySelectorAll(".hqx-min.short").length, icons: document.querySelectorAll(".hqx-min .hqx-min-i").length, t: (S2.$(".hqx-mins") || {}).textContent || "" }));
   A("before the draft the minimums are quiet: no red rule, no x, From the draft on", r.pre === 3 && r.short === 0 && r.icons === 0 && (r.t.match(/From the draft on/g) || []).length === 3, r);
+  await close(x);
+  /* QA round 2 A6 (2026-11-25): "the draft is complete" is the model's one definition (M.draftDone): the league read's
+     draft_state, or the market's own draft_done once read. Team HQ read draft_state alone, so a draft the market called
+     done still drew the minimums as to come */
+  x = await open("owner", "#/hq?tab=roster", { draft: null, noGames: true, rpcs: { market_calendar: mock.ok({ draft_done: true }) } });
+  r = await x.p.evaluate(async () => { await S2.market.ensure(); S2.route(true); await new Promise((res) => setTimeout(res, 300));
+    return { done: S2.M.draftDone(), state: S2.M.draft.state, pre: document.querySelectorAll(".hqx-min.pre").length, live: document.querySelectorAll(".hqx-min.ok, .hqx-min.short").length, mins: S2._hq.minsInForce() }; });
+  A("the market's word that the draft is done puts the minimums in force (M.draftDone), with no draft_state in the league read", r.done && !r.state && r.mins && r.pre === 0 && r.live === 3, r);
+  await x.p.evaluate((h) => { location.hash = h; }, "#/hq?tab=roster"); await wait(300);
   await x.p.evaluate((h) => { location.hash = h; }, "#/hq?tab=trades"); await wait(500);
   r = await x.p.evaluate(() => ({ h: (S2.$('[data-w="tblockh"]') || {}).textContent || "", b: (S2.$('[data-w="tblock"]') || {}).textContent || "" }));
   A("an empty trade block says so in English under the All filter", /Nobody on the block/.test(r.h) && /Nobody is on the block right now\./.test(r.b) && !/No all/.test(r.b), r);
@@ -687,11 +739,122 @@ async function liveSuite(b, errors) {
     S2.$(".hqx-pane").appendChild(box); const inp = box.querySelector("input"); inp.focus();
     const acc = getComputedStyle(box.querySelector("[data-acc]")).color, bs = getComputedStyle(box.querySelector(".hqx-bd-note")).boxShadow; box.remove(); return { acc, bs }; });
   A("the focused bid note carries the accent edge, the site's input focus", r.bs.indexOf(r.acc) >= 0 && /inset/.test(r.bs), r);
+  /* QA round 2 (2026-11-25): Team HQ never asked for the market, and with no bid night on record (the schedule not set)
+     the tab said "No bid nights left this season" and "Saturday bidding runs only before the movement deadline" */
+  await x.p.waitForFunction(() => S2.market.status().loaded, null, { timeout: 5000 }).catch(() => {});
+  await wait(200);
+  r = await x.p.evaluate(() => ({ loaded: S2.market.status().loaded, nights: S2.market.bidNights().length, h: (S2.$('[data-w="bhead"]') || {}).textContent || "",
+    nav: ([...document.querySelectorAll(".hqx-nav-row")].filter((y) => /Bidding/.test(y.textContent))[0] || {}).textContent || "" }));
+  A("Team HQ reads the market itself, and with no bid night on record says none exist yet and when they come (Rule S2.6)",
+    r.loaded && r.nights === 0 && /No bid nights yet/.test(r.h) && /Bid nights appear once the Season 2 schedule is set \(Rule S2\.6\)\./.test(r.h) && /No bid nights yet/.test(r.nav), r);
+  A("...never that none are left, nor that bidding runs only before the movement deadline", !/left|only before the movement deadline/i.test(r.h + " " + r.nav), r);
   await close(x);
   /* QA worst 9: teams.color is nullable; the band drew white type on the light canvas */
   x = await open("owner", "#/hq", { noColor: "DET" });
   r = await x.p.evaluate(() => { const h = S2.$(".hqx-band"); return { style: h.getAttribute("style"), bg: getComputedStyle(h).backgroundColor, ink: getComputedStyle(S2.$(".hqx-band h1")).color }; });
   A("a club with no color takes the ink band, never white type on the light canvas", /--club:\s*var\(--ink-band\)/.test(r.style) && r.bg !== "rgba(0, 0, 0, 0)" && r.ink === "rgb(255, 255, 255)", r);
+  await close(x);
+  /* QA round 2 A4: the band is core's S2.clubBand, which spells a short hex out; Team HQ wrote its own band by hand */
+  x = await open("owner", "#/hq", { color: ["DET", "#c00"] });
+  /* the declared band, read off the element (the entrance adds its own --i to the same style attribute) */
+  r = await x.p.evaluate(() => { const h = S2.$(".hqx-band"); return { band: "--club:" + h.style.getPropertyValue("--club").trim() + ";--club-ink:" + h.style.getPropertyValue("--club-ink").trim(),
+    want: S2.clubBand(S2.M.team("DET")), bg: getComputedStyle(h).backgroundColor }; });
+  A("Team HQ's band is S2.clubBand's: a club stored as #c00 keeps its red, with white ink", r.band === r.want && r.band === "--club:#cc0000;--club-ink:#fff" && r.bg === "rgb(204, 0, 0)", r);
+  await close(x);
+
+  /* QA round 2 (2026-11-25): after the movement deadline a club adds players game by game (Rule S2.5: per-game requests
+     since v4.59); the Bidding tab said "nightly requests only" */
+  const ago = (d) => new Date(Date.now() - d * 86400e3).toISOString();
+  x = await open("owner", "#/hq?tab=bidding", { draft: "complete", rpcs: { market_calendar: mock.ok({ market: true, deadline: ago(1), moves_locked: true, draft_done: true, game_nights: [],
+    bid_nights: [{ night: ago(4).slice(0, 10), skipped: false, why: null, opens_at: ago(4), new_until: ago(3.95), id: null, state: "missed", paused: false }], next_bid_night: null }) } });
+  r = await x.p.evaluate(async () => { await S2.market.ensure(); S2.route(true); await new Promise((res) => setTimeout(res, 300)); return { st: (S2.market.room() || {}).state, t: (S2.$('[data-w="bhead"]') || {}).textContent || "" }; });
+  A("after the movement deadline the Bidding tab points to single-game requests from the training camp pool (Rule S2.5), never nightly ones",
+    r.st === "closed" && /clubs add players only through single-game requests from the training camp pool \(Rule S2\.5\)\./.test(r.t) && !/nightly/i.test(r.t), r);
+  await close(x);
+
+  /* QA round 2 (2026-11-25): a press is the scale property, never transform (the house rule, ui.css .btn), so ui.css's one
+     reduce rule takes it away; .hqx-av-b.is-pressing and the other presses in hq.css scaled through transform */
+  console.log("## presses ride the scale property; the medal's focus ring is the band's ink");
+  x = await open("commissioner", "#/hq", { preview: "PIT" });
+  r = await x.p.evaluate((f) => { const out = [], sheets = [...document.styleSheets].filter((sh) => (sh.href || "").split("?")[0].endsWith("/" + f));
+    const walk = (rules) => { for (const r of rules) { if (r.selectorText && /:active|is-pressing/.test(r.selectorText)) out.push({ sel: r.selectorText, transform: r.style.transform, scale: r.style.scale }); else if (r.cssRules) walk(r.cssRules); } };
+    sheets.forEach((sh) => walk(sh.cssRules)); return { n: sheets.length, presses: out }; }, "hq.css");
+  A("every press in hq.css is the scale property, none a transform", r.n === 1 && r.presses.length >= 12 && r.presses.every((q) => !/scale/.test(q.transform || "")) && r.presses.filter((q) => q.scale).length >= 8, r);
+  const pressing = () => x.p.evaluate(() => { const b = document.createElement("button"); b.className = "hqx-av-b is-pressing"; b.textContent = "Available"; S2.$(".hqx-pane").appendChild(b);
+    const l = document.createElement("div"); l.className = "hqx-bd is-lifted-row"; S2.$(".hqx-pane").appendChild(l);
+    const cs = getComputedStyle(b), o = { scale: cs.scale, transform: cs.transform, opacity: cs.opacity, lift: getComputedStyle(l).scale }; b.remove(); l.remove(); return o; });
+  r = await pressing();
+  A("an availability button held down sits at .96 on the scale property, its transform untouched", r.scale === "0.96" && r.transform === "none" && r.opacity === "1", r);
+  /* QA round 2 nit (2026-11-25): the bid board's drag lift was an inline transform's scale(1.015), which Reduce Motion kept */
+  A("a lifted bid board row rises on the scale property (1.015)", r.lift === "1.015", r);
+  await x.p.emulateMedia({ reducedMotion: "reduce" });
+  r = await pressing();
+  /* QA round 2 nit (2026-11-25): with the scale gone nothing marked the press; it dims instead, the house press (ui.css .btn) */
+  A("...and under Reduce Motion it does not scale at all, and dims instead (the house press)", r.scale === "none" && r.transform === "none" && r.opacity === "0.7", r);
+  A("...and the lifted row keeps its shadow but loses the scale", r.lift === "none", r);
+  await x.p.emulateMedia({ reducedMotion: null });
+  r = await x.p.evaluate((f) => { const presses = [], dips = [], sheets = [...document.styleSheets].filter((sh) => (sh.href || "").split("?")[0].endsWith("/" + f));
+    const walk = (rules, red) => { for (const q of rules) {
+      if (q.media && /prefers-reduced-motion:\s*reduce/.test(q.media.mediaText)) walk(q.cssRules, true);
+      else if (q.cssRules && !q.selectorText) walk(q.cssRules, red);
+      else if (q.selectorText) { const sels = q.selectorText.split(",").map((y) => y.trim()), pr = sels.filter((y) => /:active|is-pressing/.test(y));
+        if (!red && q.style.scale && pr.length) presses.push(...pr); if (red && q.style.opacity) dips.push(...sels); } } };
+    sheets.forEach((sh) => walk(sh.cssRules, false)); return { n: sheets.length, presses, missing: presses.filter((y) => dips.indexOf(y) < 0) }; }, "hq.css");
+  A("under Reduce Motion every scale press in hq.css dims instead", r.n === 1 && r.presses.length >= 9 && r.missing.length === 0, r);
+  const hqSrc = require("fs").readFileSync(require("path").join(process.env.S2_ROOT, "js/pages/hq.js"), "utf8");
+  A("no inline transform in hq.js carries a scale (the lift is hq.css's, on the scale property)", !/style\.transform\s*=[^;]*scale\(/.test(hqSrc));
+  /* the medal is a link, so it took the accent and the band's currentColor ring drew in it: 1.99:1 on Pittsburgh's gold */
+  await x.p.evaluate(() => { const m = S2.$(".hqx-medal"), b = document.createElement("button"); b.id = "__pre"; m.parentNode.insertBefore(b, m); b.focus(); });
+  await x.p.keyboard.press("Tab");
+  r = await x.p.evaluate(() => {
+    const m = S2.$(".hqx-medal"), band = S2.$(".hqx-band"), on = document.activeElement === m && m.matches(":focus-visible"), cs = getComputedStyle(m);
+    const rgb = (c) => (c.match(/[\d.]+/g) || []).slice(0, 3).map(Number), lum = (c) => { const v = rgb(c).map((x) => { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); }); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
+    const a = lum(cs.outlineColor), b = lum(getComputedStyle(band).backgroundColor), ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    document.getElementById("__pre").remove();
+    return { on, ring: cs.outlineColor, w: cs.outlineWidth, ink: getComputedStyle(band).color, bg: getComputedStyle(band).backgroundColor, ratio: +ratio.toFixed(2) };
+  });
+  A("Pittsburgh's medal, focused from the keyboard, rings in the band's ink at 3:1 or more against the gold", r.on && r.w === "3px" && r.ring === r.ink && r.ratio >= 3, r);
+  await close(x);
+
+  /* QA round 2 (2026-11-25): on an archive (?season=1 beside Season 2) Team HQ drew every tool, and its block door wrote the
+     archived season's roster row (RLS does not stop it). Now no write control is drawn and every door refuses with
+     S2_ARCHIVE before anything is sent */
+  console.log("## an archive: Team HQ is read only");
+  const WRITE_SEL = ['[data-act="seat-nominate"]', '[data-act="seat-remove"]', '[data-act="nom-withdraw"]', '[data-act="mv-decide"]', '[data-act="mv-withdraw"]', '[data-act="perm-save"]', '.hqx-perm-seg',
+    '[data-act^="tr-"]', '[data-act="rq"]', '[data-act="rq-reply"]', '[data-act="block-list"]', '[data-act="block"]', '[data-act="claim"]', '[data-act="badd"]', '[data-act="ceil"]', '[data-act="bmove"]',
+    '[data-act="bremove"]', '[data-act="sheet"]', '[data-act="file-night"]', '[data-flow="trade"]', "select[data-srv]", "[data-bnote]", "[data-bgrip]"].join(",");
+  const RQ = [{ id: "rq-1", profile_id: "@roster0", status: "pending", subject: "Trade request", details: "Wants a move." }];
+  const ARCH_TR = [{ id: "tr-in", dir: "in", with: "BOS" }, { id: "tr-out", dir: "out", with: "PIT" }];
+  x = await open("owner", "#/hq?tab=office", { archive: true, draft: "complete", vacateAgm: true, moves: MOVES, notices: NOTICES, trades: ARCH_TR, reqs: RQ });
+  await x.p.waitForFunction(() => !document.querySelector('[data-w="approvals"] .empty-state, [data-w="seats"] .empty-state'), null, { timeout: 5000 }).catch(() => {});
+  r = { tabs: {} };
+  for (const tab of ["office", "overview", "roster", "trades", "bidding", "lineups", "nights"]) {
+    await x.p.evaluate((h) => { location.hash = h; }, "#/hq?tab=" + tab); await wait(450);
+    r.tabs[tab] = await x.p.evaluate((sel) => [...document.querySelectorAll(".hqx " + sel)].map((e) => e.getAttribute("data-act") || e.getAttribute("data-flow") || e.className || e.tagName), WRITE_SEL);
+  }
+  r.banner = await x.p.evaluate(() => { const b = S2.$(".hqx-banner.hqx-ro"), a = b && b.querySelector("a"); return b ? { t: b.textContent, href: a && a.getAttribute("href") } : null; });
+  /* QA round 2 nit (2026-11-25): the nav's Bidding row read the current market ("No bid nights yet") beside the tab's
+     "Bidding runs in Season 2" */
+  r.bidNav = await x.p.evaluate(() => { const row = [...document.querySelectorAll(".hqx-nav-row")].filter((y) => /Bidding/.test(y.textContent))[0]; return row ? { t: row.textContent.replace(/\s+/g, " "), badge: !!row.querySelector(".badge, .hqx-badge, [class*=badge]") } : null; });
+  A("on an archive the nav's Bidding row says where bidding runs, with no badge, as its pane does", r.bidNav && /Runs in Season 2/.test(r.bidNav.t) && !/No bid nights|eligible target|Bid night /.test(r.bidNav.t) && !r.bidNav.badge, r.bidNav);
+  r.office = await x.p.evaluate(() => { location.hash = "#/hq?tab=office"; return new Promise((res) => setTimeout(() => res((S2.$(".hqx-pane") || {}).textContent || ""), 450)); });
+  A("on an archive no tab draws a write control: seats, approvals, permissions, offers, requests, the block, the board, sheets, picks",
+    Object.keys(r.tabs).every((k) => r.tabs[k].length === 0), r.tabs);
+  A("the band says the archive is read only and leads to the current season's Team HQ", r.banner && /Season 1's archive: Team HQ is read only here\. Its tools act on Season 2\./.test(r.banner.t) && /#\/hq$/.test(r.banner.href || "") && !/season=/.test(r.banner.href || ""), r.banner);
+  A("the records still read: the seats, the waiting moves and the permissions as a table", /Recent decisions/.test(r.office) && /put a winger on the trade block/.test(r.office) && /What your managers may do|What the Owner lets each seat do/.test(r.office), r.office.slice(0, 200));
+  const n0 = (await calls(x)).length, archPid = await x.p.evaluate(() => S2.M.roster("DET").active.filter((p) => !p.seat)[0].id);
+  r = await x.p.evaluate((pid) => new Promise((res) => S2._hq.blockLive(S2.M.player(pid), true, (e) => res(e ? { code: e.code, msg: e.message } : { sent: true }))), archPid);
+  A("the block door refuses with S2_ARCHIVE and the way out", r.code === "S2_ARCHIVE" && /open Team HQ without \?season in the address/.test(r.msg), r);
+  await x.p.evaluate(() => { window.__toasts = []; location.hash = "#/hq?tab=office"; }); await wait(400);
+  await x.p.evaluate(() => { const el = document.createElement("button"); el.dataset.act = "seat-nominate"; el.dataset.seat = "GM"; S2.$(".hqx-pane").appendChild(el); el.click(); el.remove(); });
+  await x.p.evaluate((pid) => { S2.claimDoor(pid); S2._lineups.openSheet("DET", S2.M.games.filter((g) => g.home === "DET")[0].id); }, archPid); await wait(400);
+  r = { t: await toasts(x), sheet: await x.p.evaluate(() => !!document.querySelector(".sheet")), n: (await calls(x)).length };
+  A("a write action reached anyway (a nomination, a claim, a lineup sheet) is refused in the archive's words, with no sheet and nothing sent",
+    r.t.filter((q) => /^err:This page shows Season 1's archive/.test(q)).length === 3 && !r.sheet && r.n === n0, r);
+  await x.p.evaluate((h) => { location.hash = h; }, "#/hq?tab=roster"); await wait(400);
+  await x.p.click('[data-act="player"][data-pid="' + archPid + '"]'); await wait(450);
+  r = await x.p.evaluate(() => { const sh = [...document.querySelectorAll(".sheet")].pop(); return sh ? { rows: [...sh.querySelectorAll("[data-x]")].map((e) => e.dataset.x), t: sh.textContent } : null; });
+  A("a player's sheet on an archive shows the record and their profile, with no block, trade or waiver door", r && r.rows.length === 0 && /Open profile/.test(r.t) && /read only here/.test(r.t), r);
   await close(x);
 
   console.log("## the phone");

@@ -211,6 +211,9 @@ const A = (name, cond, more) => { console.log((cond ? "PASS " : "FAIL ") + name 
   ({ ctx, p } = await open("gm"));
   r = await p.evaluate(() => document.querySelector("#cpHeroIn .lede-l").textContent);
   A("after the movement deadline, the hero says bidding ended at it", /Bidding ended at the movement deadline/.test(r) && !/No Saturday bidding is left/.test(r), r.length);
+  /* QA round 2 (2026-11-25): requests are per game since v4.59 (Rule S2.5); the hero said "by nightly request only" */
+  A("...and that clubs now add players only through single-game requests from the training camp pool (Rule S2.5), never nightly ones",
+    /clubs now add players only through single-game requests from the training camp pool \(Rule S2\.5\)\./.test(r) && !/nightly/i.test(r), r);
   await ctx.close();
 
   /* QA 2026-11-25 (phone, worst case and function lenses): no night tonight and none ahead read as the end of the season,

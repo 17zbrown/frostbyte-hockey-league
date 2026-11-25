@@ -76,7 +76,7 @@ html:has(.cc-tabs) .navbar.scrolled { border-bottom-color: transparent; }
 .cc-dot.ok { background: var(--win); }
 .cc-dot.warn { background: var(--warn); }
 .cc-dot.loss { background: var(--loss); }
-.cc-dot.live { background: var(--live); animation: pulse 1.6s var(--ease-out) infinite; }
+.cc-dot.live { background: var(--live); }   /* its ring is ui.css's live-ring, on its own layer (QA round 2: the dead "pulse" is gone) */
 .cc-warn { color: var(--warn-ink); }
 .cc-bad { color: var(--loss-ink); font-weight: 600; }
 .cc-error { display: flex; gap: 14px; align-items: flex-start; }
@@ -219,8 +219,10 @@ html:has(.cc-tabs) .navbar.scrolled { border-bottom-color: transparent; }
 .cc-fxs { display: grid; gap: 10px; }
 @container ccpane (min-width: 1000px) { .cc-fxs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .cc-fx { position: relative; display: grid; gap: 14px; padding: 16px 18px; border-radius: var(--r-sm); background: var(--surface); color: var(--ink); min-width: 0;
-  -webkit-tap-highlight-color: transparent; transition: transform var(--t-press) var(--ease-out), box-shadow 200ms ease; }
-.cc-fx:active { transform: scale(.985); }
+  -webkit-tap-highlight-color: transparent; transition: scale var(--t-press) var(--ease-out), box-shadow 200ms ease; }
+/* every press here is the scale property, never transform (QA round 2, the kit's rule since round 1): ui.css's one Reduce
+   Motion rule removes them all */
+.cc-fx:active { scale: .985; }
 .cc-fx > .chev { position: absolute; right: 16px; top: 28px; }
 .cc-fx-m { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding-right: 20px; min-width: 0; }
 .cc-team { display: inline-flex; align-items: center; gap: 8px; }
@@ -258,8 +260,8 @@ html:has(.cc-tabs) .navbar.scrolled { border-bottom-color: transparent; }
 .cc-step:not(:last-child)::after { content: ""; position: absolute; left: 22px; top: 46px; bottom: -8px; width: 2px; border-radius: 1px; background: var(--separator); }
 .cc-step.is-done:not(:last-child)::after { background: var(--accent); }
 .cc-step-b { width: 100%; display: flex; align-items: flex-start; gap: 12px; padding: 12px 8px; border-radius: var(--r-sm); text-align: left; color: var(--ink);
-  -webkit-tap-highlight-color: transparent; transition: background-color 140ms ease, transform var(--t-press) var(--ease-out); }
-.cc-step-b:active { background: var(--fill-2); transform: scale(.99); }
+  -webkit-tap-highlight-color: transparent; transition: background-color 140ms ease, scale var(--t-press) var(--ease-out); }
+.cc-step-b:active { background: var(--fill-2); scale: .99; }
 .cc-step-b > .chip { flex: none; margin-top: 4px; }
 .cc-step-b > .chev { margin-top: 9px; }
 .cc-step-b .grow { flex: 1; min-width: 0; }
@@ -303,8 +305,8 @@ html:has(.cc-tabs) .navbar.scrolled { border-bottom-color: transparent; }
 .cc-divs-lg { grid-template-columns: minmax(0, 1fr); gap: 22px; margin: 0; }
 .cc-divs-lg .cc-crests { display: grid; grid-template-columns: repeat(4, minmax(0, 72px)); gap: 14px 16px; margin-top: 10px; }
 .cc-divs-lg .cc-cr .crest { width: 52px; height: 52px; }
-a.cc-cr { border-radius: var(--r-xs); -webkit-tap-highlight-color: transparent; transition: transform var(--t-press) var(--ease-out); }
-a.cc-cr:active { transform: scale(.96); }
+a.cc-cr { border-radius: var(--r-xs); -webkit-tap-highlight-color: transparent; transition: scale var(--t-press) var(--ease-out); }
+a.cc-cr:active { scale: .96; }
 .cc-pick .tick { display: flex; color: var(--accent-ink); }
 .cc-pick .tick svg { width: 20px; height: 20px; }
 
@@ -406,7 +408,7 @@ a.cc-cr:active { transform: scale(.96); }
 .cc-calm { color: var(--muted); }
 .cc-mgr { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 56px; padding: 8px 14px 8px 8px; border-radius: var(--r-sm); background: var(--fill-2); text-align: left; color: var(--ink);
   touch-action: manipulation; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none;
-  transition: transform var(--t-press) var(--ease-out), background-color 160ms ease; }
+  transition: background-color 160ms ease; }
 /* the seat holder is read-only since 2026-11-23 (no appointing), so it has no press state */
 .cc-mgr .grow { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .cc-mgr .title { font: 600 .9375rem/1.2 var(--font); }
@@ -527,8 +529,6 @@ a.cc-cr:active { transform: scale(.96); }
   .cc-svg { cursor: crosshair; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .cc-fx:active, .cc-step-b:active, .cc-mgr:active, a.cc-cr:active { transform: none; }
-  .cc-dot.live { animation: none; }
   .cc-tabs a::after { transition: none; }
 }
 

@@ -28,14 +28,16 @@
 .tp-rail::-webkit-scrollbar { display: none; }
 .tp-club { scroll-snap-align: start; display: grid; justify-items: start; align-content: start; gap: 3px; min-width: 0; padding: 14px 14px 16px; border-radius: var(--r-sm);
   background: var(--surface); box-shadow: var(--shadow-1), inset 0 0 0 1px var(--hairline); text-align: left; color: var(--ink);
-  transition: box-shadow 160ms ease, transform 160ms var(--ease-out); -webkit-tap-highlight-color: transparent; }
+  transition: box-shadow 160ms ease, scale 160ms var(--ease-out); -webkit-tap-highlight-color: transparent; }
 .tp-club .crest { width: 44px; height: 44px; margin-bottom: 8px; }
 .tp-club-n { font: 760 1.125rem/1.05 var(--font-brand); font-stretch: 75%; font-variation-settings: "wdth" 75; text-transform: uppercase; letter-spacing: .01em; }
 .tp-club-r { font-size: .8125rem; color: var(--ink-2); }
 .tp-club-f { margin-top: 6px; font-size: .8125rem; color: var(--muted); }
 .tp-club-f b { color: var(--ink); font-weight: 650; }
 .tp-club-x { font-size: .75rem; line-height: 1.35; color: var(--muted); }
-.tp-club:active { transform: scale(.97); }
+/* presses are the scale property (the house rule, ui.css .btn), so ui.css's one reduce rule (scale: none) takes them
+   away under Reduce Motion: this file's transition: none only made them instant (QA round 2, 2026-11-25) */
+.tp-club:active { scale: .97; }
 .tp-club[aria-pressed="true"] { box-shadow: var(--shadow-1), inset 0 0 0 2px var(--accent); }
 @media (hover: hover) and (pointer: fine) { .tp-club:hover { box-shadow: var(--shadow-2), inset 0 0 0 1px var(--separator); } .tp-club[aria-pressed="true"]:hover { box-shadow: var(--shadow-2), inset 0 0 0 2px var(--accent); } }
 @media (min-width: 1140px) { .tp-rail { grid-auto-flow: row; grid-template-columns: repeat(7, minmax(0, 1fr)); overflow: visible; margin: 0; padding: 4px 0 0; } }
@@ -59,10 +61,10 @@
 .tp-m-pn a { font: 600 1rem/1.25 var(--font); color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
 .tp-m-pm { font-size: .75rem; color: var(--muted); }
 .tp-m-p > b { font: 700 1.125rem/1 var(--font-num); color: var(--ink); }
-.tp-m-x { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; color: var(--muted); background: var(--fill); transition: transform 120ms var(--ease-out); }
+.tp-m-x { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; color: var(--muted); background: var(--fill); transition: scale 120ms var(--ease-out); }
 .tp-m-x::after { content: ""; position: absolute; inset: -6px; }   /* a 44px reach on a 32px mark */
 .tp-m-x svg { width: 15px; height: 15px; }
-.tp-m-x:active { transform: scale(.92); }
+.tp-m-x:active { scale: .92; }
 .tp-m-none { padding: 12px 0; border-top: 1px solid var(--hairline); font-size: .875rem; color: var(--muted); }
 @media (hover: hover) and (pointer: fine) { .tp-m-pn a:hover { text-decoration: underline; text-underline-offset: 3px; } .tp-m-x:hover { color: var(--ink); } }
 /* a picked player arrives from just below its place; one leaving goes at once (exits are faster than entrances) */
@@ -140,10 +142,10 @@
 .tp-tbl td { color: var(--ink-2); }
 /* the tick: a 28px mark with a 44px reach; it answers on press, fills with the accent once picked */
 .tp-tick { position: relative; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--faint); color: transparent;
-  transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease, transform 120ms var(--ease-out); -webkit-tap-highlight-color: transparent; }
+  transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease, scale 120ms var(--ease-out); -webkit-tap-highlight-color: transparent; }
 .tp-tick::after { content: ""; position: absolute; inset: -8px; }
 .tp-tick svg { width: 16px; height: 16px; stroke-width: 2.6; }
-.tp-tick:active { transform: scale(.88); }
+.tp-tick:active { scale: .88; }
 .tp-tick[aria-pressed="true"] { background: var(--accent-fill); box-shadow: none; color: var(--accent-on); }
 .tp-tick[aria-disabled="true"] { opacity: .35; }
 .tp-row.is-seat .tp-tick { box-shadow: inset 0 0 0 1.5px var(--separator); }
@@ -277,4 +279,6 @@
   .tp-tray, .tp-tray.on { transform: none; opacity: 0; transition: opacity 160ms ease, visibility 0s linear 160ms; }
   .tp-tray.on { opacity: 1; transition: opacity 160ms ease, visibility 0s; }
   .tp-club, .tp-tick, .tp-m-x { transition: none; }
+  /* the presses lose their scale to ui.css's reduce rule; each dims instead, the house press (QA round 2 nit, 2026-11-25) */
+  .tp-club:active, .tp-tick:active, .tp-m-x:active { opacity: .7; }
 }

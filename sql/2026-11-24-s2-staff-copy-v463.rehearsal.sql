@@ -828,6 +828,7 @@ begin
     raise exception 'v463 staff powers: suspension_requests lacks the extension columns';
   end if;
 end $chk$;
+-- Applied as migration v463_s2_staff_powers on 2026-11-25 (re-rehearsed on production that morning, rolled back, then applied after the v4.63 deploy); tools/sql/grant-audit.sql returned zero rows.
 -- <<< staff powers record text
 
 -- >>> all-staff voting record text: sql/2026-11-24-s2-all-staff-voting-v463.sql
@@ -1007,6 +1008,7 @@ begin
     (select count(*) from public.staff_applications where status = 'pending'),
     (select count(*) from public.management_applications where status = 'pending');
 end $chk$;
+-- Applied as migration v463b_s2_all_staff_voting on 2026-11-25 (re-rehearsed on production that morning, rolled back, then applied after the v4.63 deploy); tools/sql/grant-audit.sql returned zero rows.
 -- <<< all-staff voting record text
 
 -- >>> record text: sql/2026-11-24-s2-staff-copy-v463.sql
@@ -1246,6 +1248,7 @@ begin
     end if;
   end loop;
 end $chk$;
+-- Applied as migration v463c_s2_staff_copy on 2026-11-25 (re-rehearsed on production that morning, rolled back, then applied after the v4.63 deploy); tools/sql/grant-audit.sql returned zero rows.
 -- <<< record text
 
 -- C1 as X, a member

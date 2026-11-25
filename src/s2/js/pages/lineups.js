@@ -23,7 +23,7 @@
   var S2 = window.S2;
   if (!S2 || !S2.page) return;
   var HQ = S2._hq;
-  var M = HQ.M, SLOTS = HQ.SLOTS,
+  var M = HQ.M, SLOTS = HQ.SLOTS, archErr = HQ.archErr,
     availWord = HQ.availWord, byNight = HQ.byNight,
     cd = HQ.cd, clock = HQ.clock, club = HQ.club, curNight = HQ.curNight, empty = HQ.empty,
     esc = HQ.esc, filledN = HQ.filledN, head = HQ.head, ic = HQ.ic,
@@ -47,14 +47,9 @@
   function seasonId() { var s = M.control && M.control.season(M.view.season); return (s && s.settings && s.settings.id) || null; }
   /* the club's row id: one definition, js/lobby.js S2.lobby.teamId (the seat's own, the model's, else the league body's) */
   function teamIdOf(code) { return S2.lobby.teamId(code); }
-  /* a read through f's client (js/live.js S2.ensureSb): an empty answer always means the league answered empty */
-  function rd(q) {
-    return Promise.resolve().then(function () {
-      var c = S2.ensureSb ? S2.ensureSb() : null;
-      if (!c) throw new Error("Not connected to the league, so the lineups cannot be read. Reload the page and try again.");
-      return q(c);
-    }).then(function (r) { if (r && r.error) throw new Error(r.error.message || "The league did not answer."); return (r && r.data) || []; });
-  }
+  /* a read through the ONE read door, js/live.js S2.rd (QA round 2 A10, 2026-11-25: this page kept its own copy): an
+     empty answer always means the league answered empty, and every answer is a list */
+  function rd(q) { return S2.rd(q, { list: true, offline: "Not connected to the league, so the lineups cannot be read. Reload the page and try again." }); }
   function slotsOf(row) { var o = {}; SLOTS.forEach(function (s) { if (row && row[COL[s]]) o[s] = row[COL[s]]; }); return o; }
   function same(a, b) { return SLOTS.every(function (s) { return (a[s] || null) === (b[s] || null); }); }
   function six(o) { return SLOTS.every(function (s) { return o && o[s]; }); }
@@ -291,7 +286,9 @@
           p: "Each lineup locks 30 minutes before its puck drop and is published to the opponent; until 10 minutes after puck drop a club may still swap players, and the opponent is told at once (Rule 5.3). A club that has not set a full lineup of six by a game's lock forfeits that game (Rule 3.2)." +
             (n.games[0].stage === "playoff" ? " In the playoffs a player may play four games of a series and two of its first four, goaltenders included (Rule S2.7)." :
               " Camp players tonight: " + gn + " of " + CAMP_NIGHT + "; at least three of each six must be the club's own players (Rule S2.5)."),
-          side: '<div class="hqx-plan-acts"><button class="btn secondary sm" data-lux="fill-night">Fill empty spots from ratings</button>' +
+          /* an archive (or a later season typed by hand) draws no write control, as hq.js does with ro(); the doors refuse
+             with S2_ARCHIVE too (QA round 2 nit, 2026-11-25: Season 1 has no nights, so only a later season drew these) */
+          side: archErr() ? "" : '<div class="hqx-plan-acts"><button class="btn secondary sm" data-lux="fill-night">Fill empty spots from ratings</button>' +
             (n.games.some(function (g) { var L = luOf(code, g); return (!L.filed || dirty(L)) && ls(g) !== "underway"; }) ? '<button class="btn sm" data-act="file-night">File all lineups</button>' : "") + "</div>" }) +
         '<div class="list hqx-list hqx-plan-l">' + n.games.map(function (g) { return planRow(code, g, t); }).join("") + "</div>" +
         /* a filed sheet with changes on screen stays filed; the changes are named here until saved or discarded.
@@ -311,6 +308,7 @@
   /* commissioner, 2026-11-09 (File all lineups: "yes"): one press files every ready sheet of the night; a sheet that is
      not ready stays a draft and is named */
   function fileNight(code) {
+    var ae = archErr(); if (ae) return S2.toast(ae.message, "err");
     var n = curNight(byNight(weekGames(code))); if (!n) return;
     return fileNightLive(code, n);
   }
@@ -339,7 +337,9 @@
   /* file or change one sheet: set_game_lineup with the six on screen. The database answers with the sheet as filed, which
      becomes the sheet; a seat whose Owner approves lineup moves is sent to the Owner (resolves {queued: true}). A change
      made while the filing was on its way stays on screen */
+  /* an archive is read only (hq.js archErr, QA round 2): the sheet's doors refuse with S2_ARCHIVE before anything is sent */
   function sendSheet(code, g, L) {
+    var ae = archErr(); if (ae) return Promise.reject(ae);
     var tid = teamIdOf(code); if (!tid) return Promise.reject(new Error("This club has no league record to file for."));
     var sent = Object.assign({}, L.slots);
     var args = { p_game: g.id, p_team: tid, p_center: sent.C || null, p_lw: sent.LW || null, p_rw: sent.RW || null, p_ld: sent.LD || null, p_rd: sent.RD || null, p_goalie: sent.G || null, p_emergency: ls(g) !== "open" };
@@ -358,6 +358,7 @@
   var OPEN = null;
   function gameById(id) { return M.games.filter(function (g) { return g.id === id; })[0] || null; }
   function openSheet(code, gid) {
+    var ae = archErr(); if (ae) return S2.toast(ae.message, "err");
     var g = gameById(gid); if (!g) { S2.toast("That game is not on the schedule", "err"); return; }
     var o = opp(g, code);
     OPEN = { code: code, g: g, sel: null };
@@ -552,6 +553,7 @@
       onOk: function () { withdrawNow(code, g, tid); } });
   }
   function withdrawNow(code, g, tid) {
+    var ae = archErr(); if (ae) return OPEN && OPEN.g === g ? err(ae.message) : S2.toast(ae.message, "err");
     if (OPEN && OPEN.g === g) busy(true);
     S2.write("clear_game_lineup", { p_game: g.id, p_team: tid }).then(function (res) {
       var L = luOf(code, g), was = Object.assign({}, L.slots);
@@ -577,6 +579,7 @@
   }
   /* Save as a line: set_team_line, one of the club's three lines (the club's own players only, by the database) */
   function saveLineSheet(code, L) {
+    var ae = archErr(); if (ae) return S2.toast(ae.message, "err");
     var opts = [1, 2, 3].map(function (n) { var l = LV.lines[n]; return '<option value="' + n + '">Line ' + n + (l ? (l.name ? ", " + esc(l.name) : "") + " (replace it)" : " (empty)") + "</option>"; }).join("");
     var sh = sheet({ title: "Save as a line", back: ['[data-x="save-line"]'], html: '<div class="hqx-lusave"><p class="t-sub">Saves the players on this sheet as one of the club\'s three lines, to fill a sheet from later. A line holds the club\'s own players only.</p>' +
       '<label class="hqx-srv-f"><span class="t-foot">Line</span><select class="input" data-ls="slot">' + opts + '</select></label>' +
@@ -605,8 +608,8 @@
     return head({ k: "Lines", size: "d-2 sec-h-sm", h: saved.length ? plural(saved.length, "line") + " saved" : "No lines saved yet",
         p: "A line is a saved six, private to the club's front office. Save one from a lineup sheet; Fill empty spots for a night starts from that night's line, then fills the rest from ratings." }) +
       (saved.length ? '<div class="list hqx-list">' + saved.map(function (x) { var l = LV.lines[x]; return '<div class="row"><span class="grow"><span class="title">' + esc(l.name || "Line " + x) + '</span><span class="sub">' + esc(who(l)) + "</span></span></div>"; }).join("") + "</div>" +
-        '<label class="hqx-srv-f hqx-lu-night"><span class="t-foot">Line for ' + esc(n.label.split(",")[0]) + '</span><select class="input" data-lux="night-line" data-night="' + nk + '">' +
-          [["", "No line"]].concat(saved.map(function (x) { return [String(x), LV.lines[x].name || "Line " + x]; })).map(function (o) { return '<option value="' + o[0] + '"' + (String(cur) === o[0] ? " selected" : "") + ">" + esc(o[1]) + "</option>"; }).join("") + "</select></label>" : "");
+        (archErr() ? "" : '<label class="hqx-srv-f hqx-lu-night"><span class="t-foot">Line for ' + esc(n.label.split(",")[0]) + '</span><select class="input" data-lux="night-line" data-night="' + nk + '">' +
+          [["", "No line"]].concat(saved.map(function (x) { return [String(x), LV.lines[x].name || "Line " + x]; })).map(function (o) { return '<option value="' + o[0] + '"' + (String(cur) === o[0] ? " selected" : "") + ">" + esc(o[1]) + "</option>"; }).join("") + "</select></label>") : "");
   }
   /* Fill empty spots from ratings, live: each open sheet of the night starts from the night's line, then ratings; nothing
      is filed until File all lineups or the sheet's own File */
@@ -630,7 +633,8 @@
   });
   document.addEventListener("change", function (e) {
     var el = e.target; if (!el.dataset || el.dataset.lux !== "night-line" || !LV.code) return;
-    var code = LV.code, nk = el.dataset.night, v = el.value ? +el.value : null, was = LV.plan[nk] || "";
+    var code = LV.code, nk = el.dataset.night, v = el.value ? +el.value : null, was = LV.plan[nk] || "", ae = archErr();
+    if (ae) { el.value = String(was); return S2.toast(ae.message, "err"); }
     el.disabled = true;
     /* the select stays under the finger; it is put back if the league refuses */
     S2.write("set_team_line_night", { p_season: seasonId(), p_team: teamIdOf(code), p_night: nk, p_slot: v }, { approval: "owner" }).then(function (res) {

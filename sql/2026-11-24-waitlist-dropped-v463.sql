@@ -120,3 +120,4 @@ end $chk$;
 
 /* REHEARSAL: pending. The main session runs sql/2026-11-24-waitlist-dropped-v463.rehearsal.sql on production as one
    transaction that ends in an uncaught raise, and records the result here. */
+-- Applied as migration v463e_waitlist_dropped on 2026-11-25 (re-rehearsed on production that morning, rolled back, then applied after the v4.63 deploy); tools/sql/grant-audit.sql returned zero rows.
