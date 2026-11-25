@@ -364,9 +364,52 @@ const DESK = {
     await p.selectOption('[data-cc-vote="mvp"]', cand); await p.click('[data-cc-votesave="mvp"]');
     A("a vote is award_ballots.upsert on season, category and voter, the commissioner's own", await until(p, () => true) && calls(p)[2] && calls(p)[2].rpc === "award_ballots.upsert" && calls(p)[2].args.row.category === "mvp" &&
       calls(p)[2].args.row.profile_id === cand && calls(p)[2].args.row.season_id === SID && !!calls(p)[2].args.row.voter_id && calls(p)[2].args.onConflict === "season_id,category,voter_id", calls(p)[2]);
+    A("and its toast says the vote can change until the vote closes (Rule 9.2)", await toastSaid(p, /Vote saved\. You can change it until the vote closes \(Rule 9\.2\)\./));
   }
-  await p.waitForSelector('[data-cc-final="mvp"]'); await p.click('[data-cc-final="mvp"]'); await p.waitForSelector('.sheet [data-cf="ok"]'); await ok(p);
-  A("Finalize is finalize_season_award for this season and category, after a confirm", await until(p, () => true) && calls(p).some((c) => c.rpc === "finalize_season_award" && c.args.p_season === SID && c.args.p_category === "mvp") && await toastSaid(p, /TestWinner wins Most Valuable Player/));
+  /* v465 (commissioner, 2026-11-25; Rule 9.2: no award is decided before its vote closes): Season 2 has no Season 3 row,
+     so its vote has no close yet; the database refuses Finalize for it (finalize_season_award, 22023), and none is offered.
+     Finalize itself is driven below, on Season 1 after its close */
+  A("a season with no next owner deadline: the block says the vote closes at that deadline, not set yet, and offers no Finalize",
+    /The Season 2 vote closes when Season 3 owner applications close, and that deadline is not set yet; each award is then decided by itself\./.test(await txt(p, "#ccAwards")) &&
+    await p.evaluate(() => document.querySelectorAll("#ccAwards [data-cc-final]").length === 0) && !calls(p).some((c) => c.rpc === "finalize_season_award"), await txt(p, "#ccAwards"));
+  await done(p);
+
+  /* v465 (commissioner, 2026-11-25: "set the award announcement date to be the same date as the owner application
+     deadline"): Season 1's vote closes at Season 2's owner deadline (M.awardsCloseAt) and the awards decide themselves
+     then; a tie comes to the commissioner. Each page sets that deadline itself, so no check depends on the day it runs */
+  console.log("## season awards at the vote's close: decided by themselves, a tie to the commissioner");
+  const L1 = mock.league({ p_season: 1 }), S1ID = L1.seasons.filter((x) => x.number === 1)[0].id;
+  const CANDS = L1.rosters.spots.slice(0, 2).map((x) => x.profile_id);
+  const awardsAt = (closeAt) => baseRead({ "rpc:s2_league": (a) => { const body = mock.league(a); (body.seasons || []).forEach((x) => { if (x.number === 2) x.owner_app_deadline = closeAt; }); return { data: body }; },
+    "from:award_ballots": () => ({ data: ["mvp", "best_goalie"].reduce((o, c) => o.concat([{ season_id: S1ID, category: c, voter_id: "voter-1", profile_id: CANDS[0] }, { season_id: S1ID, category: c, voter_id: "voter-2", profile_id: CANDS[1] }]), []) }) });
+  p = await page("#/control", { persona: "commissioner", season: 1, read: awardsAt(new Date(Date.now() + 7 * 864e5).toISOString()), writes: { finalize_season_award: mock.ok("TestWinner") } });
+  await until(p, () => !!document.querySelector('[data-cc-vote="mvp"]'));
+  r = await p.evaluate(() => ({ t: document.getElementById("ccAwards").textContent.replace(/\s+/g, " "), fin: document.querySelectorAll("#ccAwards [data-cc-final]").length, votes: document.querySelectorAll("#ccAwards [data-cc-vote]").length,
+    want: S2.M.etTime(S2.M.awardsCloseAt(1)) + " ET on " + S2.M.etLong(S2.M.awardsCloseAt(1)) }));
+  A("before the close: the block says when the vote closes and that the awards then decide themselves, a tie coming to the commissioner",
+    r.t.indexOf("The vote closes at " + r.want + ", when Season 2 owner applications close, and each award is then decided by itself. A tie at the top, or an award with no vote for a playoff-eligible player, comes to you.") >= 0, r.t.slice(0, 400));
+  A("before the close the commissioner votes like any voter, and no award is finalized by hand", r.votes === 4 && r.fin === 0, r);
+  await done(p);
+  p = await page("#/control", { persona: "commissioner", season: 1, read: awardsAt(new Date(Date.now() - 36e5).toISOString()), writes: { finalize_season_award: mock.ok("TestWinner") } });
+  await until(p, () => !!document.querySelector('[data-cc-final="mvp"]'));
+  r = await p.evaluate(() => ({ t: document.getElementById("ccAwards").textContent.replace(/\s+/g, " "), fin: document.querySelectorAll("#ccAwards [data-cc-final]").length, votes: document.querySelectorAll("#ccAwards [data-cc-vote]").length,
+    want: S2.M.etTime(S2.M.awardsCloseAt(1)) + " ET on " + S2.M.etLong(S2.M.awardsCloseAt(1)) }));
+  A("after the close: the block says the vote closed and each award with one leader decided itself; Finalize breaks a tie",
+    r.t.indexOf("The vote closed at " + r.want + ", when Season 2 owner applications closed; each award with one leader is decided by itself at that minute. A tie at the top, or an award with no vote for a playoff-eligible player, comes to you: Finalize breaks a tie.") >= 0, r.t.slice(0, 400));
+  A("after the close no vote is offered, and every undecided award offers Finalize", r.votes === 0 && r.fin === 4, r);
+  await p.click('[data-cc-final="mvp"]'); await p.waitForSelector(".sheet #ccAwWin");
+  r = await p.evaluate(() => [...document.querySelectorAll(".sheet #ccAwWin option")].map((o) => o.value));
+  A("Finalize's sheet offers the pick that breaks a tie: no pick first, then every player with a vote", r.length === 3 && r[0] === "" && r.slice(1).sort().join() === CANDS.slice().sort().join(), r);
+  await ok(p);
+  A("with no pick, Finalize sends no p_winner", await until(p, () => true) && calls(p).filter((c) => c.rpc === "finalize_season_award").length === 1 &&
+    calls(p).filter((c) => c.rpc === "finalize_season_award").every((c) => c.args.p_season === S1ID && c.args.p_category === "mvp" && !("p_winner" in c.args)), calls(p).map((c) => c.args));
+  A("Finalize is finalize_season_award for the season on screen and the award, after a confirm, and names the winner", await toastSaid(p, /TestWinner wins Most Valuable Player/));
+  await until(p, () => !document.querySelector(".sheet #ccAwWin"), null, 3000);
+  await p.waitForSelector('[data-cc-final="best_goalie"]'); await p.click('[data-cc-final="best_goalie"]'); await p.waitForSelector(".sheet #ccAwWin");
+  await p.evaluate(() => { const s = [...document.querySelectorAll(".sheet #ccAwWin")].pop(); s.value = s.options[1] ? s.options[1].value : ""; });
+  await p.evaluate(() => { const b = [...document.querySelectorAll('.sheet [data-cf="ok"]')].pop(); b.click(); });
+  A("with a pick, Finalize sends it as p_winner for the commissioner's tie-break", await until(p, () => true) && await (async () => { await wait(300); const f = calls(p).filter((c) => c.rpc === "finalize_season_award" && c.args.p_category === "best_goalie")[0];
+    return !!f && f.args.p_season === S1ID && CANDS.indexOf(f.args.p_winner) >= 0; })(), calls(p).map((c) => c.args));
   await done(p);
   p = await page("#/control", { persona: "commissioner", read: officeRead, writes: { "feature_flags.update": mock.fail("S2_NO_ROWS", "Nothing was saved: the league wrote no row (signed out, or not allowed)"),
     "news.insert": mock.fail("42501", "new row violates row-level security policy for table news") } });

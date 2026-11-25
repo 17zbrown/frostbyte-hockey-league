@@ -114,6 +114,12 @@ window.S2.fillModel = function (D) {
     const played = s2Nights.some((n) => n.key === addDays(sat, -1));
     M.s2cal.bidNights.push({ key: sat, opens: CG.etISO(sat, "21:00"), newUntil: CG.etISO(sat, "22:00"), skipped: !played, why: played ? null : "Holiday week: no games, no bidding (Rule S2.6)" });
   }
+  /* v465 (commissioner, 2026-11-25: "set the award announcement date to be the same date as the owner application
+     deadline"): season n's vote closes, and its voted awards are decided and announced (Rule 9.2), at the owner application
+     deadline of season n + 1, read from that season's row. The authority is the database's public.awards_close_at, which
+     reads the same row (the ballot guard refuses a vote after it, and the pg_cron job awards-close decides the awards), so
+     a moved deadline moves both. Null when that season has no row or no deadline yet (Season 2's awards, until Season 3's) */
+  M.awardsCloseAt = (n) => { const r = rowOf(num(n) + 1); return r && r.owner_app_deadline ? iso(r.owner_app_deadline) : null; };
 
   /* ---------- positions (mirrors CG.POS_NAME and CG.POS_RANK, part2_engine.js) ---------- */
   M.POS = ["LW", "C", "RW", "LD", "RD", "G"];                       /* rink order */
@@ -717,6 +723,19 @@ window.S2.fillModel = function (D) {
     return { category: a.category, label: TITLE_LABEL[a.category], tag: p ? p.tag : null, club: a.club, gp: gp, total: total,
       value: total != null && gp ? Math.round(total / gp * 1000) / 1000 : null, id: p ? p.id : null, href: p ? p.href : null };
   });
+  /* a season's voted awards AS DECIDED (Rule 9.2: by the vote when it closes, M.awardsCloseAt, or by a commissioner for a
+     tie): category -> the winner from the awards row (s2_league honors); an award not decided yet is absent. A winner this
+     body holds no line for (a Season 1 winner while Season 2 is on screen) is named from the league's members */
+  const VOTED = ["mvp", "best_goalie", "best_defenseman", "rookie_of_year"];
+  M.votedAwards = (n) => {
+    const out = {};
+    AWARDS.filter((a) => a.season === n && a.week == null && VOTED.indexOf(a.category) >= 0).forEach((a) => {
+      const p = P[a.pid] || null, m = p ? null : M.members.filter((x) => x.id === a.pid)[0] || null;
+      if (!p && !m) console.error("M.votedAwards: Season " + n + "'s " + a.category + " names a member this body does not hold");
+      out[a.category] = { category: a.category, id: a.pid, tag: p ? p.tag : m ? m.tag : null, club: a.club, href: "#/player/" + a.pid };
+    });
+    return out;
+  };
 
   /* ---------- trophies ----------
      Commissioner, 2026-11-21: "add team awards for winning the Presidents' Trophy, Stanley Cup trophy, and any other stat

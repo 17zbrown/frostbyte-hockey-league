@@ -107,7 +107,9 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   console.log("## the ballot");
   p = await page("#/stats?tab=awards", { role: "player" });
   r = await p.evaluate(() => document.getElementById("hvote").parentNode.textContent);
-  A("the citation backs the vote, not the secrecy: '(Rule 9.2). Nobody sees the tally.'", /until the award is decided \(Rule 9\.2\)\. Nobody sees the tally\./.test(r) && !/tally \(Rule 9\.2\)/.test(r), r.slice(0, 200));
+  /* v465 (commissioner, 2026-11-25): a vote can be changed until the vote closes, at the next season's owner application
+     deadline (Rule 9.2); the page opens on Season 2, whose vote has no close yet, so the open ballot's sentence is read */
+  A("the citation backs the vote, not the secrecy: '(Rule 9.2). Nobody sees the tally.'", /until the vote closes \(Rule 9\.2\)\. Nobody sees the tally\./.test(r) && !/tally \(Rule 9\.2\)/.test(r), r.slice(0, 200));
   await done(p);
 
   A("no console errors", errors.length === 0, errors.slice(0, 5));

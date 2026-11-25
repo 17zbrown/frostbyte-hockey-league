@@ -12991,14 +12991,18 @@ CG.hubStaffDesk = function(){
   h += CG.staffDirectoryCard();
   h += CG.staffActivityCard();
 
-  /* season award ballots — staff vote all season; the commissioner finalizes after the finale */
+  /* season award ballots: staff vote until the vote closes.
+     v465 (commissioner, 2026-11-25: "set the award announcement date to be the same date as the owner application
+     deadline"): the vote closes at the next season's owner application deadline, when the database decides each award with
+     one eligible leader by itself (public.close_season_awards) and refuses any Finalize before it. This sheet sends no tie
+     pick and targets the season in play, so it carries no Finalize: a commissioner breaks a tie in the Control Center of
+     the Season 2 site (finalize_season_award with p_winner) */
   var BALLOT_CATS = [
     ["mvp","Most Valuable Player", null],
     ["best_goalie","Best Goaltender", "G"],
     ["best_defenseman","Best Defenseman", "D"],
     ["rookie_of_year","Rookie of the Year", null]
   ];
-  var isCommish = CG.role()==="commish";
   /* Rule 2.7 — Media holds no ballot; the RLS policy refuses the write either way */
   var mediaNoBallot = CG.isMediaOnlyStaff();
   h += '<div class="card" style="margin-top:18px"><div class="card-h"><h3>Season award ballots</h3>'+
@@ -13022,14 +13026,13 @@ CG.hubStaffDesk = function(){
             '<span class="caption" data-ballot-tally="'+cat[0]+'">counting…</span>'
           : '<select data-ballot-cat="'+cat[0]+'" style="padding:6px;max-width:220px" aria-label="Vote for '+cat[1]+'">'+opts+'</select>'+
             '<button class="btn btn-ghost btn-sm" data-ballot-save="'+cat[0]+'">Save vote</button>'+
-            '<span class="caption" data-ballot-tally="'+cat[0]+'">counting…</span>'+
-            (isCommish?'<button class="btn btn-chrome btn-sm" data-ballot-final="'+cat[0]+'" data-label="'+esc(cat[1])+'" style="margin-left:auto">Finalize</button>':""))+
+            '<span class="caption" data-ballot-tally="'+cat[0]+'">counting…</span>')+
       '</div>';
   }).join("");
   h += '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">'+
     (mediaNoBallot
       ? 'Media staff read the tallies but don’t vote on awards: the department covers the league rather than deciding it.'
-      : 'Every rostered player, and every staff member and commissioner, gets one vote per award, for a player on another club; players vote from the Awards page (v3.60). Media staff who are not rostered hold no ballot. Finalizing counts the votes for playoff-eligible players only and publishes the winner; a commissioner picks only to break a tie. The statistical titles are filed from the record when the regular season ends.')+
+      : 'Every rostered player, and every staff member and commissioner, gets one vote per award, for a player on another club; players vote from the Awards page (v3.60). Media staff who are not rostered hold no ballot. The vote closes when owner applications for the following season close; then each award goes by itself to the playoff-eligible player with the most votes, and a commissioner breaks a tie in the Control Center at chelgamingleague.com (Rule 9.2). The statistical titles are filed from the record when the regular season ends.')+
     '</span></div></div>';
   return h;
 };
@@ -13068,19 +13071,8 @@ CG.AFTER._staffdesk = function(){
       .then(function(r){
         btn.disabled=false;
         if(r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
-        CG.toast("Vote saved — change it any time","ok"); CG.router();
+        CG.toast("Vote saved. You can change it until the vote closes (Rule 9.2).","ok"); CG.router();
       });
-  }); });
-  document.querySelectorAll("[data-ballot-final]").forEach(function(b){ b.addEventListener("click", function(){
-    var cat=this.getAttribute("data-ballot-final"), label=this.getAttribute("data-label");
-    CG.confirm("Finalize "+label+"?",
-      "Counts the votes for playoff-eligible players and publishes the winner to the Awards page and the newsroom. A tied vote stops and asks you to pick one of the tied players.",
-      "Finalize award", function(){
-      CG.sb.rpc("finalize_season_award",{ p_season:CG.SEASON.id, p_category:cat }).then(function(r){
-        if(r.error){ CG.toast(r.error.message,"err"); return; }
-        CG.toast(String(r.data||"Winner")+" wins "+label,"ok"); CG.reloadLeague();
-      });
-    });
   }); });
 };
 CG.AFTER._complaints = function(){ CG.AFTER._complaintsLive(); };

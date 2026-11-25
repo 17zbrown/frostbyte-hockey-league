@@ -158,10 +158,25 @@ const CUP = ["eefd9d4e-cd51-4747-8251-90244e1d9379", "a367a693-c97b-4d8d-98fa-45
   /* v5.00 swap (i3b, 2026-11-25): the ballot is the league's (award_ballots, the classic CG.AFTER.awards door). The write mock
      answers every vote as the database would; nothing is shown as saved before it answers, and a refusal keeps the vote on file */
   console.log("## the award ballot: the voter's own ballot read from the league, each vote an upsert through S2.write");
+  /* v465 (commissioner, 2026-11-25: "set the award announcement date to be the same date as the owner application
+     deadline"): Season 1's vote closes at Season 2's owner_app_deadline (M.awardsCloseAt, after public.awards_close_at).
+     Every ballot page sets that deadline itself, a week ahead unless a check says otherwise (o.close), so no check
+     depends on the day the suite runs; o.honors adds decided awards to the league read, o.at fixes the page's clock */
+  const WEEK = 7 * 864e5;
+  const s2League = (closeAt, honors) => (a) => {
+    let body; try { body = mock.league(a); } catch (e) { return mock.fail("MOCK0", e.message); }
+    (body.seasons || []).forEach((x) => { if (x.number === 2) x.owner_app_deadline = closeAt; });
+    if (honors && body.honors) body.honors = body.honors.concat(honors);
+    return mock.ok(body);
+  };
   const ballot = async (persona, o, width) => {
+    o = o || {};
     const ctx = await b.newContext(width ? { viewport: { width, height: 812 }, isMobile: true, hasTouch: true } : { viewport: { width: 1280, height: 900 } });
+    if (o.at) await ctx.clock.setFixedTime(new Date(o.at));
     await ctx.addInitScript(() => { try { localStorage.setItem("s2.introSeen", "true"); localStorage.setItem("s2.survey", JSON.stringify({ done: "2026-11-01" })); } catch (e) { /* storage blocked */ } });
-    await mock.install(ctx, Object.assign({ live: true, persona }, READS, o, { tables: Object.assign({}, READS.tables, (o || {}).tables || {}) }));
+    const close = "close" in o ? o.close : new Date(Date.now() + WEEK).toISOString();
+    await mock.install(ctx, Object.assign({ live: true, persona }, READS, { writes: o.writes }, { tables: Object.assign({}, READS.tables, o.tables || {}),
+      rpcs: Object.assign({}, READS.rpcs, { s2_league: s2League(close, o.honors) }) }));
     const pg = await ctx.newPage();
     pg.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
     pg.on("pageerror", (e) => errors.push("pageerror: " + e.message));
@@ -219,6 +234,67 @@ const CUP = ["eefd9d4e-cd51-4747-8251-90244e1d9379", "a367a693-c97b-4d8d-98fa-45
   p = await ballot("staff", { tables: { award_ballots: [] } }, 375);
   r = await p.evaluate(() => [...document.querySelectorAll(".lg-bal-r")].map((x) => ({ t: Math.round(x.querySelector(".grow").getBoundingClientRect().width), s: Math.round(x.querySelector("select").getBoundingClientRect().top - x.querySelector(".grow").getBoundingClientRect().top) })));
   A("the ballot rows wrap at 375: each award's name keeps its width and its select drops below it", r.length === 4 && r.every((x) => x.t >= 200 && x.s > 10), r);
+  await done(p);
+
+  /* v465 (commissioner, 2026-11-25: "set the award announcement date to be the same date as the owner application
+     deadline"): the ballot says when the vote closes, read from the model; after the close it says the vote has closed and
+     the winners are being announced; a decided award shows its winner to everyone and takes no vote */
+  console.log("## the vote's close: when it closes, closed, and the winners");
+  const voteRead = () => { const sec = document.querySelector('[aria-labelledby="hvote"]');
+    return { title: (document.getElementById("hvote") || {}).textContent || "", text: ((sec && sec.querySelector(".lg-sh p, header p, p")) || {}).textContent || "", all: sec ? sec.textContent : "",
+      rows: [...document.querySelectorAll("[data-bal-row]")].map((x) => ({ k: x.dataset.balRow, say: x.querySelector("[data-bal-say]").textContent, sel: !!x.querySelector("select"),
+        href: (x.querySelector("[data-bal-say] a") || {}).getAttribute ? x.querySelector("[data-bal-say] a").getAttribute("href") : null })),
+      at: S2.M.awardsCloseAt(1), want: S2.M.awardsCloseAt(1) ? S2.M.etTime(S2.M.awardsCloseAt(1)) + " ET on " + S2.M.etLong(S2.M.awardsCloseAt(1)) : null,
+      note: (document.querySelector('[aria-labelledby="hrec"] .lg-rec-note') || {}).textContent || "" }; };
+  /* the real deadline, Season 2's recorded owner_app_deadline (11:59 PM ET, Saturday, November 28), on a clock two days before */
+  const REAL = mock.league({ p_season: 1 }).seasons.filter((x) => x.number === 2)[0].owner_app_deadline;
+  p = await ballot("staff", { tables: { award_ballots: [] }, close: REAL, at: "2026-11-26T17:00:00Z" });
+  r = await p.evaluate(voteRead);
+  A("the ballot says when the vote closes, from the model: the next season's owner deadline", r.at === new Date(REAL).toISOString() &&
+    r.all.indexOf("Voting closes at 11:59 PM ET on Saturday, November 28, when the winners are announced.") >= 0, r.all.slice(0, 400));
+  A("and keeps the citation on the vote, which may change until it closes", /you may change it until the vote closes \(Rule 9\.2\)\. Nobody sees the tally\. Voting closes at /.test(r.all), r.all.slice(0, 300));
+  A("before the close every award takes a vote", r.rows.length === 4 && r.rows.every((x) => x.sel), r.rows.map((x) => [x.k, x.sel]));
+  await done(p);
+  p = await ballot("anon", { close: REAL, at: "2026-11-26T17:00:00Z" });
+  r = await p.evaluate(voteRead);
+  A("a guest reads the same close, with the way to join", r.all.indexOf("Voting closes at 11:59 PM ET on Saturday, November 28, when the winners are announced.") >= 0 && /The ballot opens to members when they join/.test(r.all), r.all.slice(0, 300));
+  await done(p);
+  /* the deadline moved: the ballot follows the row, never a written date */
+  const moved = new Date(Date.now() + 3 * 864e5).toISOString();
+  p = await ballot("staff", { tables: { award_ballots: [] }, close: moved });
+  r = await p.evaluate(voteRead);
+  A("a moved owner deadline moves the close the ballot says", r.at === moved && !!r.want && r.all.indexOf("Voting closes at " + r.want + ", when the winners are announced.") >= 0, [r.want, r.all.slice(0, 200)]);
+  await done(p);
+  /* the close passed and nothing decided yet: the vote has closed and the winners are being announced, to voter and guest */
+  const past = new Date(Date.now() - 36e5).toISOString();
+  for (const who of ["staff", "anon"]) {
+    p = await ballot(who, { tables: { award_ballots: [] }, close: past });
+    r = await p.evaluate(voteRead);
+    A("after the close (" + who + "): the vote has closed, the winners are being announced, a tie goes to a commissioner", r.title === "The vote has closed" &&
+      r.all.indexOf("The vote closed at " + r.want + ". The winners are being announced. A tie at the top, or an award with no vote for a playoff-eligible player, goes to a commissioner (Rule 9.2).") >= 0, [r.title, r.all.slice(0, 300)]);
+    A("after the close (" + who + "): four awards, each being announced, none takes a vote", r.rows.length === 4 && r.rows.every((x) => x.say === "Being announced" && !x.sel) && !/Voting closes at/.test(r.all), r.rows);
+    await done(p);
+  }
+  /* decided awards (the close's rows, as s2_league honors carries them): the winner, linked, to everyone */
+  const won = (cat, pid) => ({ id: "aw-" + cat, team: "BOS", week: null, season: 1, team_id: null, category: cat, stat_line: null, created_at: past, profile_id: pid });
+  p = await ballot("anon", { close: past, honors: [won("mvp", ID.scorer), won("rookie_of_year", ID.playmaker)] });
+  r = await p.evaluate(voteRead);
+  const rw = (k) => r.rows.filter((x) => x.k === k)[0] || {};
+  A("a decided award shows its winner, linked to the player, to a guest", rw("mvp").say === "Winner: " + T.scorer && rw("mvp").href === "#/player/" + ID.scorer &&
+    rw("rookie_of_year").say === "Winner: " + T.playmaker && rw("best_goalie").say === "Being announced" && rw("best_defenseman").say === "Being announced", r.rows.map((x) => [x.k, x.say]));
+  A("the record board's note points to the vote once an award is decided", /\(Rule 9\.2\)\. Season 1.s are with the vote below\.$/.test(r.note), r.note);
+  await done(p);
+  p = await ballot("staff", { tables: { award_ballots: [] }, close: past, honors: ["mvp", "best_goalie", "best_defenseman", "rookie_of_year"].map((c) => won(c, ID.scorer)) });
+  r = await p.evaluate(voteRead);
+  A("every award decided: the winners, each to the most votes among playoff-eligible players", r.title === "The winners" && r.rows.length === 4 && r.rows.every((x) => x.say === "Winner: " + T.scorer && !x.sel) &&
+    r.all.indexOf("The vote closed at " + r.want + ". Each award went to the playoff-eligible player with the most votes (Rule 9.2).") >= 0, [r.title, r.all.slice(0, 300)]);
+  await done(p);
+  /* an awards row while the vote is open (the database decides nothing before the close since v465, but an awards row is
+     shown the same way wherever it comes from): that award shows its winner and takes no vote; the rest stay open */
+  p = await ballot("staff", { tables: { award_ballots: [] }, honors: [won("best_goalie", ID.goalieTitle)] });
+  r = await p.evaluate(voteRead);
+  A("an award decided before the close takes no vote; the others keep theirs", rw("best_goalie").say === "Winner: " + T.goalieTitle && !rw("best_goalie").sel &&
+    ["mvp", "best_defenseman", "rookie_of_year"].every((k) => rw(k).sel) && r.all.indexOf("Voting closes at " + r.want) >= 0, r.rows.map((x) => [x.k, x.say, x.sel]));
   await done(p);
 
   console.log("## press, hover and reduced motion (BRIEF): pressables answer on pointer-down; hover only with a fine pointer");

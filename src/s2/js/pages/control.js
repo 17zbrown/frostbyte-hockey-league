@@ -1750,19 +1750,37 @@
     });
   }
   /* -- season awards: the commissioner's own ballot (award_ballots upsert on season, category and voter) and
-     Finalize (finalize_season_award: counts the votes for playoff-eligible players and publishes the winner) -- */
+     Finalize (finalize_season_award: counts the votes for playoff-eligible players and publishes the winner).
+     v465 (commissioner, 2026-11-25: "set the award announcement date to be the same date as the owner application
+     deadline"): the vote closes at the next season's owner application deadline (M.awardsCloseAt, after the database's
+     public.awards_close_at), and the pg_cron job awards-close decides each award with one eligible leader then, by itself.
+     A tie at the top, or an award with no vote for a playoff-eligible player, waits for a commissioner, who is told by a
+     bell: Finalize is offered for an undecided award only once the vote has closed (the database refuses it before the
+     close, and for a season with no next owner deadline yet, Rule 9.2, and refuses an award already decided), and its
+     sheet takes the pick that breaks a tie (p_winner; the database accepts only one of the tied leaders). Before the
+     close the commissioner votes like any voter; a decided award shows its winner and takes nothing -- */
+  function awardsWhen(n) {
+    var at = M().awardsCloseAt(n), shut = !!at && Date.now() >= Date.parse(at), w = at ? M().etTime(at) + " ET on " + M().etLong(at) : "";
+    return { at: at, shut: shut, won: M().votedAwards(n),
+      say: (!at ? "The Season " + n + " vote closes when Season " + (n + 1) + " owner applications close, and that deadline is not set yet; each award is then decided by itself. "
+        : shut ? "The vote closed at " + w + ", when Season " + (n + 1) + " owner applications closed; each award with one leader is decided by itself at that minute. "
+        : "The vote closes at " + w + ", when Season " + (n + 1) + " owner applications close, and each award is then decided by itself. ") +
+        "A tie at the top, or an award with no vote for a playoff-eligible player, comes to you" + (shut ? ": Finalize breaks a tie." : ".") };
+  }
   function awardsHtml() {
     var sid = viewSeasonId(), A0 = st.ballots && st.ballots.sid === sid ? st.ballots : null, me = S2.session && S2.session.profileId;
-    var pool = M().players.filter(function (p) { return p.rostered || p.club; });
+    var pool = M().players.filter(function (p) { return p.rostered || p.club; }), W = awardsWhen(M().view ? M().view.season : SETUP_N);
     if (!client()) return '<div class="cc-block" id="ccAwards">' + lead("Season awards", "The ballots are read from the league, which this page cannot reach here.") + "</div>";
-    return '<div class="cc-block" id="ccAwards">' + lead("Season awards", A0 ? (A0.err ? "The ballots could not be read: " + esc(A0.err) : "Your vote in each award, the votes so far, and Finalize, which counts them and publishes the winner.") : "Reading the ballots.") +
+    return '<div class="cc-block" id="ccAwards">' + lead("Season awards", A0 ? (A0.err ? "The ballots could not be read: " + esc(A0.err) : esc(W.say)) : "Reading the ballots.") +
       (A0 && !A0.err ? '<div class="list cc-flat">' + AWARDS.map(function (a) {
-        var votes = A0.rows.filter(function (x) { return x.category === a[0]; }), mine = votes.filter(function (x) { return x.voter_id === me; })[0], cnt = {};
+        var votes = A0.rows.filter(function (x) { return x.category === a[0]; }), mine = votes.filter(function (x) { return x.voter_id === me; })[0], cnt = {}, won = W.won[a[0]];
         votes.forEach(function (v) { cnt[v.profile_id] = (cnt[v.profile_id] || 0) + 1; });
         var top = Object.keys(cnt).sort(function (x, y) { return cnt[y] - cnt[x]; }).slice(0, 3).map(function (pid) { return seatName(pid) + " (" + cnt[pid] + ")"; });
-        return '<div class="row cc-award" data-cc-award="' + a[0] + '"><span class="grow"><span class="title">' + esc(a[1]) + '</span><span class="sub">' + (votes.length ? votes.length + (votes.length === 1 ? " vote" : " votes") + "; leading: " + esc(top.join(", ")) : "No votes yet") + "</span></span>" +
-          '<select class="input cc-sel" aria-label="Your vote for ' + esc(a[1]) + '" data-cc-vote="' + a[0] + '"><option value="">Your vote</option>' + pool.map(function (p) { return '<option value="' + esc(p.id) + '"' + (mine && mine.profile_id === p.id ? " selected" : "") + ">" + esc(p.tag) + "</option>"; }).join("") + "</select>" +
-          '<button class="btn secondary sm" data-cc-votesave="' + a[0] + '">Save vote</button><button class="btn sm" data-cc-final="' + a[0] + '">Finalize</button></div>';
+        var tally = votes.length ? votes.length + (votes.length === 1 ? " vote" : " votes") + "; leading: " + top.join(", ") : "No votes yet";
+        return '<div class="row cc-award" data-cc-award="' + a[0] + '"><span class="grow"><span class="title">' + esc(a[1]) + '</span><span class="sub">' + esc(won ? "Winner: " + (won.tag || seatName(won.id)) + "; " + tally : tally) + "</span></span>" +
+          (won || W.shut ? "" : '<select class="input cc-sel" aria-label="Your vote for ' + esc(a[1]) + '" data-cc-vote="' + a[0] + '"><option value="">Your vote</option>' + pool.map(function (p) { return '<option value="' + esc(p.id) + '"' + (mine && mine.profile_id === p.id ? " selected" : "") + ">" + esc(p.tag) + "</option>"; }).join("") + "</select>" +
+            '<button class="btn secondary sm" data-cc-votesave="' + a[0] + '">Save vote</button>') +
+          (!won && W.shut ? '<button class="btn sm" data-cc-final="' + a[0] + '">Finalize</button>' : "") + "</div>";
       }).join("") + '</div><p class="fl-err" role="alert" data-cc-awerr hidden></p>' : "") + "</div>";
   }
   function loadBallots(root) {
@@ -1784,14 +1802,21 @@
         if (!sel.value) { err.textContent = "Pick a player first."; err.hidden = false; sel.focus(); return; }
         sv.disabled = true; err.hidden = true;
         S2.write("award_ballots.upsert", { row: { season_id: viewSeasonId(), category: cat, voter_id: S2.session.profileId, profile_id: sel.value, updated_at: new Date().toISOString() }, onConflict: "season_id,category,voter_id" }, {}).then(function () {
-          st.ballots = null; loadBallots(root); S2.toast("Vote saved; change it any time", "ok");
+          st.ballots = null; loadBallots(root); S2.toast("Vote saved. You can change it until the vote closes (Rule 9.2).", "ok");
         }, function (e2) { sv.disabled = false; err.textContent = "Not saved: " + e2.message; err.hidden = false; });
       }
       if (fin) {
-        var c2 = fin.dataset.ccFinal, label = (AWARDS.filter(function (a) { return a[0] === c2; })[0] || [0, c2])[1];
+        var c2 = fin.dataset.ccFinal, label = (AWARDS.filter(function (a) { return a[0] === c2; })[0] || [0, c2])[1], cnt2 = {};
+        /* the tie's pick: every player with a vote in this award, most votes first; the database decides who leads
+           (playoff-eligible votes only) and refuses a pick that is not one of the tied leaders, in its own words */
+        (st.ballots ? st.ballots.rows : []).filter(function (x) { return x.category === c2; }).forEach(function (v) { cnt2[v.profile_id] = (cnt2[v.profile_id] || 0) + 1; });
+        var voted = Object.keys(cnt2).sort(function (x, y) { return cnt2[y] - cnt2[x]; });
         writeSheet({ title: "Finalize " + label + "?", label: "Finalize award", refocus: function () { return S2.$('[data-cc-final="' + c2 + '"]', root); },
-          why: ["Counts the votes for playoff-eligible players and publishes the winner to the Awards page and the newsroom. A tied vote stops and asks you to pick one of the tied players."],
-          send: function () { return S2.write("finalize_season_award", { p_season: viewSeasonId(), p_category: c2 }, { sections: ["honors", "news"] }); },
+          html: '<div class="field"><label for="ccAwWin">If the vote is tied at the top</label><select class="input" id="ccAwWin"><option value="">No pick: the vote decides</option>' +
+            voted.map(function (pid) { return '<option value="' + esc(pid) + '">' + esc(seatName(pid) + " (" + cnt2[pid] + (cnt2[pid] === 1 ? " vote)" : " votes)")) + "</option>"; }).join("") + "</select></div>",
+          why: ["Counts the votes for playoff-eligible players and publishes the winner to the Awards page and the newsroom. A tie at the top needs your pick of one of the tied players; with one leader, the leader wins and a pick is refused."],
+          check: function (sh) { return S2.$("#ccAwWin", sh.el).value || null; },
+          send: function (sh, pick) { var args = { p_season: viewSeasonId(), p_category: c2 }; if (pick) args.p_winner = pick; return S2.write("finalize_season_award", args, { sections: ["honors", "news"] }); },
           done: function (r) { S2.toast(String(r.data || "The winner") + " wins " + label, "ok"); st.ballots = null; loadBallots(root); } });
       }
     });

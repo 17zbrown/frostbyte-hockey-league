@@ -115,7 +115,7 @@ CG.ROUTES.awards = function(param, qs){
        eligible to be eligible to receive the award." */
     var floor = CG.playoffMinGp ? CG.playoffMinGp() : 0;
     body += '<div class="note chr" style="margin-bottom:18px"><b style="font-family:var(--f-disp)">Voted awards are decided by the league\u2019s players.</b> '+
-      'Every rostered player and every member of league staff casts one vote per award, for a player on another club, and can change it until the award is decided. '+
+      'Every rostered player and every member of league staff casts one vote per award, for a player on another club, and can change it until the vote closes, when owner applications for the following season close and the winners are announced. '+
       'The statistical titles are not voted on: they go to the best per-game average in the official record. '+
       'Only a playoff-eligible player can win either kind'+(floor ? ' ('+floor+' regular-season games, prorated for a player placed after opening night)' : '')+' (Rules 9.2 and 9.3).</div>'+
       /* v4.54 (review): a completed season on screen is final and read-only, so it carries no ballot */
@@ -207,7 +207,7 @@ CG.awardBallotCard = function(lg){
             '<button class="btn btn-ghost btn-sm" data-aw-save="'+cat[0]+'">Save vote</button>')+
         '</div>';
     }).join("")+
-    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">You can change a vote until the award is decided. You cannot vote for yourself or for a player on your own club (Rule 9.2).</span></div></div>';
+    '<div class="card-b" style="border-top:1px solid var(--line)"><span class="caption">You can change a vote until the vote closes, when owner applications for the following season close. You cannot vote for yourself or for a player on your own club (Rule 9.2).</span></div></div>';
 };
 CG.AFTER.awards = function(param){
   var sid = CG.SEASON && CG.SEASON.id, uid = CG.auth && CG.auth.user && CG.auth.user.id;
@@ -229,7 +229,7 @@ CG.AFTER.awards = function(param){
         btn.disabled = false;
         if (r.error){ CG.toast("Couldn’t save: "+r.error.message,"err"); return; }
         if (!r.data || !r.data.length){ CG.toast("Couldn’t save: nothing was written. Sign out and back in, then retry.","err"); return; }
-        CG.toast("Vote saved. You can change it until the award is decided","ok");
+        CG.toast("Vote saved. You can change it until the vote closes","ok");
       });
   }); });
   $$("[data-tab]").forEach(function(b){ b.addEventListener("click", function(){ location.hash="#/awards?tab="+this.getAttribute("data-tab"); }); });

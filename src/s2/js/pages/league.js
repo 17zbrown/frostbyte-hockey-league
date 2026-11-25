@@ -1148,7 +1148,27 @@
     if (s.seat && s.teamCode && out.indexOf(s.teamCode) < 0) out.push(s.teamCode);
     return out;
   }
+  /* v465 (commissioner, 2026-11-25: "set the award announcement date to be the same date as the owner application
+     deadline"): the vote closes at the next season's owner application deadline (M.awardsCloseAt, after the database's
+     public.awards_close_at), when the league office decides and announces each award (Rule 9.2); a tie at the top, or an
+     award with no vote for an eligible player, waits for a commissioner. The ballot says when it closes; after the close
+     it says the vote has closed and the winners are being announced; a decided award shows its winner (M.votedAwards),
+     to everyone, and takes no vote. A page left open across the close keeps its selects until its next repaint, and
+     the database refuses a late vote in its own words beside the select */
+  function voteNow(n) {
+    var at = M.awardsCloseAt(n), won = M.votedAwards(n), all = BALLOT.every(function (c) { return !!won[c[0]]; });
+    return { at: at, won: won, all: all, any: BALLOT.some(function (c) { return !!won[c[0]]; }), over: all || (!!at && Date.now() >= Date.parse(at)) };
+  }
+  function closeWords(at) { return M.etTime(at) + " ET on " + M.etLong(at); }   /* the time, then the weekday and the date, as Rule 9.2 says it */
+  /* an award's line once it is decided, or once the vote has closed: its winner, else "Being announced" */
+  function votedRow(cat, V) {
+    var w = V.won[cat[0]];
+    return '<div class="row lg-bal-r" data-bal-row="' + cat[0] + '"><span class="grow"><span class="title">' + esc(cat[1]) + '</span><span class="sub" data-bal-say="' + cat[0] + '">' +
+      (w ? "Winner: " + (w.tag ? '<a href="' + esc(w.href) + '">' + esc(w.tag) + "</a>" : "decided") : V.over ? "Being announced" : "Voting is open") + "</span></span></div>";
+  }
+  function votedList(V) { return '<div class="list lg-ballot" id="lgVoted">' + BALLOT.map(function (c) { return votedRow(c, V); }).join("") + "</div>"; }
   function ballotRow(cat) {
+    var V = voteNow(VIEW.season); if (V.won[cat[0]]) return votedRow(cat, V);
     var self = ballotWho(), pool = ballotPool(cat, self, ballotClubs()), v = VOTES.votes ? VOTES.votes[cat[0]] : null, pick = v ? M.player(v) : null;
     return '<label class="row lg-bal-r" data-bal-row="' + cat[0] + '"><span class="grow"><span class="title">' + esc(cat[1]) + '</span><span class="sub" data-bal-say="' + cat[0] + '">' + esc(pick ? "Your vote: " + pick.tag : "No vote yet") + "</span></span>" +
       '<select class="input lg-bal-s" data-bal="' + cat[0] + '" aria-label="' + esc("Your vote for " + cat[1]) + '">' + (v ? "" : '<option value="">Pick a player</option>') + pool.map(function (pl) {
@@ -1161,11 +1181,16 @@
   }
   function ballotSec() {
     /* a display hint only (the database decides): rostered this season (S2.mine), staff or a commissioner */
-    var member = S2.has("member"), can = member && (S2.has("staff") || S2.has("commish") || !!me());
+    var member = S2.has("member"), can = member && (S2.has("staff") || S2.has("commish") || !!me()), V = voteNow(VIEW.season);
+    var when = V.at ? "Voting closes at " + closeWords(V.at) + ", when the winners are announced." : "Voting closes when owner applications for Season " + (VIEW.season + 1) + " close, when the winners are announced.";
+    if (V.over) return '<section class="lg-sec" aria-labelledby="hvote">' + secHead({ kicker: "Voted awards", id: "hvote", title: V.all ? "The winners" : "The vote has closed",
+      text: (V.at && Date.now() >= Date.parse(V.at) ? "The vote closed at " + esc(closeWords(V.at)) + ". " : "") + (V.all ? "Each award went to the playoff-eligible player with the most votes (" + rule("9.2") + ")."
+        : "The winners are being announced. A tie at the top, or an award with no vote for a playoff-eligible player, goes to a commissioner (" + rule("9.2") + ").") }) +
+      votedList(V) + "</section>";
     var head = secHead({ kicker: "Voted awards", id: "hvote", title: can ? "Your ballot" : "Every rostered player and staffer votes",
-      text: "One vote per award, for a player on another club and never yourself, and you may change it until the award is decided (" + rule("9.2") + "). Nobody sees the tally." });
-    if (!member) return '<section class="lg-sec" aria-labelledby="hvote">' + head + '<p class="lg-rec-note">The ballot opens to members when they join. <a href="#/you">Join with Discord</a></p></section>';
-    if (!can) return '<section class="lg-sec" aria-labelledby="hvote">' + head + '<p class="lg-rec-note">Your ballot opens once you hold a roster spot in ' + esc(VIEW.name) + ", or join the staff.</p></section>";
+      text: "One vote per award, for a player on another club and never yourself, and you may change it until the vote closes (" + rule("9.2") + "). Nobody sees the tally. " + esc(when) });
+    if (!member) return '<section class="lg-sec" aria-labelledby="hvote">' + head + (V.any ? votedList(V) : "") + '<p class="lg-rec-note">The ballot opens to members when they join. <a href="#/you">Join with Discord</a></p></section>';
+    if (!can) return '<section class="lg-sec" aria-labelledby="hvote">' + head + (V.any ? votedList(V) : "") + '<p class="lg-rec-note">Your ballot opens once you hold a roster spot in ' + esc(VIEW.name) + ", or join the staff.</p></section>";
     return '<section class="lg-sec" aria-labelledby="hvote">' + head + ballotList() +
       '<p class="lg-rec-note">Every rostered player, staffer and commissioner votes in ' + esc(VIEW.name) + ". Only a playoff-eligible player can win (" + rule("9.3") + ").</p></section>";
   }
@@ -1184,13 +1209,22 @@
         .then(function () {
           VOTES.votes[k] = pid;
           var row = S2.$('[data-bal-row="' + k + '"]', sec); if (row) row.outerHTML = ballotRow(BALLOT.filter(function (c) { return c[0] === k; })[0]);
-          S2.toast("Vote saved for " + (pl ? pl.tag : "that player") + ". You can change it until the award is decided.", "ok");
+          S2.toast("Vote saved for " + (pl ? pl.tag : "that player") + ". You can change it until the vote closes.", "ok");
         }, function (er) {
           sel.disabled = false; sel.value = was;
           if (say) say.textContent = (er.code === "S2_NO_ROWS" ? "Nothing was saved: the league did not take this vote." : er.message) + (was && M.player(was) ? " Your vote stays " + M.player(was).tag + "." : "");
         });
     });
     if (!VOTES.votes && !VOTES.err) ballotRead().then(paint);
+  }
+  /* v465: the record board's word on the voted awards of the season it shows: none decided yet; with the vote below (the
+     same season); or, for an earlier season (Season 1's trophy room while Season 2 is on screen), each winner named */
+  function votedNote(n) {
+    var V = voteNow(n);
+    if (!V.any) return "Season " + n + "&rsquo;s have not been awarded yet.";
+    if (n === VIEW.season) return "Season " + n + "&rsquo;s are with the vote below.";
+    return "Season " + n + "&rsquo;s: " + BALLOT.map(function (c) { var w = V.won[c[0]];
+      return esc(c[1]) + ", " + (w && w.tag ? '<a href="' + esc(w.href) + '">' + esc(w.tag) + "</a>" : w ? "decided" : "not decided yet"); }).join("; ") + ".";
   }
   function sxAwards() {
     /* the whole season's Players of the Week (weeks 5 and 6 came after the snapshot: M.honors.potwSeason); Three Stars are
@@ -1218,7 +1252,7 @@
       (nRec ? '<section class="lg-sec" aria-labelledby="hrec">' + secHead({ kicker: "By the record", id: "hrec",
         title: most && byWho[most] > 1 ? most + " takes " + word(byWho[most]) + " of the " + word(nRec) : cap(word(nRec)) + " awards by the record",
         text: "The league's titles go to the best rate per game among playoff-eligible players (" + rule("9.2") + "). Beside them, the NHL's three trophies decided by the numbers count season totals, the NHL's way." }) +
-        recBoard(AW) + '<p class="lg-rec-note">Four more are decided by vote: Most Valuable Player, Best Goaltender, Best Defenseman and Rookie of the Year (' + rule("9.2") + "). Season " + AW + "&rsquo;s have not been awarded yet.</p></section>" : "") +
+        recBoard(AW) + '<p class="lg-rec-note">Four more are decided by vote: Most Valuable Player, Best Goaltender, Best Defenseman and Rookie of the Year (' + rule("9.2") + "). " + votedNote(AW) + "</p></section>" : "") +
       ballotSec() +
       '<section class="lg-sec" aria-labelledby="hpotw">' + secHead({ kicker: "Players of the Week", id: "hpotw", title: pw && pw.n > 1 ? pw.p.tag + ", " + word(pw.n) + " times" : plural(M.honors.potwSeason(AW).length, "Player of the Week", "Players of the Week"),
         text: "Named automatically every Monday from the record: at least three games that week, every one at that position (" + rule("9.1") + "). All " + word(weeks.length) + " weeks of the regular season." }) +
