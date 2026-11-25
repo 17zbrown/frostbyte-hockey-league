@@ -33,7 +33,12 @@ let W, posts, claims, released, cfgRows, missing, lineups, postStatus;
 /* `leadH` = how many hours from now the week's availability deadline sits */
 function reset(over = {}) {
   const leadH = over.leadH ?? 20;
-  const dl = new Date(Date.now() + leadH * H);
+  let dl = new Date(Date.now() + leadH * H);
+  /* main session, 2026-11-25: run at about 2 AM Eastern, the two games (35 minutes apart) straddled midnight ET and read as
+     two nights, failing "grouped by night". When they would, the whole week moves an hour earlier (the deadline stays about
+     leadH hours away, still inside the reminder window), so the test means the same thing at any hour */
+  const etDay = (t) => new Date(t).toLocaleDateString("en-US", { timeZone: "America/New_York" });
+  if (etDay(dl.getTime() + 90 * 60000) !== etDay(dl.getTime() + 125 * 60000)) dl = new Date(dl.getTime() - H);
   const first = new Date(dl.getTime() + 90 * 60000);          // the deadline is 90 min before the first game
   W = {
     deadlines: over.deadlines || { w1: dl.toISOString() },

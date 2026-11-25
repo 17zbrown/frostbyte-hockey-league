@@ -1,0 +1,211 @@
+/* audit 2026-11-09: one label voice. Labels speak in sentence case like .kicker; table heads and data keys keep the
+   small capitals of .t-cap at .02em; the tracked capitals (.1em to .2em) the commissioner called AI slop are gone */
+/* The Season 2 training camp pool, #/camp (js/pages/camp.js). Namespaced cp- and built from the kit's tokens and its
+   website layer (.hero, .d-*, .kicker, .band, .sec-head, .arrow, .btn.site, .seg, .tbl), so dark mode and every finish
+   work without a second color. Website, not dashboard: sections and bands, lists on hairlines, no card walls. Phone
+   first at 375px, widened at 561/900/1000.
+   Motion: presses answer on pointer-down (the kit's .btn scale), the waiver bar runs linear (constant motion), the row
+   just acted on settles in once; hovers only on fine pointers; reduced motion keeps opacity only. */
+
+.cp > * { min-width: 0; }
+
+/* ---------- the statement hero ---------- */
+.cp-hero { gap: 24px; padding-bottom: clamp(24px, 4vw, 44px); }
+.cp-hero > *, .cp-hero-foot > * { min-width: 0; }
+.cp-hero-copy { display: grid; gap: 18px; justify-items: start; }
+/* the headline carries two numbers and a clause, so it takes the long-title size (league.css .lg-h1.long) */
+.cp-h1 { font-size: clamp(2.75rem, 9.6vw, 6.75rem); line-height: .88; max-width: 13.5em; overflow-wrap: anywhere; text-wrap: balance; }
+.cp-hero-foot { display: grid; gap: 28px; }
+.cp-hero-text { display: grid; gap: 22px; justify-items: start; }
+.cp-hero .lede-l { text-wrap: pretty; }
+.cp-cta { display: flex; flex-wrap: wrap; gap: 10px; max-width: 100%; }
+.cp-cta .btn { max-width: 100%; white-space: normal; text-align: center; line-height: 1.15; }   /* a long label wraps at large text sizes */
+/* the commissioner's Acting for on the real site (js/pages/camp.js actFor), the bid room's picker beside the buttons */
+.cp-actfor { display: grid; gap: 6px; flex-basis: 100%; max-width: 360px; }
+.cp-actfor .kicker { color: var(--muted); }
+.cp-actfor select { font-size: 1rem; }
+.cp-hero-foot { grid-template-columns: minmax(0, 1fr); }
+/* a text button that still reaches 44px */
+.cp-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0; color: var(--accent-ink); font: 500 .875rem/1.2 var(--font);
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  touch-action: manipulation; -webkit-user-select: none; user-select: none; transition: opacity 120ms ease; }
+.cp-link:active { opacity: .6; transition-duration: 0ms; }
+
+/* the countdown numeral: figures in the brand face, units small beside them */
+.cp-cd { display: grid; gap: 8px; justify-items: start; color: var(--ink); }
+.cp-big { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 0 .2em; }
+.cp-big .d-num, .cp-live { font-size: clamp(4rem, 15vw, 7.5rem); }
+.cp-u { font: 750 clamp(1rem, 2.2vw, 1.375rem)/1 var(--font-brand); font-stretch: 85%; font-variation-settings: "wdth" 85; letter-spacing: .01em; text-transform: uppercase;
+  color: var(--muted); margin: 0 .35em 0 .06em; }
+.cp-cd-l { max-width: 26ch; font: 500 .9375rem/1.4 var(--font); color: var(--muted); }
+.cp-live { color: var(--live-ink); }
+a.cp-cd { transition: transform var(--t-press) var(--ease-out); }
+a.cp-cd:active { transform: scale(.98); }
+a.cp-cd .cp-cd-l { color: var(--accent-ink); }
+@media (min-width: 900px) {
+  .cp-hero-foot { grid-template-columns: minmax(0, 1fr) auto; align-items: end; column-gap: 48px; }
+  .cp-hero-side .cp-cd { justify-items: end; text-align: right; }
+}
+
+/* ---------- sections and bands, the site rhythm ---------- */
+.cp-sec { margin-top: clamp(48px, 7vw, 88px); }
+.cp-band { margin-top: clamp(48px, 7vw, 88px); }
+.cp-sh .copy { min-width: 0; }
+.cp-sh h2 { overflow-wrap: anywhere; text-wrap: balance; }
+.cp-sh h2:focus { outline: none; }
+.cp-sh p a { color: var(--accent-ink); }
+.band.ink .cp-sh p { color: inherit; opacity: .78; }
+.band.ink .cp-sh p a { color: var(--accent-ink); }
+.cp-band .cp-big .d-num { font-size: clamp(3.25rem, 9vw, 5.25rem); }
+
+.cp-split { display: grid; gap: 32px; }
+.cp-split > * { min-width: 0; }
+
+/* ---------- lists on hairlines: a row is a player, its state and one door ---------- */
+.cp-list { list-style: none; margin: 0; padding: 0; border-top: 2px solid var(--ink); }
+.cp-quiet { border-top-width: 1px; border-top-color: var(--separator); }
+.cp-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 16px; padding: 14px 0; min-height: 64px; border-bottom: 1px solid var(--separator); }
+.cp-row > * { min-width: 0; }
+.cp-who { display: grid; gap: 3px; grid-column: 1 / -1; }
+.cp-tag { font: 600 1.0625rem/1.25 var(--font); color: var(--ink); overflow-wrap: anywhere; justify-self: start; }
+a.cp-tag { text-decoration: none; padding: 4px 0; margin: -4px 0; }
+.cp-meta { font: 400 .8125rem/1.35 var(--font); color: var(--muted); font-variant-numeric: tabular-nums; }
+.cp-meta abbr, .cp-tbl abbr { text-decoration: none; }
+.cp-from { display: flex; align-items: center; gap: 8px; font: 500 .875rem/1.3 var(--font); color: var(--ink-2); }
+.cp-from > span:last-child { overflow-wrap: anywhere; }
+.cp-cr { display: inline-flex; flex: none; }
+.cp-cr .crest { width: 24px; height: 24px; }
+.cp-act { display: flex; justify-content: flex-end; }
+.cp-note { font: 400 .8125rem/1.3 var(--font); color: var(--muted); text-align: right; }
+.cp-say { grid-column: 1 / -1; margin: 2px 0 0; font: 500 .875rem/1.45 var(--font); color: var(--loss-ink); max-width: 64ch; }
+.cp-empty { margin: 0; padding: 20px 0; border-top: 1px solid var(--separator); border-bottom: 1px solid var(--separator); color: var(--muted); max-width: 60ch; }
+.cp-subh { display: block; margin: 36px 0 10px; color: var(--muted); }
+.cp-past { min-height: 56px; }
+.cp-past .cp-tag { font-size: 1rem; }
+.cp-you { margin: -6px 0 20px; font: 500 .9375rem/1.45 var(--font); color: inherit; }
+.cp-more { margin-top: 20px; max-width: 100%; white-space: normal; text-align: center; line-height: 1.2; padding-top: 8px; padding-bottom: 8px; }
+
+/* a waiver's 24 hours: the text, then a hairline that runs down at constant speed (linear) */
+.cp-clock { display: grid; gap: 6px; grid-column: 1 / -1; }
+.cp-left { font: 600 .9375rem/1.2 var(--font-num); font-variant-numeric: tabular-nums; color: var(--ink); }
+.cp-bar { display: block; height: 3px; border-radius: 2px; background: var(--fill); overflow: hidden; }
+.cp-bar i { display: block; height: 100%; background: var(--ink-2); transform-origin: left center; transition: transform 1s linear; }
+.cp-until { font: 400 .75rem/1.3 var(--font); color: var(--muted); }
+
+/* a phone row: the player across the top, then the state and the door side by side, the clock under them */
+@media (min-width: 561px) {
+  .cp-wv { grid-template-columns: minmax(0, 1.25fr) minmax(0, .9fr) minmax(0, 1.1fr) auto; }
+  .cp-tn { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto; }
+  .cp-past { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); }
+  .cp-road { grid-template-columns: minmax(0, 1.1fr) auto minmax(0, 1.2fr); }
+  .cp-who, .cp-clock { grid-column: auto; }
+}
+.cp-tn .cp-act:empty { display: none; }
+/* phone: the club and the Claim door share a line; the clock runs under them */
+.cp-wv .cp-clock { order: 1; }
+.cp-say { order: 2; }
+@media (min-width: 561px) { .cp-wv .cp-clock { order: 0; } }
+.cp-tn.is-req .cp-from { color: var(--ink); font-weight: 600; }
+
+/* the one row a person just acted on settles in once (a press already answered; this says where the change landed) */
+.cp-just { animation: cpJust 280ms var(--ease-out); }
+@keyframes cpJust { from { opacity: .35; transform: translateY(4px); } }
+
+/* ---------- Road to six: six quiet marks, played filled, a requested night's three outlined in the accent ---------- */
+.cp-prog { display: flex; align-items: center; gap: 12px; }
+.cp-pips { display: inline-flex; gap: 4px; flex: none; }
+.cp-pips i { width: 16px; height: 6px; border-radius: 3px; background: var(--fill); }
+.cp-pips i.on { background: var(--ink-2); }
+.cp-pips i.next { background: none; box-shadow: inset 0 0 0 1.5px var(--accent); }
+.cp-gp { font: 500 .8125rem/1.2 var(--font); color: var(--muted); white-space: nowrap; }
+.cp-gp b { font-weight: 650; color: var(--ink); }
+.cp-road-n { grid-column: 1 / -1; margin: 0; font: 400 .875rem/1.4 var(--font); color: var(--muted); }
+.cp-road-n.is-next { color: var(--accent-ink); font-weight: 500; }
+@media (min-width: 561px) { .cp-road-n { grid-column: auto; text-align: right; } }
+
+/* ---------- The whole pool: filters, then the table ---------- */
+.cp-tools { display: flex; flex-wrap: wrap; gap: 10px 14px; margin: 0 0 16px; }
+/* at large text sizes a control wider than the screen scrolls inside itself, never the page (break-ui, 200% text) */
+.cp-seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+.cp-seg::-webkit-scrollbar { display: none; }
+.cp-seg button { touch-action: manipulation; -webkit-user-select: none; user-select: none; white-space: nowrap; }
+.cp-count { margin: 0 0 10px; font: 400 .875rem/1.4 var(--font); color: var(--muted); }
+.cp-tblw { border-radius: 0; border-top: 2px solid var(--ink); }
+.cp-tbl th { background: var(--canvas-2); vertical-align: middle; }
+.cp-tbl th button { min-height: 40px; padding: 0; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+.cp-dir { display: inline-block; min-width: .8em; }
+.cp-tbl td { vertical-align: middle; }
+/* the table sits on the page's hairlines, not in a card: its first and last columns align with the section */
+.cp-tbl th:first-child, .cp-tbl td:first-child { padding-left: 0; }
+.cp-tbl th:last-child, .cp-tbl td:last-child { padding-right: 0; }
+.cp-tbl td.cp-c-who { white-space: normal; min-width: 9rem; }
+.cp-c-who .cp-tag { display: inline-block; font-size: .9375rem; }
+.cp-sub { display: block; margin-top: 2px; font: 400 .75rem/1.3 var(--font); color: var(--muted); }
+.cp-tbl .cp-c-six, .cp-tbl .cp-c-club, .cp-tbl .cp-c-tn { text-align: left; }
+.cp-clubc { display: inline-flex; align-items: center; gap: 6px; }
+.cp-clubc .crest { width: 22px; height: 22px; }
+.cp-ok { color: var(--ink); font-weight: 600; }   /* quiet chrome: a column of green words would shout */
+.cp-dim { color: var(--muted); }
+.cp-tbl td.cp-c-act { padding-right: 0; text-align: right; white-space: normal; }
+.cp-c-act .cp-say { text-align: left; font-size: .8125rem; margin-top: 6px; white-space: normal; max-width: 22rem; margin-left: auto; }
+.cp-onb { display: inline-flex; align-items: center; gap: 4px; min-height: 34px; font: 600 .8125rem/1 var(--font); color: var(--accent-ink); white-space: nowrap; }
+/* the check stands for "On board" on a phone, where those words go to the screen reader only (break-ui: "On board #10"
+   squeezed the gamertags at 320px) */
+.cp-onb-i { width: 15px; height: 15px; flex: none; display: none; }
+@media (max-width: 560px) { .cp-onb-i { display: block; } }
+@media (max-width: 560px) {
+  .cp-tbl .cp-c-pos, .cp-tbl .cp-c-six, .cp-tbl .cp-c-club, .cp-tbl .cp-c-tn { display: none; }
+  .cp-tbl td, .cp-tbl th { padding-left: 6px; padding-right: 6px; }
+  .cp-tbl td.cp-c-who { min-width: 0; }
+  /* the button says "Add" to the eye and "Add to bid board" to a screen reader */
+  .cp-wide { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
+@media (min-width: 561px) { .cp-sub { display: none; } }
+@media (hover: hover) and (pointer: fine) {
+  .cp-tbl tbody tr:hover { background: var(--fill-2); }
+  a.cp-tag:hover, .cp-onb:hover { text-decoration: underline; text-underline-offset: 3px; }
+}
+
+/* ---------- How the pool works ---------- */
+.cp-how { display: grid; gap: 28px 48px; }
+.cp-how-b { display: grid; gap: 10px; align-content: start; padding-top: 16px; border-top: 2px solid var(--ink); }
+.cp-how-b p { margin: 0; font: 400 1rem/1.55 var(--font); color: var(--ink-2); max-width: 62ch; }
+.cp-how-b .cp-how-l { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; font-size: .875rem; color: var(--muted); }
+.cp-how-l > a:first-child { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent-ink); font-weight: 600; }
+@media (min-width: 760px) { .cp-how { grid-template-columns: 1fr 1fr; } }
+
+/* the link the board toast carries (the kit's toast takes text only) */
+.cp-toast-a { margin-left: 4px; color: var(--accent-ink); font-weight: 600; white-space: nowrap; }
+
+/* touch: every door reaches 44px */
+.cp .btn { touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+@media (pointer: coarse) {
+  .cp .btn.sm { min-height: 44px; padding: 0 16px; }
+  .cp-seg button { min-height: 44px; min-width: 44px; }   /* "All" was 37px wide at 320px */
+  /* "GP" alone was 28px wide; the short labels head right-aligned number columns, so the label stays at the right edge
+     (every left-aligned label, Player and Last club, is wider than 44px and fills its button) */
+  .cp-tbl th button { min-height: 44px; min-width: 44px; justify-content: flex-end; }
+  /* "On board #1" folds to the check and "#1" on a phone, 34px wide (i3e, 2026-11-25): 44 by 44 like every door */
+  .cp-onb { min-height: 44px; min-width: 44px; justify-content: center; }
+  /* a gamertag is the door to the player's page: a reach of 44px or more around the 19 to 21px name (the kit's .btn.sm
+     reach), so the row keeps its rhythm. Positioned, the reach sits above the meta line under the name, which is not a
+     door (review 2026-11-02: names were 27 to 29px tall on a phone) */
+  a.cp-tag { position: relative; }
+  a.cp-tag::after { content: ""; position: absolute; inset: -9px -8px; min-width: 44px; }   /* min-width: a two-letter tag such as "AC" */
+}
+@media (max-width: 560px) {
+  .cp-seg { width: 100%; grid-auto-columns: auto; }
+  .cp-seg button { padding: 7px 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-bar i { transition: none; }
+  @keyframes cpJust { from { opacity: .35; } }
+}
+
+/* ---- per-game requests (2026-11-24): the request sheet's games and the pool player's answers ---- */
+.cp-games .row, .cp-ask-r { flex-wrap: wrap; gap: 8px 12px; }
+.cp-games .grow, .cp-ask-r .grow { flex: 1 1 16ch; display: grid; gap: 2px; }
+.cp-ask { margin: 16px 0; padding: 14px 16px; border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--separator); color: var(--ink); }
+.cp-ask-h { font: 600 1.0625rem/1.3 var(--font); margin: 0 0 4px; }
+.cp-ask-b { display: flex; gap: 8px; flex: none; }

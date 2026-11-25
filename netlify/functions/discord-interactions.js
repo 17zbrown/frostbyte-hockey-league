@@ -194,16 +194,21 @@ async function sbGetConfig(key) {
   } catch (e) { return null; }
 }
 // Delete gate: only statistics staff or a commissioner may remove a lobby channel (they're the ones
-// entering the box score). Fail-CLOSED — a transient DB error blocks the delete rather than allowing it.
+// entering the box score). Fail-CLOSED: a transient DB error blocks the delete rather than allowing it.
+/* v463 (Season 2 flip, commissioner 2026-10-19 and 2026-11-23: no departments): who holds the statistics key is the
+   database's answer, profile_has_department (the one department test, created by the staff powers record), asked with
+   the service role because a Discord click carries no member JWT. A banned member is refused and a commissioner passes
+   before the question, so until that record applies only a commissioner can delete a lobby from Discord (the call
+   fails closed, and says so in the log). */
 async function sbIsStatsStaff(discordId) {
   try {
-    const r = await fetch(`${SB_URL}/rest/v1/profiles?discord_id=eq.${encodeURIComponent(discordId)}&select=role,departments&limit=1`, withTimeout({ headers: sbHead() }));
+    const r = await fetch(`${SB_URL}/rest/v1/profiles?discord_id=eq.${encodeURIComponent(discordId)}&select=id,role,banned&limit=1`, withTimeout({ headers: sbHead() }));
     const rows = await r.json().catch(() => []);
     const p = Array.isArray(rows) && rows[0];
-    if (!p) return false;
+    if (!p || p.banned) return false;
     if (p.role === "commissioner") return true;
-    return p.role === "staff" && Array.isArray(p.departments) && p.departments.includes("statistics");
-  } catch (e) { return false; }
+    return (await sbRpc("profile_has_department", { p_profile: p.id, p_key: "statistics" })) === true;
+  } catch (e) { console.error("lobby delete gate: " + ((e && e.message) || e)); return false; }
 }
 
 /* ---------- Discord REST (bot token) — the public summary + per-lobby channel ---------- */
@@ -996,4 +1001,4 @@ export const handler = async (event) => {
 export const _internals = { verifySignature, applyJoin, applyLeave, applyCaptain, applyPick, applyServer,
   applyKickPropose, applyKickApprove, applyKickDecline, applyDeleteVote, applyVeto, handleJoin, pickerView, handleComponent,
   startDraft, pickerView, summaryView, draftView, serverView, doneView, remainingPool, draftOrder, POS, FULL, SERVERS,
-  readyToForm, selectTwelve, nameWithEa, PER_POS };
+  readyToForm, selectTwelve, nameWithEa, PER_POS, sbIsStatsStaff };

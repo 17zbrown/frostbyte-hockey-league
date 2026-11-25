@@ -1,0 +1,26 @@
+/* The abbreviation popup (js/abbr.js). Solid, one soft shadow, no glass: the same raised surface as a menu, in every theme and finish.
+   It lives on body, so an ink band's own tokens never reach it; white on the near-black band reads as well as white on the page.
+   Motion: 130ms in, 90ms out, opacity and transform only, from a slight scale at the end nearest the abbreviation (js sets the
+   origin). A transition rather than keyframes, so a new hover retargets it mid-exit. The first wait is in js; a neighbor is instant. */
+.abbr-tip {
+  position: fixed; left: 0; top: 0; z-index: 210;   /* over the sheets (90), the palette (95), toasts (100) and a drag ghost (200) */
+  pointer-events: none;
+  box-sizing: border-box; width: max-content; max-width: min(260px, calc(100vw - 16px));
+  padding: 5px 9px; border-radius: var(--r-xs);
+  background: var(--raised); color: var(--ink);
+  border: 1px solid var(--hairline); box-shadow: var(--shadow-2);
+  font: 500 .75rem/1.35 var(--font); letter-spacing: 0; text-transform: none; text-align: left;
+  scroll-margin: 0 env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px);   /* no effect here: it hands js/abbr.js the notch in pixels */
+  visibility: hidden; opacity: 0; transform: scale(.97);
+  transition: opacity 90ms var(--ease-out), transform 90ms var(--ease-out), visibility 0s linear 90ms;
+}
+.abbr-tip[data-open] {
+  visibility: visible; opacity: 1; transform: none;
+  transition: opacity 130ms var(--ease-out), transform 130ms var(--ease-out), visibility 0s;
+}
+.abbr-tip[data-instant] { transition-duration: 0s; transition-delay: 0s; }
+@media (prefers-reduced-motion: reduce) {
+  .abbr-tip { transform: none; transition: opacity 120ms linear, visibility 0s linear 120ms; }
+  .abbr-tip[data-open] { transition: opacity 120ms linear, visibility 0s; }
+  .abbr-tip[data-instant] { transition-duration: 0s; transition-delay: 0s; }
+}

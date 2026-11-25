@@ -53,6 +53,21 @@
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
+# v5.00 swap (i2): the Season 2 site's one script bundle, /s2/app-<hash>.js. Its name is a hash of its bytes, so a release
+# is a new URL and a returning visitor downloads 2.3 MB once per release instead of on every visit.
+[[headers]]
+  for = "/s2/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# v5.00 swap (i2): /next/ exists only in site-build's "next" mode (the suites; never shipped) and is never indexed (its page
+# says so in a robots meta too). After the flip /next and /classic redirect to / (_redirects); the Season 1 site lives on
+# its own Netlify site (site-build --fallback), not under a path here.
+[[headers]]
+  for = "/next/*"
+  [headers.values]
+    X-Robots-Tag = "noindex"
+
 [[redirects]]
   from = "/preview.html"
   to = "/index.html"

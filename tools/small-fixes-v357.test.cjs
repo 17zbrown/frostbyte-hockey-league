@@ -28,7 +28,7 @@ const e = rb.changelog.find((c) => c.version === "3.57");
 A("changelog records 3.57", !!e);
 A("Appendix A: the draft at 9:00 PM", /held live on the site at 9:00 PM Eastern/.test(secs["0.5"].full[0]));
 A("2.3.1: status changes", /An offer is declined only by the club that received it and withdrawn only by the club that made it/.test(secs["2.3"].paragraphs[0]));
-A("2.3.3: reversal before or after the deadline", /The transactions department, or a commissioner, may thereafter review any completed trade and reverse it, before or after the movement deadline/.test(secs["2.3"].paragraphs[2]));
+A("2.3.3: reversal before or after the deadline", /League staff, or a commissioner, may thereafter review any completed trade and reverse it, before or after the movement deadline/.test(secs["2.3"].paragraphs[2]));
 A("3.2.6, 3.3.1, 5.1.2, 5.1.4: reschedules only in special circumstances", /not entitled to a reschedule/.test(secs["3.2"].paragraphs[5]) && /only in special circumstances/.test(secs["3.3"].paragraphs[0]) && /approved only in special circumstances \(Rule 3\.3\)/.test(secs["5.1"].paragraphs[1]) && /approved only in special circumstances \(Rule 3\.3\)/.test(secs["5.1"].paragraphs[3]));
 A("5.1.1: the fixed hour", /Game times do not change, so the deadline is always that fixed hour/.test(secs["5.1"].paragraphs[0]) && !/90 minutes before the first puck drop/.test(secs["5.1"].paragraphs[0]));
 A("5.2.1: positions are preferences", /the positions a player lists are their preferred spots rather than limits/.test(secs["5.2"].paragraphs[0]));

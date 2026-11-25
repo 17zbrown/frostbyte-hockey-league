@@ -86,7 +86,7 @@ console.log("\n— the rulebook says what the site does (v2.28)");
   A("[full] 2.2: the counter loop is described", /counter with their own number/.test(secFull("2.2")));
   A("[full] 2.2: accepting one offer withdraws the rest", /accepting one offer withdraws every other offer they hold/.test(secFull("2.2")));
   A("[full] 2.2 no longer promises a league-office confirmation", !/only once the league office confirms it/.test(secFull("2.2")));
-  A("[full] 2.3: the department may send a trade back", /transactions department may review any completed trade/.test(secFull("2.3")));
+  A("[full] 2.3: league staff may send a trade back (the v5.00 swap staffing flip)", /Afterwards league staff may review any completed trade and send it back where, in their judgment,/.test(secFull("2.3")));
   A("[full] 2.3: ...and cannot once a piece has moved on", /cannot be reversed once a player or pick in it has moved on/.test(secFull("2.3")));
   A("5.2: the weekly cap is a regular-season cap (v2.51) and 8.3's series cap applies in its place in the playoffs",
     /weekly appearance cap in the regular season, counted across the game-week/.test(sec("5.2")) && /In the playoffs the cap of Rule 8\.3 applies in its place/.test(sec("5.2")));

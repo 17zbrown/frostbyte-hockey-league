@@ -34,11 +34,12 @@ const rb = CG.CONTENT.rulebook, secs = {};
 rb.chapters.forEach((ch) => ch.sections.forEach((s) => { secs[s.id] = s; }));
 const e = rb.changelog.find((c) => c.version === "3.68");
 A("changelog records 3.68", !!e);
-A("3.2.6: ten and sixteen", /ten \(10\) forfeits in a season refer the club to the officiating department/.test(secs["3.2"].paragraphs[5]) && /sixteen \(16\) forfeits in a season are grounds for removing the club's management/.test(secs["3.2"].paragraphs[5]));
+A("3.2.6: ten and sixteen", /ten \(10\) forfeits in a season refer the club to the league staff for review/.test(secs["3.2"].paragraphs[5]) && /sixteen \(16\) forfeits in a season are grounds for removing the club's management/.test(secs["3.2"].paragraphs[5]));
 A("3.3.1: the week it is played, almost never", /A game moved into another game-week counts toward the week in which it is played/.test(secs["3.3"].paragraphs[0]) && /That almost never happens/.test(secs["3.3"].paragraphs[0]));
-A("2.6.1: majority of all reviewers; alone, a commissioner", /approved once more than half of all the reviewers approve it/.test(secs["2.6"].paragraphs[0]) && /Only a commissioner decides one alone\./.test(secs["2.6"].paragraphs[0]));
+/* v5.00 swap, the staffing flip (2026-11-23): every staffer and commissioner votes, not the applications reviewers */
+A("2.6.1: majority of all voters (every staffer and commissioner); alone, a commissioner", /is decided by a vote of every member of league staff and every commissioner, each vote counting the same; a member who is banned, or suspended from staff duties, does not vote and is not counted\. The application is approved once more than half of all of them approve it/.test(secs["2.6"].paragraphs[0]) && /Only a commissioner decides one alone\./.test(secs["2.6"].paragraphs[0]));
 A("6.3.1: the Statistics correction", /a correction request \(the Statistics correction in the Action Center\), identifying the game and the specific entry disputed and attaching supporting evidence\. The request is filed by the club's Owner, GM or AGM/.test(secs["6.3"].paragraphs[0]));
-A("2.3.1: resend, and staff act otherwise only to reverse", /The transactions department may resend a declined or withdrawn offer as it was/.test(secs["2.3"].paragraphs[0]));
+A("2.3.1: resend, and staff act otherwise only to reverse", /League staff may resend a declined or withdrawn offer as it was, for the receiving club to accept or decline; otherwise they act on a trade only to reverse one they find suspicious/.test(secs["2.3"].paragraphs[0]));
 A("2.4: a season minimum gates trades too", /Where a season sets one, it applies to a trade as it does to a waiver\./.test(secs["2.4"].paragraphs[2]));
 A("no em dashes or spaced hyphens in the 3.68 entry", !/—| - /.test(JSON.stringify(e)));
 

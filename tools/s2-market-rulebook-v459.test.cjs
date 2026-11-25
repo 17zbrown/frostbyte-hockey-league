@@ -58,7 +58,11 @@ const NEW = {
   "S2.8": [
     "Season 2 has six (6) staff committees: Officiating; Statistics and imports; Applications; Community; Transactions; and Draft and Bidding.",
     "Each committee has one committee manager, who prioritizes the committee's work and is the first point of contact for it.",
-    "A committee manager holds no power beyond that of any other member of league staff, save the manager of Draft and Bidding, who, like a commissioner, may pause and resume a Saturday bidding event (Rule S2.6)",
+    /* v5.00 swap, the staffing flip: the held S2.8 sentences, released with the flip records (one group, the all-staff
+       vote, one staff channel, the managers' suspension powers) */
+    "The league staff is one group, with no departments: every member of league staff may do the work of any committee, and every member of league staff and every commissioner votes on an owner, staff, General Manager or Assistant General Manager application (Rule 2.6).",
+    "Every automated notice to league staff, the notice of a ban, of the lifting of a ban and of the lifting of a suspension included, goes to one staff notifications channel in the league Discord.",
+    "A committee manager holds no power beyond that of any other member of league staff, save that a committee manager may issue a suspension within the limits of Rule 7.2, extend or lift one, and decide a suspension request or an appeal (Rules 7.2 and 7.6), and save the manager of Draft and Bidding, who, like a commissioner, may pause and resume a Saturday bidding event (Rule S2.6)",
     "A member of league staff may apply for a committee manager seat that is vacant.",
     "it is approved once more than half of all league staff and commissioners approve it",
   ],
@@ -79,11 +83,11 @@ const STALE = [
 /* held rulings: never in the current site's book until the commissioner releases them. v4.61: the playoff ruling ("2 of
    the first 4", the floor at the signed-up position group) was released on 2026-11-24, when the commissioner kept it
    ("Keep 2 of the first 4") and it shipped with its database record; tools/s2-playoff-rules-v461.test.cjs pins its text,
-   so "series' first four" and "at the position group they signed up for" left this list. */
-const HELD = [
-  "may issue a suspension within the limits",
-  "with no departments", "an owner, staff, General Manager or Assistant General Manager application", "public from then",
-];
+   so "series' first four" and "at the position group they signed up for" left this list. v5.00 swap, the staffing flip:
+   the new suspension limits and the all-staff vote were released with the flip records, so "may issue a suspension within
+   the limits", "with no departments" and "an owner, staff, General Manager or Assistant General Manager application" left
+   it too; NEW pins them in S2.8. */
+const HELD = ["public from then"];
 const DASHES = new RegExp("[" + String.fromCharCode(0x2014, 0x2013) + "]| - ");
 
 for (const f of Object.keys(books)) {

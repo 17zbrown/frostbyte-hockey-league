@@ -60,6 +60,9 @@ globalThis.fetch = async (url, opts = {}) => {
   const u = String(url), m = opts.method || "GET";
   const J = (b, c) => new Response(JSON.stringify(b), { status: c || 200, headers: { "content-type": "application/json" } });
   if (u.includes("/auth/v1/user")) return J({ id: "uid1" });
+  /* v463: staffActor asks the database for the statistics key (rpc/is_stats_staff under the member's JWT); this
+     answers as the database does before the Season 2 flip records apply (the departments column) */
+  if (u.includes("/rest/v1/rpc/is_stats_staff")) return J(PROFILE.role === "commissioner" || (PROFILE.role === "staff" && (PROFILE.departments || []).includes("statistics")));
   if (u.includes("/rest/v1/profiles?id=eq.uid1")) return J([PROFILE]);
   if (u.includes("/rest/v1/games?id=eq.g1") && m === "GET") return J([GAMEX || GAME]);
   if (u.includes("/rest/v1/teams?id=in.")) return J(SEATED && u.includes("owner_profile_id") ? SEATS : TEAMS);

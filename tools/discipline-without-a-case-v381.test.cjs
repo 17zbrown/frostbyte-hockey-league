@@ -24,7 +24,7 @@ A("the officiating desk offers it to a commissioner", /\(commishNow \? '<button 
 console.log("— the book");
 global.CG = {}; vm.runInThisContext(R("src/live/part3_content.js"));
 const rb = CG.CONTENT.rulebook, s72 = rb.chapters.flatMap((c) => c.sections || []).find((s) => s.id === "7.2");
-A("Rule 7.2: a commissioner may impose any sanction directly, without a case", /A commissioner may impose any of these sanctions directly, from Users and roles in the Control Center or from the officiating desk, without a case being filed/.test(s72.paragraphs[0]));
+A("Rule 7.2: a commissioner may impose any sanction directly, without a case", /A commissioner may impose any of these sanctions directly, from the Staff Desk or the Control Center, without a case being filed/.test(s72.paragraphs[0]));
 A("changelog 3.81", !!rb.changelog.find((c) => c.version === "3.81"));
 
 console.log(fail ? "\n" + fail + " of " + n + " FAILED" : "\nall " + n + " passed");

@@ -26,7 +26,7 @@ import { fileURLToPath } from "node:url";
    sides importing one module is what stops the two processes from ever disagreeing about what a
    member's roles should be — they can only disagree about when. */
 import { STAFF_DEPARTMENTS, POS_LABEL, POSITION_ROLES, MANAGED_STATIC,
-  desiredRolesFor, applyManagedRoles, managedRoleIds,
+  desiredRolesFor, applyManagedRoles, managedRoleIds, STAFF_MODEL_KEY, committeesLive, committeeRoleName,
   NOT_SIGNED_UP, notSignedUpName, roleIdMap, notSignedUpStrays } from "../shared/roles.mjs";
 import { buildDepartureEmbed } from "../shared/departure-card.mjs";
 import { buildNoticeEmbed } from "../bot/club-notices.mjs";
@@ -1297,6 +1297,8 @@ function rolePermissionsAtBirth(name, guildRoles) {
   return perms.toString();
 }
 async function enforceRoleBits(guildRoles, teams, roleId, sum) {
+  /* v463: committee manager roles are not passed here on purpose: they are office roles, like Commissioner and Staff
+     (ROLE_BITS_KEEP), so a bit the office gives one by hand stays. They are born with the standard set. */
   const owned = managedRoleIds(roleId, teams);
   for (const r of guildRoles || []) {
     let perms;
@@ -1760,6 +1762,52 @@ async function ensureStaffDepartments(guildChannels, guildRoles, roleId, roleNam
   }
 }
 
+/* v463: lifted out of the sweep body unchanged apart from the #free-agency audience below, so a test can drive it. */
+async function lockAudienceChannels(guildChannels, roleId, marketOn, sum) {
+  // #trade-block and #free-agency self-heal to their intended audience if @everyone view ever
+  // gets re-added. They are NOT the same audience: #trade-block is team management only, but
+  // #free-agency exists for free agents AND clubs to talk deals, so the Free Agent role must be
+  // able to see it — locking it to management hid the channel from the very people it is for.
+  const MGMT_ALLOW = "68608";   // VIEW_CHANNEL(1024)+SEND_MESSAGES(2048)+READ_HISTORY(65536)
+  const mgmtRoleIds = ["owner", "general manager", "assistant general manager", "commissioner"].map((n) => roleId[n]).filter(Boolean);
+  const faRoleId = roleId["free agent"];
+  /* v463 (commissioner, 2026-11-23: "#free-agency becomes the training camp pool channel"; Rule S2.5: the training camp
+     channel is "open only to league staff, club management and the training camp pool"): in a season the market runs,
+     the channel's audience is the office (Commissioner and Staff), the three seat roles and Training Camp, and Free
+     Agent's view comes off, so a signed-up player outside the pool no longer reads it. In any other season the audience
+     is the one above, unchanged. Unknown (marketOn null: the read failed) leaves the channel exactly as it is this run. */
+  const poolAudience = [...mgmtRoleIds, roleId["staff"], roleId["training camp"]].filter(Boolean);
+  const CHANNEL_AUDIENCE = { "trade-block": mgmtRoleIds };
+  if (marketOn === true) CHANNEL_AUDIENCE["free-agency"] = poolAudience;
+  else if (marketOn === false) CHANNEL_AUDIENCE["free-agency"] = [...mgmtRoleIds, faRoleId].filter(Boolean);
+  const CHANNEL_DROP = { "free-agency": marketOn === true && faRoleId ? [faRoleId] : [] };
+  for (const cname of Object.keys(CHANNEL_AUDIENCE)) {
+    const allowIds = CHANNEL_AUDIENCE[cname];
+    const chan = guildChannels.find((c) => c.name === cname && c.type === 0);
+    if (!chan || !allowIds.length) continue;
+    const ow = chan.permission_overwrites || [];
+    const everyone = ow.find((o) => o.id === GUILD);
+    const hidden = everyone && (BigInt(everyone.deny || "0") & 1024n) === 1024n;
+    // Fast-path skip only when it's hidden from @everyone AND every intended role can already
+    // view it — otherwise a missing role allow (e.g. Free Agent) would never be healed.
+    const allAllowed = allowIds.every((rid) => {
+      const o = ow.find((x) => x.id === rid);
+      return o && (BigInt(o.allow || "0") & 1024n) === 1024n;
+    });
+    const drops = (CHANNEL_DROP[cname] || []).filter((rid) => ow.some((o) => o.id === rid));
+    if (hidden && allAllowed && !drops.length) continue;
+    try {
+      // Grant the audience FIRST, then deny @everyone — never deny-then-stop, or a mid-sweep
+      // failure would leave the channel hidden from everyone including its own audience.
+      for (const rid of allowIds) await dApi("PUT", `/channels/${chan.id}/permissions/${rid}`, { type: 0, allow: MGMT_ALLOW, deny: "0" });
+      await dApi("PUT", `/channels/${chan.id}/permissions/${GUILD}`, { type: 0, deny: "1024", allow: "0" });
+      /* last, once the new audience can already read it: the old audience's overwrite comes off */
+      for (const rid of drops) { await dApi("DELETE", `/channels/${chan.id}/permissions/${rid}`); sum.channelViewDropped = (sum.channelViewDropped || 0) + 1; }
+      sum.mgmtLocked = (sum.mgmtLocked || 0) + 1;
+    } catch (e) { sum.errors.push({ lockChannel: cname, error: String(e.message || e) }); }
+  }
+}
+
 /* ---- the two member passes ------------------------------------------------------------------
    Pass 1 walks every site profile with a Discord id; pass 2 walks every guild member the first
    pass did not cover. Both take `ctx` (everything the sweep loaded) and `outOfTime()`, and stop
@@ -1775,7 +1823,7 @@ function cutShort(sum, left) {
 }
 async function syncLinkedMembers(ctx, sum, outOfTime) {
   const { links, bannedIds, guildBans, memberById, memberListOk, markGuild, avatarById, tagOwner, inputsOk,
-    roleId, teamRoleId, registered, playing, regOpen, mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, camp, managedIds,
+    roleId, teamRoleId, registered, playing, regOpen, mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, camp, managedIds, pool, committeesOn, committeeSeats,
     timeoutUntil, timeoutsApplied } = ctx;
   const linked = links.filter((m) => m.discord_id);
   for (let i = 0; i < linked.length; i++) {
@@ -1869,7 +1917,7 @@ async function syncLinkedMembers(ctx, sum, outOfTime) {
       // shared/roles.mjs, shared verbatim with the gateway bot's instant per-member sync.
       if (inputsOk) {
         const desired = desiredRolesFor(m, { roleId, teamRoleId, registered, playing, regOpen,
-          mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, camp });
+          mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, camp, pool, committees: committeesOn === true, committeeSeats });
         const { next, changed } = applyManagedRoles(mem.roles, desired, managedIds);
         if (changed) {
           const res = await dApi("PATCH", `/guilds/${GUILD}/members/${m.discord_id}`, { roles: next });
@@ -2315,6 +2363,18 @@ export async function runSweep(opts = {}) {
   const deptByProfile = {};
   try { for (const p of await sbGet("profiles?select=id,departments&role=in.(staff,commissioner)")) deptByProfile[p.id] = p.departments || []; }
   catch (e) { inputsOk = false; inputsErr.push("departments: " + String(e.message || e)); }
+  /* v463 (FLIP): the staff model (shared/roles.mjs committeesLive: app_config.staff_model) and the committee seats.
+     Unknown (null) when a read fails: managed roles are left untouched, and no department or committee furniture is
+     built or changed, so a blip can never put the department roles back on anyone after the flip. */
+  let committeesOn = null, committees = [];
+  const committeeSeats = {};
+  try {
+    const sm = await sbGet(`app_config?key=eq.${STAFF_MODEL_KEY}&select=value`);
+    const on = committeesLive(sm[0] && sm[0].value);
+    committees = await sbGet("committees?select=key,name,manager_profile_id&order=sort.asc");
+    for (const c of committees) if (c.manager_profile_id) (committeeSeats[c.manager_profile_id] = committeeSeats[c.manager_profile_id] || []).push(c.name);
+    committeesOn = on;
+  } catch (e) { committees = []; inputsOk = false; inputsErr.push("staff model: " + String(e.message || e)); }
   const bannedIds = new Set((await sbGet("profiles?banned=eq.true&select=id")).map((p) => p.id));
   // current in_guild per profile, so we only write when it changes
   const inGuildById = {};
@@ -2342,6 +2402,8 @@ export async function runSweep(opts = {}) {
   // POS_LABEL / POSITION_ROLES come from shared/roles.mjs (imported at top)
   const posOf = {};
   const camp = new Set();   /* v2.72: roster spots in training camp this season → the Training Camp role */
+  const pool = new Set();   /* v463: Season 2's league training camp pool (public.market_pool) → the Training Camp role */
+  let marketOn = null;      /* v463: does the market run the season in play (public.market_on)? null = unknown this run */
   try {
     /* v2.36: sign-up positions come from the season taking sign-ups and roster positions from the
        season in play (active, else the lowest-numbered open season). "Newest season" pointed at a
@@ -2354,6 +2416,11 @@ export async function runSweep(opts = {}) {
       if (s.position) posOf[s.profile_id] = s.position; // roster spot wins over signup
       if (s.squad === "tc" && (s.status || "active") === "active") camp.add(s.profile_id);
     }
+    /* v463: the database's own pool, never a list rebuilt here. It answers nothing for a season the market does not run
+       (market_on, so Season 1 is unchanged) or before that season's draft is complete; a failed read leaves roles as
+       they are, like every input above. market_on also decides who sees #free-agency (the channel audience below). */
+    if (curSeason) marketOn = (await sbGet(`rpc/market_on?p_season=${curSeason.id}`)) === true;
+    if (curSeason) for (const r of await sbGet(`rpc/market_pool?p_season=${curSeason.id}&select=profile_id`)) pool.add(r.profile_id);
   } catch (e) { inputsOk = false; inputsErr.push("positions: " + String(e.message || e)); }
 
 
@@ -2563,7 +2630,10 @@ export async function runSweep(opts = {}) {
   // Department roles + their Staff-category rooms first, so the private-channel sweep below can
   // self-heal them the same run. deptRoleByChannel lets that sweep keep each room department-private
   // (its role + commissioners) instead of the category default (all staff).
-  try { await ensureStaffDepartments(guildChannels, guildRoles, roleId, roleNameById, sum); } catch (e) { sum.errors.push({ staffDepts: String(e.message || e) }); }
+  /* v463 (FLIP): the department roles and rooms are built only under the department model. After the flip they are left
+     exactly as they are (unassigned by the member pass, never deleted: deleting them is the commissioner's later call,
+     through discord_reap), and each committee gets its manager role instead (ENSURE_ROLES below). */
+  if (committeesOn === false) try { await ensureStaffDepartments(guildChannels, guildRoles, roleId, roleNameById, sum); } catch (e) { sum.errors.push({ staffDepts: String(e.message || e) }); }
   try { await ensureGuildCommands(sum); } catch (e) { sum.errors.push({ commands: String(e.message || e) }); }
   /* One-shot Discord reap: when a club is removed from the league, its role and channel objects
      outlive the database row — the sync creates guild furniture but deliberately never deletes any
@@ -2615,40 +2685,9 @@ export async function runSweep(opts = {}) {
     sum.deptChanMapped = Object.keys(cmap).length;
   } catch (e) { sum.errors.push({ deptChannelIds: String(e.message || e) }); }
 
-  // #trade-block and #free-agency self-heal to their intended audience if @everyone view ever
-  // gets re-added. They are NOT the same audience: #trade-block is team management only, but
-  // #free-agency exists for free agents AND clubs to talk deals, so the Free Agent role must be
-  // able to see it — locking it to management hid the channel from the very people it is for.
-  // VIEW_CHANNEL(1024)+SEND_MESSAGES(2048)+READ_HISTORY(65536)=68608.
+  // VIEW_CHANNEL(1024)+SEND_MESSAGES(2048)+READ_HISTORY(65536)=68608, the grant every private room below uses
   const MGMT_ALLOW = "68608";
-  const mgmtRoleIds = ["owner", "general manager", "assistant general manager", "commissioner"].map((n) => roleId[n]).filter(Boolean);
-  const faRoleId = roleId["free agent"];
-  const CHANNEL_AUDIENCE = {
-    "trade-block": mgmtRoleIds,
-    "free-agency": [...mgmtRoleIds, faRoleId].filter(Boolean),
-  };
-  for (const cname of Object.keys(CHANNEL_AUDIENCE)) {
-    const allowIds = CHANNEL_AUDIENCE[cname];
-    const chan = guildChannels.find((c) => c.name === cname && c.type === 0);
-    if (!chan || !allowIds.length) continue;
-    const ow = chan.permission_overwrites || [];
-    const everyone = ow.find((o) => o.id === GUILD);
-    const hidden = everyone && (BigInt(everyone.deny || "0") & 1024n) === 1024n;
-    // Fast-path skip only when it's hidden from @everyone AND every intended role can already
-    // view it — otherwise a missing role allow (e.g. Free Agent) would never be healed.
-    const allAllowed = allowIds.every((rid) => {
-      const o = ow.find((x) => x.id === rid);
-      return o && (BigInt(o.allow || "0") & 1024n) === 1024n;
-    });
-    if (hidden && allAllowed) continue;
-    try {
-      // Grant the audience FIRST, then deny @everyone — never deny-then-stop, or a mid-sweep
-      // failure would leave the channel hidden from everyone including its own audience.
-      for (const rid of allowIds) await dApi("PUT", `/channels/${chan.id}/permissions/${rid}`, { type: 0, allow: MGMT_ALLOW, deny: "0" });
-      await dApi("PUT", `/channels/${chan.id}/permissions/${GUILD}`, { type: 0, deny: "1024", allow: "0" });
-      sum.mgmtLocked = (sum.mgmtLocked || 0) + 1;
-    } catch (e) { sum.errors.push({ lockChannel: cname, error: String(e.message || e) }); }
-  }
+  try { await lockAudienceChannels(guildChannels, roleId, marketOn, sum); } catch (e) { sum.errors.push({ lockChannels: String(e.message || e) }); }
 
   // Team channels self-heal the same way: private to the club + the league office (Commissioner +
   // Staff). The club-role allow goes in the SAME pass as the @everyone deny (never deny first and
@@ -2832,6 +2871,10 @@ export async function runSweep(opts = {}) {
   //  Staff (members ping the officials), the front-office roles (gate the Team Management rooms),
   //  and "Not Signed Up" (the daily sign-up reminder pings this one role).
   const ENSURE_ROLES = [["Training Camp", true], ["Staff", true], ["Owner", true], ["General Manager", true], ["Assistant General Manager", true], ["CGHL Management", true], ["Not Signed Up", true], ["Restricted Free Agent", true], ["Rookie", true]];
+  /* v463 (FLIP; commissioner 2026-11-23: "only committee managers also wear their committee manager role"): under the
+     committee model, one role per public.committees row, mentionable like the department roles so staff can reach a
+     committee's manager. Created when missing, never deleted (a retired committee's role is the office's to reap by id). */
+  if (committeesOn === true) for (const c of committees) ENSURE_ROLES.push([committeeRoleName(c.name), true]);
   for (const [name, mentionable] of ENSURE_ROLES) {
     if (roleId[name.toLowerCase()]) continue;
     try {
@@ -2889,7 +2932,7 @@ export async function runSweep(opts = {}) {
   /* club colours above the front-office seats, so a player's name shows their club */
   try { await ensureRoleOrder(guildRoles, teams, roleId, sum); } catch (e) { sum.errors.push({ roleOrder: String(e.message || e) }); }
 
-  const managedIds = managedRoleIds(roleId, teams);
+  const managedIds = managedRoleIds(roleId, teams, committees);
 
   // Current-season registration drives the three participation roles. `registered` is populated
   // year-round (not only while the window is open) so Player and Free Agent stay coherent all
@@ -2949,7 +2992,7 @@ export async function runSweep(opts = {}) {
   catch (e) { timeoutsApplied = {}; }
   const timeoutsBefore = JSON.stringify(timeoutsApplied);
   const ctx = { links, bannedIds, guildBans, memberById, memberListOk, markGuild, avatarById, tagOwner, inputsOk,
-    roleId, teamRoleId, registered, playing, regOpen, mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, camp, managedIds,
+    roleId, teamRoleId, registered, playing, regOpen, mgmtRoleByProfile, deptByProfile, posOf, rfa, rookies, camp, managedIds, pool, committeesOn, committeeSeats,
     timeoutUntil, timeoutsApplied };
   await syncLinkedMembers(ctx, sum, outOfTime);
   if (JSON.stringify(timeoutsApplied) !== timeoutsBefore) {
@@ -3018,7 +3061,7 @@ export default async () => {
 /* Exposed for tools/departures.test.mjs. The departure tracker is the one part of this file whose
    failure mode is silent and public — a false mass-departure would page the commissioners with a
    fake exodus — so it is tested directly rather than only through the whole sync. */
-export const _internals = { fetchClubLogoPng, readRoleIcon, enforcePostingPolicy, enforceVerificationLevel, POST_BITS,
+export const _internals = { fetchClubLogoPng, lockAudienceChannels, readRoleIcon, enforcePostingPolicy, enforceVerificationLevel, POST_BITS,
   removeDepartedSignups, SIGNUP_REMOVAL_GRACE_HOURS,
   dApi, flushClubNotices, syncLinkedMembers, syncUnlinkedMembers, MEMBER_PASS_BUDGET_MS, DEPART_TOUCH_MS,
   enforceRoleBits, rolePermissionsAtBirth, ROLE_STRIP_BITS, EVERYONE_STRIP_BITS, CREATE_THREAD_BITS, CREATE_EVENTS,

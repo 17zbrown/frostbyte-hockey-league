@@ -88,13 +88,18 @@ console.log("\n— the rulebook");
   rb.chapters.find((c) => c.num === 7).sections.forEach((x) => (s7[x.id] = x.paragraphs));
   A("7.1 no longer limits community to warnings",
     !/may issue warnings and escalate anything heavier/.test(s7["7.1"][1]));
-  A("...it issues warnings and suspensions within the ceilings of Rule 7.2 (v3.51)",
-    /Both departments issue warnings and suspensions within the ceilings of Rule 7\.2/.test(s7["7.1"][1]));
-  A("...and the principle is stated: a department rules on the conduct it sees",
-    /A department rules on the conduct it sees/.test(s7["7.1"][1]) &&
-    /the community department is not asked to decide a hit it never watched/.test(s7["7.1"][1]));
-  A("7.2 sets the staff ceiling at 3 to 18 games in steps of three, or 30 days (v3.51)",
-    /from three \(3\) to eighteen \(18\) games/.test(s7["7.2"][0]) && /no more than thirty \(30\) days away/.test(s7["7.2"][0]));
+  /* v5.00 swap, the staffing flip (commissioner, 2026-10-19: "we will remove the different departments"; 2026-11-23: only
+     committee managers or commissioners suspend, up to 14 days or 18 games): one staff group, so the v3.38 department split
+     and its "a department rules on the conduct it sees" principle are gone; staff still warn, and suspend as managers */
+  A("...any staffer warns; a committee manager or a commissioner suspends within the limits of Rule 7.2 (v3.51, the flip)",
+    /Any member of league staff may give a formal warning; a committee manager or a commissioner suspends within the limits of Rule 7\.2, and any other member of league staff who finds a suspension warranted files a suspension request under that rule\./.test(s7["7.1"][1]));
+  A("...and a complaint reaches every member of staff, with no department routing",
+    /A complaint is filed under the conduct it concerns, conduct on the ice or conduct in the Discord, and every member of league staff is notified the moment one is filed\./.test(s7["7.1"][1]) &&
+    !/department/.test(s7["7.1"][1]));
+  A("7.2 sets the manager ceiling at 3 to 18 games in steps of three, or 14 days from the start (v3.51, the flip)",
+    /Only a committee manager \(Rule S2\.8\) or a commissioner may issue a suspension\./.test(s7["7.2"][0]) &&
+    /in steps of three \(3\), from three \(3\) to eighteen \(18\) games/.test(s7["7.2"][0]) &&
+    /no more than fourteen \(14\) days from the start of the suspension/.test(s7["7.2"][0]) && !/thirty \(30\) days/.test(s7["7.2"][0]));
   A("...and the heavier sanctions are still the commissioner's",
     /are imposed only by a commissioner/.test(s7["7.2"][0]));
   A("7.2 says the member is told when it is imposed (now paragraph 6)",

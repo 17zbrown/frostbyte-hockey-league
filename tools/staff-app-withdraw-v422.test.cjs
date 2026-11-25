@@ -81,7 +81,7 @@ const rb = CG.CONTENT.rulebook, sec = [].concat(...rb.chapters.map((c) => c.sect
    carries the waitlist, so the rulebook checks here pin the text without it; the database and site checks are unchanged */
 A("Rule 2.6 [4]: staff withdraw at any time, refile at any time, an approved one through the office",
   /An applicant may withdraw a pending staff application at any time and may file a staff application again at any time; an approved staff application is not withdrawn, and a staff member who wishes to leave the staff asks the league office\./.test(p3));
-A("...a refiled application is voted afresh", /An application filed again after it was withdrawn or denied goes before the reviewers afresh: votes cast before it was filed again are kept on the record but do not count\./.test(p3));
+A("...a refiled application is voted afresh", /An application filed again after it was withdrawn or denied goes to the vote afresh: votes cast before it was filed again are kept on the record but do not count\./.test(p3));
 A("...and it follows the owner withdraw sentence", /given up through the league office\. An applicant may withdraw a pending staff application/.test(p3));
 A("the rendered Rule 2.6 has no automatic fill", !/fills it automatically|automatic appointment/.test(JSON.stringify(sec)));
 const e = rb.changelog.find((c) => c.version === "4.22") || {};

@@ -150,7 +150,10 @@ A("1.1.5: the front office is still left to the office", /\(Owner, General Manag
 const p72 = sec("7.2").paragraphs, p76 = sec("7.6").paragraphs;
 A("7.2: paragraph 7 keeps its place, now the transitional paragraph", p72.length === 7 && /^A member is told of a sanction at the moment it is imposed/.test(p72[5]) && /^No member is suspended for leaving the league Discord\./.test(p72[6]));
 A("7.2.7 still says how a running departure suspension is lifted", /It is lifted only when the league office grants the member's appeal under Rule 7\.6, and lifting it restores no roster spot or sign-up by itself\./.test(p72[6]));
-A("7.2: paragraph 7 is a commissioner-level length named in paragraph 1, and the one exception to one at a time", /other than under paragraph 4 or paragraph 7 of this rule,/.test(p72[0])
+/* v5.00 swap, the staffing flip: paragraph 4 left paragraph 1's exception, because a committee manager's second
+   suspension stays within the limits or goes to a commissioner as a request for the rest of the season */
+A("7.2: paragraph 7 is a commissioner-level length named in paragraph 1, and the one exception to one at a time", /any suspension for the remainder of a season other than under paragraph 7 of this rule, is imposed by a commissioner, or is applied for by a suspension request/.test(p72[0])
+  && /A committee manager imposing a second suspension in a season must set its length within the limits of paragraph 1 of this rule, or file a suspension request for the remainder of the season, which only a commissioner may approve/.test(p72[3])
   && /A member is under one suspension at a time/.test(p72[3]) && /is the one exception to holding one suspension at a time/.test(p72[3]));
 A("7.6: appended; 48 hours and once still stand for every other sanction", p76.length === 3 && /forty-eight \(48\) hours/.test(p76[0]) && /Each sanction may be appealed once/.test(p76[0]) && /It may still be appealed only once/.test(p76[2]));
 A("0.3 in both formats keeps the day of grace", /withdrawn automatically after one day's grace \(Rule 1\.1\)\./.test(sec("0.3").paragraphs.join(" ")) && /after a day's grace \(Rule 1\.1\)\./.test((sec("0.3").full || []).join(" ")));

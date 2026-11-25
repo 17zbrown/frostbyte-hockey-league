@@ -74,6 +74,9 @@ globalThis.fetch = async (url, opts = {}) => {
   const u = String(url), m = opts.method || "GET";
   const J = (b, c) => new Response(JSON.stringify(b), { status: c || 200, headers: { "content-type": "application/json" } });
   if (u.includes("/auth/v1/user")) return UID ? J({ id: UID }) : J({ error: "bad" }, 401);
+  /* v463: staffActor asks the database for the statistics key (rpc/is_stats_staff under the member's JWT); this
+     answers as the database does before the Season 2 flip records apply (the departments column) */
+  if (u.includes("/rest/v1/rpc/is_stats_staff")) { const p = PROFILES[UID]; return J(!!p && (p.role === "commissioner" || (p.role === "staff" && (p.departments || []).includes("statistics")))); }
   if (u.includes("/rest/v1/profiles?id=eq.")) {
     const id = decodeURIComponent(u.match(/id=eq\.([^&]+)/)[1]);
     return J(PROFILES[id] ? [PROFILES[id]] : []);
@@ -102,7 +105,7 @@ globalThis.fetch = async (url, opts = {}) => {
     return J(null);
   }
   if (u.includes("/rest/v1/app_config")) return J([{ key: "discord_staff_webhook", value: "https://discord.test/hook" }]);
-  if (u.startsWith("https://discord.test/hook")) { writes.webhooks.push(JSON.parse(opts.body)); return J(null); }
+  if (u.includes("/rest/v1/rpc/notify_staff_ch")) { writes.webhooks.push({ content: JSON.parse(opts.body).p_content }); return J(null); }
   if (u.includes("/rest/v1/ea_ingest_log") && m === "GET") return J(LOG);
   /* v4.36: the merge marks an archived sitting conditionally and reads the representation back (an empty one is a race) */
   if (u.includes("/rest/v1/ea_ingest_log") && m === "PATCH") { writes.logPatches.push({ url: u, body: JSON.parse(opts.body) }); return J([{ ea_match_id: decodeURIComponent((u.match(/ea_match_id=eq\.([^&]+)/)||[])[1]||"") }]); }

@@ -35,12 +35,35 @@ export const MANAGED_STATIC = ["Player", "Owner", "General Manager", "Assistant 
   "CGHL Management", "Commissioner", "Staff", "Free Agent", "Restricted Free Agent", "Rookie",
   "Not Signed Up", "Training Camp", ...POSITION_ROLES];
 
-export function managedRoleIds(roleId, teams) {
+/* v463 (FLIP; commissioner, 2026-10-19 and 2026-11-23): Season 2 has no staff departments. "Every staffer wears the plain
+   Staff role (Media and the department roles go); only committee managers also wear their committee manager role." The
+   switch is ONE app_config key, staff_model, read by every lane (the sweep, the bot's role sync, the bot's staff alerts):
+   absent or "departments" is Season 1's model, exactly as before; "committees" is Season 2's. It is set by
+   sql/2026-11-24-s2-discord-staff-model-v463.sql right after the staff powers record applies, and removed by that record's
+   reverse, so the code ships ahead and changes nothing until the database flips. Any other value is an error: callers
+   leave roles and alerts as they are rather than guess. */
+export const STAFF_MODEL_KEY = "staff_model";
+export function committeesLive(value) {
+  const v = value == null ? "" : String(value).trim();
+  if (v === "" || v === "departments") return false;
+  if (v === "committees") return true;
+  throw new Error(`app_config.${STAFF_MODEL_KEY} is "${v}": expected "departments" or "committees"`);
+}
+/* a committee manager's Discord role, named for the committee row (public.committees.name): "Officiating Manager",
+   "Draft and Bidding Manager". shortcut: found by name like the department roles, so renaming a committee in the
+   database builds a new role and strands the old one on nobody; adopt by stored id if committees are ever renamed. */
+export const committeeRoleName = (name) => `${String(name || "").trim()} Manager`;
+
+/* `committees` (public.committees rows) makes their manager roles managed in every staff model, so a rollback to
+   departments takes them off again instead of leaving them on whoever wore them. */
+export function managedRoleIds(roleId, teams, committees) {
   const ids = new Set();
   for (const n of MANAGED_STATIC) if (roleId[n.toLowerCase()]) ids.add(roleId[n.toLowerCase()]);
   for (const t of teams || []) if (t.discord_role_id) ids.add(t.discord_role_id);
   // department roles are managed too, so they're added/removed as officials change their picks
+  // (and after the Season 2 flip, removed from everyone: unassigned, never deleted)
   for (const d of STAFF_DEPARTMENTS) { const rid = roleId[d.role.toLowerCase()]; if (rid) ids.add(rid); }
+  for (const c of committees || []) { const rid = roleId[committeeRoleName(c.name).toLowerCase()]; if (rid) ids.add(rid); }
   return ids;
 }
 
@@ -87,6 +110,9 @@ export function notSignedUpStrays(guildRoles, roleId) {
      mgmtRoleByProfile profile_id -> "owner" | "gm" | "agm" (from the club seats)
      deptByProfile     profile_id -> departments[] (staff + commissioners only)
      posOf             profile_id -> position code (roster spot wins over signup)
+     pool              Set of profile_ids in the season's league training camp pool (public.market_pool; Season 2 on)
+     committees        true once app_config.staff_model is "committees" (committeesLive); false or absent = departments
+     committeeSeats    profile_id -> committee names[] the member manages (public.committees.manager_profile_id)
 
    The three participation roles are mutually coherent, gated on current-season registration and
    roster status:
@@ -106,6 +132,10 @@ export function desiredRolesFor(m, ctx) {
   const { roleId, teamRoleId, registered, regOpen, mgmtRoleByProfile, deptByProfile, posOf } = ctx;
   const rfa = ctx.rfa || new Set();
   const camp = ctx.camp || new Set();   /* profiles whose roster spot this season is in training camp (v2.72) */
+  /* v463 (Season 2 rulings, 2026-11-23: no club camps, one league-wide training camp pool; "Pool players get the TC
+     Discord role but no club room"): the pool is the database's one list, public.market_pool(season), read by both lanes.
+     It is empty in a season the market does not run (Season 1) and until that season's draft is complete. */
+  const pool = ctx.pool || new Set();
   const rookies = ctx.rookies || new Set();
   const desired = new Set();
   /* v3.98 (commissioner, 2026-10-13): a player registered for the season IN PLAY keeps Player and Free Agent until that
@@ -131,6 +161,8 @@ export function desiredRolesFor(m, ctx) {
   /* Training Camp rides with the club role: a camp player is the club's player (Rule 2.1) and
      wears the badge only while his spot is in camp; a call-up drops it on the next pass. */
   if (onRoster && camp.has(m.profile_id) && roleId["training camp"]) desired.add(roleId["training camp"]);
+  /* v463: a Season 2 pool player wears it with no club role: the pool has no roster spot by definition */
+  if (pool.has(m.profile_id) && roleId["training camp"]) desired.add(roleId["training camp"]);
   /* Rookie rides alongside the rest: it is a length-of-service badge, not a rights class, so it
      sits happily on a rostered player and on a free agent alike. */
   if ((isRegistered || onRoster) && rookies.has(m.profile_id) && roleId["rookie"]) desired.add(roleId["rookie"]);
@@ -147,15 +179,26 @@ export function desiredRolesFor(m, ctx) {
   // league officials: staff wear Staff; the commissioner is staff too.
   // EXCEPTION (2026-08-05): media-only staff wear just their Media department role — no Staff
   // role, so none of the staff rooms, pings, or oversight surfaces come with it.
+  /* v463 (FLIP, commissioner 2026-11-23): with committees live there are no departments, so neither the Media exception
+     (it reads departments: a Season 1 Media-only staffer would still be denied Staff) nor any department role applies:
+     every staffer and commissioner wears Staff, and a seated committee manager also wears that committee's role. */
+  const committeesOn = ctx.committees === true;
+  const office = m.role === "staff" || m.role === "commissioner";
   const memberDepts = (deptByProfile[m.profile_id] || []);
   const normDepts = memberDepts.map((k) => String(k || "").trim().toLowerCase()).filter((k) => k.length);
-  const mediaOnly = m.role === "staff" && normDepts.length > 0 && normDepts.every((k) => k === "media");
-  if ((m.role === "staff" || m.role === "commissioner") && !mediaOnly && roleId["staff"]) desired.add(roleId["staff"]);
+  const mediaOnly = !committeesOn && m.role === "staff" && normDepts.length > 0 && normDepts.every((k) => k === "media");
+  if (office && !mediaOnly && roleId["staff"]) desired.add(roleId["staff"]);
   // department roles the official signed up for on the site — these open the department rooms
-  if (m.role === "staff" || m.role === "commissioner") {
+  if (office && !committeesOn) {
     for (const key of memberDepts) {
       const d = STAFF_DEPARTMENTS.find((x) => x.key === key);
       const rid = d && roleId[d.role.toLowerCase()];
+      if (rid) desired.add(rid);
+    }
+  }
+  if (office && committeesOn) {
+    for (const name of ((ctx.committeeSeats || {})[m.profile_id] || [])) {
+      const rid = roleId[committeeRoleName(name).toLowerCase()];
       if (rid) desired.add(rid);
     }
   }

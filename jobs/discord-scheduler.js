@@ -609,7 +609,7 @@ async function caseworkNudge(cfg, teamById, et, dry, errors, unconfigured) {
   const url = cfg.discord_staff_casework_webhook || cfg.discord_staff_webhook;   // staff channels only — NEVER the public default
   if (!url) { unconfigured.push("casework nudge (discord_staff_casework_webhook)"); return "no casework webhook"; }
   const [profs, links, oaAll, sa, ma, ballots, cases, seasons] = await Promise.all([
-    sbGet("profiles?select=id,role,departments,gamertag"),
+    sbGet("profiles?select=id,role,gamertag"),
     sbGet("discord_links?select=profile_id,discord_id"),
     sbGet("owner_applications?status=eq.pending&select=id,profile_id,season_id,filed_at"),
     sbGet("staff_applications?status=eq.pending&select=id,profile_id,filed_at"),
@@ -625,7 +625,14 @@ async function caseworkNudge(cfg, teamById, et, dry, errors, unconfigured) {
   const did = Object.fromEntries(links.filter((l) => l.discord_id).map((l) => [l.profile_id, l.discord_id]));
   const gt = Object.fromEntries(profs.map((p) => [p.id, p.gamertag || "a member"]));
   const mention = (pid) => (did[pid] ? `<@${did[pid]}>` : `**${gt[pid] || "a reviewer"}**`);
-  const reviewers = profs.filter((p) => (p.role === "staff" || p.role === "commissioner") && Array.isArray(p.departments) && p.departments.includes("applications"));
+  /* v463 (commissioner, 2026-11-23: "Every staff member votes on owner, staff and front-office applications"): who owes
+     a vote is the database's answer, public.is_app_reviewer, never a list rebuilt here. Today it is the applications
+     department (the same set this line used to compute); once the all-staff voting record applies it is every staff
+     voter (is_staff_voter: commissioners and staff, not banned, not suspended from staff duties), and back again if
+     that record is reversed, with no deploy. A failed answer fails the nudge loudly rather than chasing the wrong people. */
+  const office = profs.filter((p) => p.role === "staff" || p.role === "commissioner");
+  const votes = await Promise.all(office.map((p) => sbRpc("is_app_reviewer", { p_uid: p.id })));
+  const reviewers = office.filter((p, i) => votes[i] === true);
   // v4.22 ("Fresh vote", commissioner 2026-10-19): a ballot counts only if cast or changed since the application was last
   // filed, exactly as resolve_application_if_ready counts it, so a refiled application chases every reviewer again.
   // Management nominations have no filed_at and count every ballot.

@@ -1,0 +1,1042 @@
+{
+  "_about": [
+    "v5.00 swap (W0.5): who may change each path on an s2/<agent> branch. `git diff --name-only s2-swap...s2/<agent> | node tools/ui/owners.cjs <agent>` exits 1 for any path the agent does not own.",
+    "The owner name is the branch suffix (s2/<owner>). A key ending in / owns everything under it; the longest matching key wins. A path no key matches is owned by nobody and fails for everyone.",
+    "Ownership changes are sequential and dated: the main session APPENDS {owner, since, why} to a path's list (never edits or deletes an entry). The LAST entry is the current owner.",
+    "db/* branches (sql/ records, database objects) ship to main through ship-version and are not checked here."
+  ],
+  "next": [
+    "DONE 2026-11-24 (e0, applied in its branch; takes effect when s2/e0 merges): inbox.js to f, hq.js to e1, league.js to e6, desk.js to g1, draft.js to g4, gamedesk.js to g2, you.js to e3, lineups.js to e2. The split is pure moves: the moved files read their host file's pieces through S2._league, S2._desk and S2._hq, and the hosts reach the moved functions through one-line forwarders over S2._gamedesk, S2._inbox, S2._you and S2._lineups (draft.js needs none). hq.css was NOT split (see e0's report): you.js, inbox.js and lineups.js keep their rules in hq.css until a split is proven against computed styles.",
+    "When c2 (live-model) merges: src/s2/demo.html to f.",
+    "When f merges: core.js to i2 (aliases), then to i3 after i2 (dock, footer and setRole regions).",
+    "When i1 ships: tools/site-build.cjs to i2.",
+    "Quarantined suites: autoupdate to f (rewritten for the site_build check), viewer to i3 (deleted or rewritten).",
+    "DECIDED 2026-11-24 (main session): e0 may add the <script> and <link> tags for the files it creates to src/s2/demo.html, and may split hq.css for the files it moves; live-model keeps every other demo.html line, and the main session merges the two.",
+    "OPEN: g2 (gamedesk) and g4 (draft) have no css file of their own; their rules sit in desk.css (g1) and league.css (e6) until a split.",
+    "FROM e0 (2026-11-24): hq.css is NOT split (184 of 202 rule blocks share property and specificity with later hq.css rules; a split needs a computed-style comparison), so e2 and e3 style lineups.js and you.js in e1's hq.css until e1 splits it with that check.",
+    "FROM e0: e7 fix today.js lines 683, 693, 702, 707, which name js/pages/hq.js for S2.availability, paneWeek and dueInner (now in js/pages/you.js).",
+    "FROM e0: b4 add js/pages/draft.js and js/pages/gamedesk.js to the banned-copy scan list at tools/ui/ports.test.cjs:142 (both scan clean today).",
+    "FROM e0: the series-limit code stays in e1's hq.js though e2 owns the serieslimit suite; a page owner who renames a host helper updates its kit export (S2._league, S2._desk, S2._hq); host header comments in league.js, desk.js and hq.js still list the moved pages (owners update them).",
+    "FOR g1 (2026-11-24, from the fixed staffing flip drafts, db/s2-committees 3c7e23d, rehearsed OK): the discipline desk needs (a) a keep-length choice on a committee manager's second suspension of a member in a season (the database refuses it without p_keep_length; else file a request for the rest of the season), (b) extension requests: suspension_requests gains days and extends_id; a request against a member already serving becomes an extension in that suspension's own terms (games in steps of three, or a later last day) and needs a written reason, (c) the extends field in request responses, (d) staff appeals decided only by a commissioner. Every request is in steps of three games.",
+    "FROM live-model (merged c94e2aa): every new <script> tag goes INSIDE <template id=\"s2-scripts\"> in demo.html (load.js loads them in order, then window.S2_START).",
+    "FROM live-model: page owners (e6 games/stats/clubs, e7 today/profile) replace hard-coded \"Season 1\" labels with the season on screen (M.view) and read M.view.empty for an empty season; Today must not say the regular season is complete in Season 2.",
+    "FROM live-model: i2's site build drops the data/snapshot.js tag (private) and follows the template's relative src paths; f re-reads through S2.load.read(season, sections) after sign-in and for the pulse; j1's mocks carry the private fixture keys S2DATA.seasons, awards and close.",
+    "FROM live-model: demo-only in live mode until wired: M.desk and M.sittings (g1/g2 via s2_desk), M.control (g3 via s2_control and ops_job_health), the market pool and s2Standins (b4), M.gameNightDemo (sample), s2cal.ownersDecided (app_config, unreadable by API roles), s2cal.deadline (projected until a schedule exists).",
+    "ONE BOOK (accepted 2026-11-24): ~/Developer/cghl-private/briefs/one-book.md: i2 generates js/rulebook.js at build time from part3 via CG.rulebookForFormat; its tag goes in the template after js/core.js; e6 deletes the league.js RB copy.",
+    "FROM f (merged 2026-11-24): writes go through S2.write with the contract in ~/Developer/cghl-private/contracts/client-api.md (\"Finished by f\" section): S2._writeImpl only in live mode; table writes return ids and none back is S2_NO_ROWS; unfiltered update/delete refused; mgmt_gate decides Owner approval (MGMT_APPROVAL_REQUIRED -> mgmt_request_move, resolves {queued:true}); re-read then opts.repaint; carry replays refused. teamId = the club where the member holds a seat, else their club this season (teams.id); session adds teamCode and committees; S2.has(\"manager\"/\"draftbid\") reads committees.",
+    "FROM f: live-model's S2.load.read should pass its third argument as p_game_ids, and the boot read should carry the stored session token (it goes out anonymous before sign-in) (main session to assign). i2: the site build puts pinned supabase-js before load.js at / and /next and stamps the build id only at the root; the aliases suite should add the notification view teams. b4/b1: market claims and bids cannot be queued for the Owner, but _market_ctx raises the same send-to-the-Owner wording (misleading). You-page buttons for linking and switching Discord accounts (S2.linkDiscord, S2.takeDiscordSwitch, S2.discordAccounts) are e3's.",
+    "FROM g2 (merged a2663f1): g1 removes the desk.js dispatcher cases and forwarders nothing triggers now (merge, strike, ea-club, ea-side, ea-cancel, ea-record, the rul-* cases, reverse, g-tomgr, the .dk-radio.is-off branch, the dkft change branch); the sidebar games count reads S2._gamedesk.waiting(); the sample S2.eaSearch and S2.eaStatusLine (also used by the Control Center club sheet, g3) call S2.ea. S2.ea.post makes the new site's one fetch to the Netlify functions (accepted where it is). Pickup games (import, list, line editor) are not ported: write-paths puts the pickup import in office.js (e7), pending the commissioner's word on where Season 2 pickups are managed.",
+    "FROM live-model follow-up (b178401): S2.load.read(season, sections, ids) sends p_game_ids (games AND box narrow), S2.reread merges named games by id; the first read carries the stored supabase-js session (sb-bzbuyclwdhmhdzujxeqd-auth-token), an expired token is not sent, a 401 falls back to a visitor read with a warning; after sign-in live.js calls S2.load.matchViewer() once (re-read as the member), sign-out re-reads as a visitor. Accepted by the main session: live-model's two-part edit in f's live.js. Games carry eaMatchId.",
+    "RUNNER (main session, 2026-11-24, commissioner asked for speed without losing quality): run.cjs allows THREE concurrent suite runs (slots .cghl-ui-lock, .s1, .s2; CGHL_UI_SLOTS overrides; slot 0 is the old path so older runners still take only it), arrival order kept; and tools/ui/fonts-fence.cjs serves Google Fonts from a local cache (~/Developer/cghl-private/fixtures/fonts) in every mode, so a dropped connection no longer times suites out. Merge s2-swap to get both.",
+    "FOR e1 (from e2, 2026-11-24 review fixes): in live mode, hq.js planRow (1) drops the playoff exclusion from `lost`: the no-full-six-at-the-lock forfeit holds in every stage (ruling; a postponed game is ruled at its new lock); (2) marks a filed sheet with unsaved changes in the row itself, from S2.lineups.unsaved(code, g) (lineups.js says it under the rows until then); L.filed now always means a full six is on file; (3) luStatus reads the six on file (L.saved) in live mode, not the screen's slots. Still open from e2's first pass: suggest()/fit() read the demo availability (lineups.js keeps a marked copy until hq.js reads S2.lineups.availOf in live mode), and seriesLock/seriesOf read the sample series (the database's series refusal is what the live sheet shows).",
+    "FROM e6 (one book, 2026-11-24): #/rulebook renders S2.RB (js/rulebook.js, the live v4.62 book) with no proposed-text machinery, so g1's rulebook checks pinned to the old abridged copy go red: discipline.test.cjs lines 220 and 223 to 229 (Rules 7.2 and 7.7: committee managers, fourteen days, the .lg-rb-p.prop marks and notes, no department) and staffing.test.cjs lines 253 to 263 (S2.8 in three paragraphs with charters, S2.2 and 2.6 staff votes, 3.2 league staff, prop marks, the About naming the November 23 sections; line 257 throws on S2.8's third paragraph, which the live book lacks, so the later checks never run). The live book still carries departments, reviewers and the thirty-day limit: that text changes only when the held staffing flip (db/s2-committees) lands its rulebook amendment in src/live/part3_content.js on main, followed by node tools/s2-rulebook-js-build.cjs. Until then g1 pins the live text or the main session decides; the prop and note checks go either way.",
+    "FROM i2 (2026-11-24): i3 deletes, after i2 merges, everything tools/site-build.cjs flipGuard names (node -e 'require(\"./tools/site-build.cjs\").build(\"/tmp/x\",{root:\"s2\"})' lists 86 hits by file today): js/demo.js, js/share.js, js/pages/concept.js, css/concept.css, the dock (core.js S2.shell .demo-dock markup, #roleSeg, #roleBtn sheet, #themeBtn, dockAway, the 96px footer reserve), the footer's concept note and About link, S2.setRole/ROLES/VIEWER/isManagerView and the s2.role store key, S2.override and S2.locked's View as, S2.demoNow and the sample clocks, flows.js demoNote and fillSamples, every chip sample, and the #/concept page. i2 HID the dock, footer note, concept title and Try it anyway in live mode only (S2.LIVE). Page owners clear S2.demo calls and sample chips in their files (market.js practice bidding: b4; flows.js: e5; hq.js: e1; today/profile/office: e7; draft.js: g4; league.js: e6; control.js: g3; desk.js: g1; trade/tradebuild: e4; lobby/lineups: e2; inbox/you: e3).",
+    "FROM i2: grant-audit check 4b (under the hand list of check 4) is generated: node tools/sql/client-rpcs.cjs --write adds every RPC src/live or src/s2 calls that 4 does not list (never drops one); tools/s2-site-modes.test.cjs fails on a src/live gap and NOTES a src/s2 gap, so the main session runs --write after merging a stream that adds S2.write calls, then the audit.",
+    "FROM i2b (2026-11-24 evening, the commissioner's one-release rulings): mode \"s2\" serves ONLY the Season 2 site (no /classic copy; /classic and /next 302 to /), every _redirects rule is a 302, ROOT stays \"classic\" until the release commit sets \"s2\" (no /next step; nothing ships \"next\"), and node tools/site-build.cjs --fallback <dir> builds the frozen Season 1 site for its own Netlify site (runbook: ~/Developer/cghl-private/briefs/swap-runbook.md, rewritten for one release). flipGuard now also names concept wording a member would read (code and copy, comments aside): 140 hits on 2026-11-24, 53 of them wording, listed by file by node -e 'require(\"./tools/site-build.cjs\").build(require(\"os\").tmpdir()+\"/flip\",{root:\"s2\"})'. i3 and the page owners clear them in their own files (core.js wording: i3; flows.js: e5; market.js: b4; hq.js: e1; you.js: e3; lineups.js: e2; tradebuild.js: e4; today/profile/office: e7; league.js: e6; desk.js: g1; gamedesk.js: g2; control.js: g3; draft.js: g4; bidding.js and camp.js: b4; survey.js, share.js, concept.js, model.js: i3 or their owners).",
+    "FROM e5 (2026-11-24): the filed forms write through S2.write on the real site (S2.SESSION_ROLE) and fire \"s2:filed\" {flow, data, ctx, result} on a confirmed filing (\"s2:flow\" stays the concept's). e3: You > Applications calls S2.forms.withdrawOwner(id) / withdrawStaff(id) (resolve {ok,status,final} only on the door's confirmed status) and reads the applications on file with S2.forms.mine(\"owner\"|\"staff\"); e1: the Front office calls S2.forms.nominate({teamId, role, nomineeId, pitch}) and S2.forms.withdrawNomination(id), and hq.js CASE_TITLE needs stats_correction (stat_fix is gone, action_requests_type_check); e7: today.js s2Cta reads S2.demo.me.registration, so on the real site it should read M.signups and listen to \"s2:filed\"; g1/g3/e7: discipline, reply, committee, season, schedule and story have no door in flows.js yet (on the real site they say so at the top and refuse to file); g3: S2.survey.fromLive(answers) turns season_survey_results rows into the tally's shape; j1: pageInit does not set window.S2_MODE = \"mock\" though core.js says it does (suites set it themselves), and the personas carry no teamCode or committees.",
+    "FROM g5 (review 2026-11-24): e7 adds ONE call in js/pages/profile.js S2.page(\"player\").render so a member's pickup lines show on their profile (the classic CG.renderPickupStats, ported as S2.pickups.profileHtml in js/pages/pickups.js): change `'<div id=\"pfBody\">' + bodyP(p, st) + \"</div>\" + aboutP(p)` to `'<div id=\"pfBody\">' + bodyP(p, st) + \"</div>\" + S2.pickups.profileHtml(p.id) + aboutP(p)`. The call starts the read and the section fills itself in place (hidden while loading and when the member has no pickup game; a failed read shows Try again); it needs no after() code and survives S2.quietRepaint (60-second cache). Until it lands, the pickups page and the import result promise profiles that do not show the lines. Also for e7: a member with pickup lines but no league presence (M.player covers rosters, box lines, ratings and sign-ups only) has no #/player page, so a box-score link to them opens Player not found; the classic drew an account page with #pickupSection for them.",
+    "FROM g5: the links that reach #/pickups (S2.pickups.href(id) gives #/pickups or #/pickups/<id>). e7, js/pages/office.js #/pickup-import: either carry the real importer (`host.innerHTML = S2.pickups.importHtml(); S2.pickups.bindImport(host, onDone)`, replacing the SAMPLE search) or link `<a class=\"arrow\" href=\"#/pickups\">Pickup games on file</a>` under its hero. g2 (gamedesk.js): where a sitting reads \"Imported as a pickup game.\", link it to `S2.pickups.href(s.pickupGameId)`.",
+    "FROM g5 (merged d129083) FOR the i3 groups: profile.js (G2) calls S2.pickups.profileHtml(profileId) to draw a member's pickup lines on their profile (the page promises it; the classic CG.renderPickupStats port lives in pickups.js); office.js (G2) links to #/pickups and wires the importer through S2.pickups.importHtml/bindImport where the classic office had it; gamedesk.js Games pane (G4) links to #/pickups; desk.js (G4) links the pickup tools for statistics staff; core.js alias 'pickup' -> #/pickups/<id> (FINAL step, i2's aliases region); the search index gains a Pickup games page entry (G1, search.js).",
+    "FROM i3a (review 2026-11-25) FOR g3/i3d (control.js) and the FINAL step: a committee seat not yet read never reads as open. S2.committeeManager(key) answers undefined while public.committees is unread or its read failed (null only for a seat read as open), S2.seatsOf(name) null in the same state, and S2.committeeSeats.state() gives {state: \"reading\" | \"ok\" | \"failed\", message: the database's words when failed}. On s2-swap, control.js committeesHtml still draws \"No manager yet / Open: staff apply and the other staff vote\" for an unread seat; if that file stays, its one-line change is the holder line: `var st = S2.committeeSeats.state(), title = st.state === \"ok\" ? who || \"No manager yet\" : st.state === \"failed\" ? \"The committee managers could not be read: \" + st.message : \"Reading the committee managers\";` (and mgrHead the same). s2/i3d already rewrote control.js to read the Staff Desk's copy (S2._desk.LV: \"Reading the seats\", \"The seats could not be read\", without the database's words), and s2/i3b (draft.js) and s2/i3e (bidding.js) no longer call S2.committeeManager or S2.seatsOf. Once those merge nothing calls the three, so the FINAL step deletes S2.committeeManager, S2.committeeSeats, S2.seatsOf and the SEATS read in js/flows.js, leaving desk.js loadComs the one read of public.committees.",
+    "FROM i3b (2026-11-25) FOR e6, abbr: '#/draft (guest): R1 says Round 1' pinned the mock draft board removed in edca8e8. The real room draws its round rows (.lg-dr-rr 'R1') only when the season's board has picks, and neither the fixture nor the recorded Season 2 has any. Pin it in live mode on a body with draft picks (draftroom.test.cjs builds one) or take #/draft off the fixture route list. The draft room's console error in fixture mode is fixed on s2/i3b (1f0f9dd).",
+    "FROM i3b (2026-11-25) FOR e1, hq-market: two checks pin demo behavior that i3b removed. (1) 'the profile's claim goes through the one claim door and the hero repaints in place' drives S2.demo.setClub, S2.demo.waive and the demo market's claim event; since 748d9f5 the profile repaints its hero only on the market's 'load' (the real claim is market_claim, then the market's read). It is pinned live in career.test.cjs (0dc0874): delete it, or convert it to live mode as that check does. (2) 'the club page counts the active roster against 12 and the 3/2/1 minimums, with Season 2 cap room' read the fixture's Season 1 as Season 2 (the club page's demo rules); a club page now tells the season on screen. It is pinned live in today.test.cjs's Season 2 club roster check (b91bc92): delete it, or run it live on a Season 2 body.",
+    "FROM i3b (2026-11-25) FOR g5, pickups: 'no page error or console error across the whole run' fails because an unrostered member's profile now asks S2.market.ensure() (748d9f5: its Claim off waivers and Add to bid board doors are real, so the profile reads where the player stands). In mock mode the market reads through the suite's routes: answer rpc current_season_id, market_calendar, market_pool and market_club_state, and the tables market_waivers, market_pool_requests, market_boards, market_bid_nights, market_lots and market_bids (empty answers are fine; career.test.cjs READS is the set).",
+    "FROM i3b (2026-11-25) FOR g1, staffing: the section 'the Draft and Bidding seat: the draft room's controls' pins the mock draft room removed in edca8e8 (a staffer's Draft controls lock, the manager's and commissioner's controls on S2.setRole, the demo skip and conclude toasts); 'a staffer sees Draft controls, not the controls themselves' fails and the page.click on [data-dr=\"cc\"] then times out and ends the suite. The real room's equivalents are pinned live in draftroom.test.cjs: an ordinary staffer gets no controls (has_department false); the seated manager gets pause, reset and skip under 'Draft and Bidding manager'; the commissioner's controls; the skip sheet's $750K and Rule S2.3; the complete room's fill at $750K. Delete the section, or convert it to live with has_department answers.",
+    "FROM i3b (2026-11-25) FOR main, fixround and restored: fixround's 'the ballot rows wrap at 375' and its staffer and Detroit ballot pair pinned the demo ballot (fixture mode, S2.setRole). Without a client the real ballot says it could not be read and has no [data-bal=\"mvp\"], so the suite throws at line 112. Both behaviors are pinned live in awards.test.cjs (0b5db5e: the phone rows, and a voter's own pool, which fixed a staffer who played for a club being offered that club's players): delete them. fixround's 'a night recap spells its count out to twenty' and restored's 'one recap per game night with a final, plus the power rankings, newest first' pinned the concept's generated News recaps; News reads the news table since e06a523, its text is the database's, and today.test.cjs pins live News (the news table's stories, newest first, none sample). Delete both, or pin the database's recap writer. aliases and nav (i2) are green again after 1f0f9dd and need no change."
+  ],
+  "paths": {
+    "CLAUDE.md": [
+      {
+        "owner": "i2",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 i2 (the map, check 4 at the hand-off)"
+      }
+    ],
+    "bot/staff-alerts.mjs": [
+      {
+        "owner": "k",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "jobs/discord-scheduler.js": [
+      {
+        "owner": "k",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "jobs/discord-sync.js": [
+      {
+        "owner": "k",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "netlify.toml": [
+      {
+        "owner": "i1",
+        "since": "2026-11-24",
+        "why": "W0: PLAN 6.6; ships to main on db/site-builder; i2 takes site-build.cjs for the /classic and root modes"
+      },
+      {
+        "owner": "i2",
+        "since": "2026-11-24",
+        "why": "i2 brief: the /s2/* cache rule and the /next/, /classic/ noindex headers"
+      }
+    ],
+    "netlify/functions/discord-interactions.js": [
+      {
+        "owner": "a3",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 a3 (v467 statistics gates)"
+      }
+    ],
+    "netlify/functions/ingest-stats.js": [
+      {
+        "owner": "a3",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 a3 (v467 statistics gates)"
+      }
+    ],
+    "shared/roles.mjs": [
+      {
+        "owner": "k",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/css/abbr.css": [
+      {
+        "owner": "e6",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/css/bidding.css": [
+      {
+        "owner": "b4",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/css/camp.css": [
+      {
+        "owner": "b4",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/css/concept.css": [
+      {
+        "owner": "i3",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 i3 deletes these (after i2)"
+      }
+    ],
+    "src/s2/css/control.css": [
+      {
+        "owner": "g3",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/css/desk.css": [
+      {
+        "owner": "g1",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/css/flows.css": [
+      {
+        "owner": "e5",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/css/hq.css": [
+      {
+        "owner": "e1",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/css/league.css": [
+      {
+        "owner": "e6",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/css/lineups.css": [
+      {
+        "owner": "e2",
+        "since": "2026-11-24",
+        "why": "e2 (2026-11-24): the live lineup sheet's own rules, loaded after hq.css (the brief: new rules in a new file)"
+      }
+    ],
+    "src/s2/css/market.css": [
+      {
+        "owner": "b4",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/css/office.css": [
+      {
+        "owner": "e7",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/css/profile.css": [
+      {
+        "owner": "e7",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/css/survey.css": [
+      {
+        "owner": "e5",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/css/today.css": [
+      {
+        "owner": "e7",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/css/tokens.css": [
+      {
+        "owner": "main",
+        "since": "2026-11-24",
+        "why": "W0: shared kit and integration; fixround (added after the plan) pins cross-page fixes"
+      }
+    ],
+    "src/s2/css/trade.css": [
+      {
+        "owner": "e4",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/css/tradebuild.css": [
+      {
+        "owner": "e4",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/css/ui.css": [
+      {
+        "owner": "main",
+        "since": "2026-11-24",
+        "why": "W0: shared kit and integration; fixround (added after the plan) pins cross-page fixes"
+      }
+    ],
+    "src/s2/css/you.css": [
+      {
+        "owner": "e3",
+        "since": "2026-11-24",
+        "why": "e3 (2026-11-24): the real You page's own rules, loaded after hq.css (the brief: new rules in a new file)"
+      }
+    ],
+    "src/s2/demo.html": [
+      {
+        "owner": "live-model",
+        "since": "2026-11-24",
+        "why": "W0: PLAN 6.5 (d then c2); demo.html is the script tags until f takes it"
+      }
+    ],
+    "src/s2/js/abbr.js": [
+      {
+        "owner": "e6",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/js/cg-engine.js": [
+      {
+        "owner": "live-model",
+        "since": "2026-11-24",
+        "why": "W0: PLAN 6.5 (d then c2); demo.html is the script tags until f takes it"
+      }
+    ],
+    "src/s2/js/charts.js": [
+      {
+        "owner": "e6",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/js/core.js": [
+      {
+        "owner": "f",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 f; core.js after W0's stub block"
+      },
+      {
+        "owner": "i2",
+        "since": "2026-11-24",
+        "why": "f merged (owners next): aliases, and the live-mode gating of the dock, footer note, title and Try it anyway; i3 takes the dock, footer and setRole regions next"
+      }
+    ],
+    "src/s2/js/demo.js": [
+      {
+        "owner": "i3",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 i3 deletes these (after i2)"
+      }
+    ],
+    "src/s2/js/flows.js": [
+      {
+        "owner": "e5",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/js/inbox.js": [
+      {
+        "owner": "e0",
+        "since": "2026-11-24",
+        "why": "W0: e0's pure moves come first; each file passes to its page owner when e0 merges"
+      },
+      {
+        "owner": "f",
+        "since": "2026-11-24",
+        "why": "e0 split done 2026-11-24 (pure moves, suites green): hands over per the next list"
+      }
+    ],
+    "src/s2/js/live.js": [
+      {
+        "owner": "f",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 f; core.js after W0's stub block"
+      }
+    ],
+    "src/s2/js/load.js": [
+      {
+        "owner": "live-model",
+        "since": "2026-11-24",
+        "why": "W0: PLAN 6.5 (d then c2); demo.html is the script tags until f takes it"
+      }
+    ],
+    "src/s2/js/lobby.js": [
+      {
+        "owner": "e2",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/js/market.js": [
+      {
+        "owner": "b4",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/js/model.js": [
+      {
+        "owner": "live-model",
+        "since": "2026-11-24",
+        "why": "W0: PLAN 6.5 (d then c2); demo.html is the script tags until f takes it"
+      }
+    ],
+    "src/s2/js/pages/bidding.js": [
+      {
+        "owner": "b4",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/js/pages/camp.js": [
+      {
+        "owner": "b4",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/js/pages/concept.js": [
+      {
+        "owner": "i3",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 i3 deletes these (after i2)"
+      }
+    ],
+    "src/s2/js/pages/control.js": [
+      {
+        "owner": "g3",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/js/pages/desk.js": [
+      {
+        "owner": "e0",
+        "since": "2026-11-24",
+        "why": "W0: e0's pure moves come first; each file passes to its page owner when e0 merges"
+      },
+      {
+        "owner": "g1",
+        "since": "2026-11-24",
+        "why": "e0 split done 2026-11-24 (pure moves, suites green): hands over per the next list"
+      }
+    ],
+    "src/s2/js/pages/draft.js": [
+      {
+        "owner": "e0",
+        "since": "2026-11-24",
+        "why": "W0: e0's pure moves come first; each file passes to its page owner when e0 merges"
+      },
+      {
+        "owner": "g4",
+        "since": "2026-11-24",
+        "why": "e0 split done 2026-11-24 (pure moves, suites green): hands over per the next list"
+      }
+    ],
+    "src/s2/js/pages/gamedesk.js": [
+      {
+        "owner": "e0",
+        "since": "2026-11-24",
+        "why": "W0: e0's pure moves come first; each file passes to its page owner when e0 merges"
+      },
+      {
+        "owner": "g2",
+        "since": "2026-11-24",
+        "why": "e0 split done 2026-11-24 (pure moves, suites green): hands over per the next list"
+      }
+    ],
+    "src/s2/js/pages/hq.js": [
+      {
+        "owner": "e0",
+        "since": "2026-11-24",
+        "why": "W0: e0's pure moves come first; each file passes to its page owner when e0 merges"
+      },
+      {
+        "owner": "e1",
+        "since": "2026-11-24",
+        "why": "e0 split done 2026-11-24 (pure moves, suites green): hands over per the next list"
+      }
+    ],
+    "src/s2/js/pages/league.js": [
+      {
+        "owner": "e0",
+        "since": "2026-11-24",
+        "why": "W0: e0's pure moves come first; each file passes to its page owner when e0 merges"
+      },
+      {
+        "owner": "e6",
+        "since": "2026-11-24",
+        "why": "e0 split done 2026-11-24 (pure moves, suites green): hands over per the next list"
+      }
+    ],
+    "src/s2/js/pages/lineups.js": [
+      {
+        "owner": "e0",
+        "since": "2026-11-24",
+        "why": "W0: e0's pure moves come first; each file passes to its page owner when e0 merges"
+      },
+      {
+        "owner": "e2",
+        "since": "2026-11-24",
+        "why": "e0 split done 2026-11-24 (pure moves, suites green): hands over per the next list"
+      }
+    ],
+    "src/s2/js/pages/office.js": [
+      {
+        "owner": "e7",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/js/pages/profile.js": [
+      {
+        "owner": "e7",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/js/pages/today.js": [
+      {
+        "owner": "e7",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/js/pages/tradebuild.js": [
+      {
+        "owner": "e4",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/js/pages/you.js": [
+      {
+        "owner": "e0",
+        "since": "2026-11-24",
+        "why": "W0: e0's pure moves come first; each file passes to its page owner when e0 merges"
+      },
+      {
+        "owner": "e3",
+        "since": "2026-11-24",
+        "why": "e0 split done 2026-11-24 (pure moves, suites green): hands over per the next list"
+      }
+    ],
+    "src/s2/js/search.js": [
+      {
+        "owner": "e6",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/js/share.js": [
+      {
+        "owner": "i3",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 i3 deletes these (after i2)"
+      }
+    ],
+    "src/s2/js/survey.js": [
+      {
+        "owner": "e5",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "src/s2/js/trade.js": [
+      {
+        "owner": "e4",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2"
+      }
+    ],
+    "tools/loadtest.mjs": [
+      {
+        "owner": "f",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 f; core.js after W0's stub block"
+      }
+    ],
+    "tools/netlify-ignore.sh": [
+      {
+        "owner": "i1",
+        "since": "2026-11-24",
+        "why": "W0: PLAN 6.6; ships to main on db/site-builder; i2 takes site-build.cjs for the /classic and root modes"
+      }
+    ],
+    "tools/s2-engine-build.cjs": [
+      {
+        "owner": "live-model",
+        "since": "2026-11-24",
+        "why": "W0: PLAN 6.5 (d then c2); demo.html is the script tags until f takes it"
+      }
+    ],
+    "tools/s2-engine-drift.test.cjs": [
+      {
+        "owner": "live-model",
+        "since": "2026-11-24",
+        "why": "W0: PLAN 6.5 (d then c2); demo.html is the script tags until f takes it"
+      }
+    ],
+    "tools/s2-privacy.test.cjs": [
+      {
+        "owner": "j1",
+        "since": "2026-11-24",
+        "why": "W0: PLAN 6.8"
+      }
+    ],
+    "tools/s2-rulebook-splice.cjs": [
+      {
+        "owner": "rulebook",
+        "since": "2026-11-24",
+        "why": "W0: PLAN 6.7 (h)"
+      }
+    ],
+    "tools/s2-rulebook.test.cjs": [
+      {
+        "owner": "rulebook",
+        "since": "2026-11-24",
+        "why": "W0: PLAN 6.7 (h)"
+      }
+    ],
+    "tools/s2-rulebook/": [
+      {
+        "owner": "rulebook",
+        "since": "2026-11-24",
+        "why": "W0: PLAN 6.7 (h)"
+      }
+    ],
+    "tools/site-build.cjs": [
+      {
+        "owner": "i1",
+        "since": "2026-11-24",
+        "why": "W0: PLAN 6.6; ships to main on db/site-builder; i2 takes site-build.cjs for the /classic and root modes"
+      },
+      {
+        "owner": "i2",
+        "since": "2026-11-24",
+        "why": "i1 shipped v4.62 (owners next): the next and s2 modes, the one ROOT switch, the flip guard"
+      }
+    ],
+    "tools/sql/grant-audit.sql": [
+      {
+        "owner": "i2",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 i2 (the map, check 4 at the hand-off)"
+      }
+    ],
+    "tools/ui/abbr.test.cjs": [
+      {
+        "owner": "e6",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/aliases.test.cjs": [
+      {
+        "owner": "i2",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/application.test.cjs": [
+      {
+        "owner": "g1",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/awards.test.cjs": [
+      {
+        "owner": "e6",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/bidding.test.cjs": [
+      {
+        "owner": "b4",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/camp.test.cjs": [
+      {
+        "owner": "b4",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/career.test.cjs": [
+      {
+        "owner": "e7",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/discipline.test.cjs": [
+      {
+        "owner": "g1",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/fixround.test.cjs": [
+      {
+        "owner": "main",
+        "since": "2026-11-24",
+        "why": "W0: shared kit and integration; fixround (added after the plan) pins cross-page fixes"
+      }
+    ],
+    "tools/ui/hq-market.test.cjs": [
+      {
+        "owner": "e1",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/lineups.test.cjs": [
+      {
+        "owner": "e2",
+        "since": "2026-11-24",
+        "why": "e2 (2026-11-24): the live lineup sheet and lobby suite (fixture and mock modes)"
+      }
+    ],
+    "tools/ui/live-model.test.cjs": [
+      {
+        "owner": "live-model",
+        "since": "2026-11-24",
+        "why": "W0: PLAN 6.5 (d then c2); demo.html is the script tags until f takes it"
+      }
+    ],
+    "tools/ui/market.test.cjs": [
+      {
+        "owner": "b4",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/mock/": [
+      {
+        "owner": "j1",
+        "since": "2026-11-24",
+        "why": "W0: PLAN 6.8"
+      }
+    ],
+    "tools/ui/nav.test.cjs": [
+      {
+        "owner": "i2",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/offseason.test.cjs": [
+      {
+        "owner": "e7",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/owners.cjs": [
+      {
+        "owner": "main",
+        "since": "2026-11-24",
+        "why": "W0: shared kit and integration; fixround (added after the plan) pins cross-page fixes"
+      }
+    ],
+    "tools/ui/owners.json": [
+      {
+        "owner": "main",
+        "since": "2026-11-24",
+        "why": "W0: shared kit and integration; fixround (added after the plan) pins cross-page fixes"
+      }
+    ],
+    "tools/ui/ports.test.cjs": [
+      {
+        "owner": "b4",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/privacy-names.cjs": [
+      {
+        "owner": "j1",
+        "since": "2026-11-24",
+        "why": "W0: PLAN 6.8"
+      }
+    ],
+    "tools/ui/quarantine/autoupdate.test.cjs": [
+      {
+        "owner": "f",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 f; core.js after W0's stub block"
+      }
+    ],
+    "tools/ui/quarantine/viewer.test.cjs": [
+      {
+        "owner": "i3",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 i3 deletes these (after i2)"
+      }
+    ],
+    "tools/ui/restored.test.cjs": [
+      {
+        "owner": "main",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/rulings.test.cjs": [
+      {
+        "owner": "main",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/run.cjs": [
+      {
+        "owner": "j1",
+        "since": "2026-11-24",
+        "why": "W0: PLAN 6.8"
+      }
+    ],
+    "tools/ui/search.test.cjs": [
+      {
+        "owner": "e6",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/serieslimit.test.cjs": [
+      {
+        "owner": "e2",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/staffing.test.cjs": [
+      {
+        "owner": "g1",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/stats.test.cjs": [
+      {
+        "owner": "e6",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/today.test.cjs": [
+      {
+        "owner": "e7",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/trade.test.cjs": [
+      {
+        "owner": "e4",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/tradepage.test.cjs": [
+      {
+        "owner": "e4",
+        "since": "2026-11-24",
+        "why": "W0: PLAN section 2 suite owners"
+      }
+    ],
+    "tools/ui/you.test.cjs": [
+      {
+        "owner": "e3",
+        "since": "2026-11-24",
+        "why": "e3 (2026-11-24): the real You page suite (fixture and mock modes, member and gm)"
+      }
+    ],
+    "tools/ui/live.test.cjs": [
+      {
+        "owner": "f",
+        "since": "2026-11-24",
+        "why": "f: the suite f wrote for its live layer"
+      }
+    ],
+    "tools/ui/autoupdate.test.cjs": [
+      {
+        "owner": "f",
+        "since": "2026-11-24",
+        "why": "f: the suite f wrote for its live layer"
+      }
+    ],
+    "tools/ui/gamedesk.test.cjs": [
+      {
+        "owner": "g2",
+        "since": "2026-11-24",
+        "why": "g2: the game desk suite and its port test"
+      }
+    ],
+    "tools/gamedesk-port-g2.test.cjs": [
+      {
+        "owner": "g2",
+        "since": "2026-11-24",
+        "why": "g2: the game desk suite and its port test"
+      }
+    ],
+    "sql/2026-11-24-box-line-audit-v463.sql": [
+      {
+        "owner": "main",
+        "since": "2026-11-24",
+        "why": "g2 drafted it; the main session ships it to main as a version (rehearsed OK 2026-11-24)"
+      }
+    ],
+    "sql/2026-11-24-box-line-audit-v463.rehearsal.sql": [
+      {
+        "owner": "main",
+        "since": "2026-11-24",
+        "why": "g2 drafted it; the main session ships it to main as a version (rehearsed OK 2026-11-24)"
+      }
+    ],
+    "tools/box-line-audit-v463.test.cjs": [
+      {
+        "owner": "main",
+        "since": "2026-11-24",
+        "why": "g2 drafted it; the main session ships it to main as a version (rehearsed OK 2026-11-24)"
+      }
+    ],
+    "tools/ui/fonts-fence.cjs": [
+      {
+        "owner": "j1",
+        "since": "2026-11-24",
+        "why": "main session wrote it (suites no longer depend on Google Fonts being reachable); the harness owner keeps it"
+      }
+    ],
+    "tools/ui/draftroom.test.cjs": [
+      {
+        "owner": "g4",
+        "since": "2026-11-24",
+        "why": "g4: the live draft room's suite (js/pages/draft.js), against a local stub of the client contract"
+      }
+    ],
+    "tools/ui/fixture-names.cjs": [
+      {
+        "owner": "j1",
+        "since": "2026-11-24",
+        "why": "j2 wrote it (test files read names from the private fixture at run time); the harness owner keeps it"
+      }
+    ],
+    "src/s2/js/rulebook.js": [
+      {
+        "owner": "e6",
+        "since": "2026-11-24",
+        "why": "one book (briefs/one-book.md): generated by tools/s2-rulebook-js-build.cjs from src/live, never edited by hand"
+      }
+    ],
+    "src/s2/head.html": [
+      {
+        "owner": "i2",
+        "since": "2026-11-24",
+        "why": "i2: the Season 2 page's real head, spliced in by tools/site-build.cjs"
+      }
+    ],
+    "tools/s2-site-modes.test.cjs": [
+      {
+        "owner": "i2",
+        "since": "2026-11-24",
+        "why": "i2: the modes, flip guard, old links, sign-in returns and check 4"
+      }
+    ],
+    "tools/site-build-v462.test.cjs": [
+      {
+        "owner": "i2",
+        "since": "2026-11-24",
+        "why": "i2: site-build's own test came with site-build.cjs (reads the build's list of what it wrote)"
+      }
+    ],
+    "tools/sql/client-rpcs.cjs": [
+      {
+        "owner": "i2",
+        "since": "2026-11-24",
+        "why": "i2: grant-audit check 4 from both sites"
+      }
+    ],
+    "tools/ui/sitebuild.test.cjs": [
+      {
+        "owner": "i2",
+        "since": "2026-11-24",
+        "why": "i2: the built site in Chromium (next and s2 modes)"
+      }
+    ],
+    "robots.txt": [
+      {
+        "owner": "i2",
+        "since": "2026-11-24",
+        "why": "i2: Disallow /next/ and /classic/"
+      }
+    ],
+    "src/live/part_live.js": [
+      {
+        "owner": "i2",
+        "since": "2026-11-24",
+        "why": "i2: CG.oauthBack only (sign-in returns to /classic/ after the flip); back to the main session on merge"
+      }
+    ],
+    "tools/ui/desklive.cjs": [
+      {
+        "owner": "g1",
+        "since": "2026-11-25",
+        "why": "g1: the Staff Desk live-mode test helper"
+      }
+    ],
+    "sql/2026-11-24-market-owner-words-v463.sql": [
+      {
+        "owner": "main",
+        "since": "2026-11-25",
+        "why": "b4 drafted it; the main session applies it in the switch release (rehearsed OK R1 to R7)"
+      }
+    ],
+    "sql/2026-11-24-market-owner-words-v463.rehearsal.sql": [
+      {
+        "owner": "main",
+        "since": "2026-11-25",
+        "why": "b4 drafted it; the main session applies it in the switch release (rehearsed OK R1 to R7)"
+      }
+    ],
+    "tools/market-owner-words-v463.test.cjs": [
+      {
+        "owner": "main",
+        "since": "2026-11-25",
+        "why": "b4 drafted it; the main session applies it in the switch release (rehearsed OK R1 to R7)"
+      }
+    ],
+    "tools/ui/flows.test.cjs": [
+      {
+        "owner": "e5",
+        "since": "2026-11-24",
+        "why": "e5: the suite e5 wrote for the filed forms and the survey, and its door pin"
+      }
+    ],
+    "tools/s2-flows-doors-e5.test.cjs": [
+      {
+        "owner": "e5",
+        "since": "2026-11-24",
+        "why": "e5: the suite e5 wrote for the filed forms and the survey, and its door pin"
+      }
+    ],
+    "tools/ui/control.test.cjs": [
+      {
+        "owner": "g3",
+        "since": "2026-11-25",
+        "why": "g3: the Control Center suite and the schedule equality proof"
+      }
+    ],
+    "tools/schedule-port-g3.test.cjs": [
+      {
+        "owner": "g3",
+        "since": "2026-11-25",
+        "why": "g3: the Control Center suite and the schedule equality proof"
+      }
+    ],
+    "src/s2/js/pages/pickups.js": [
+      {
+        "owner": "g5",
+        "since": "2026-11-24",
+        "why": "S2 swap stream g5 (2026-11-24): pickup games on the new site (import, list, delete, box score, line editor)"
+      }
+    ],
+    "src/s2/css/pickups.css": [
+      {
+        "owner": "g5",
+        "since": "2026-11-24",
+        "why": "S2 swap stream g5 (2026-11-24): pickup games on the new site (import, list, delete, box score, line editor)"
+      }
+    ],
+    "tools/ui/pickups.test.cjs": [
+      {
+        "owner": "g5",
+        "since": "2026-11-24",
+        "why": "S2 swap stream g5 (2026-11-24): pickup games on the new site (import, list, delete, box score, line editor)"
+      }
+    ],
+    "tools/pickups-g5.test.cjs": [
+      {
+        "owner": "g5",
+        "since": "2026-11-24",
+        "why": "S2 swap stream g5 (2026-11-24): pickup games on the new site (import, list, delete, box score, line editor)"
+      }
+    ],
+    "tools/ui/market-world.cjs": [
+      {
+        "owner": "b4",
+        "since": "2026-11-25",
+        "why": "i3e: the market suites live-mode world on the harness"
+      }
+    ]
+  }
+}

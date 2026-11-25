@@ -90,7 +90,7 @@ console.log("\n— the published rule says it");
   A("...and states the positive rule", /Only a completed trade is published/.test(r23[0]));
   A("acceptance still publishes to the transaction log",
     /it is posted to the official transaction log automatically/.test(r23[0]));
-  A("a reversal is still communicated to both clubs", /is communicated to both clubs with the department's reasons/.test(r23[2]));
+  A("a reversal is still communicated to both clubs", /is communicated to both clubs with the reasons of the official who reversed it/.test(r23[2]));
   A("the player's own trade request is still front-office only",
     /and to nobody else/.test(r23[3]));
   A("the changelog records it", rb.changelog.some((e) => e.version === "3.35"));

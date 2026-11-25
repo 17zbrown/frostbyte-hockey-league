@@ -2,7 +2,13 @@
 /* Read-only load test against the live site + Supabase REST (anon key), the way real visitors
    hit it (2026-09-17). Never writes. Usage: SB_KEY=… node tools/loadtest.mjs [scenario]
    scenarios: site (CDN), boot (the per-visitor query set), draft (170 clients reconciling at once),
-   herd (a game goes final: every open tab does the v2.57 delta re-read, jittered), herdfull (the old full rebuild) */
+   herd (a game goes final: every open tab does the v2.57 delta re-read, jittered), herdfull (the old full rebuild),
+   s2boot and s2herd (the Season 2 site, v5.00 swap: its one league read, public.s2_league, data_layer.md section 7):
+     s2boot   VISITORS (default 150) arriving over 60 s, each reading the pulse row once (js/live.js joining the channel),
+              s2_league() for the current season and s2_league(1) for the Season 1 switch;
+     s2herd   a game goes final: TABS (default 40; run 300 before a big night) re-read only what js/live.js re-reads for
+              scores + stats (games, ratings, box and career for that one game), each after a random 0 to 8 s wait (the
+              pulse's jitter for those kinds), three waves about 20 s apart. Season 1's data, the heaviest season there is. */
 const SB = "https://bzbuyclwdhmhdzujxeqd.supabase.co", KEY = process.env.SB_KEY;
 if (!KEY) { console.error("SB_KEY missing"); process.exit(2); }
 const H = { apikey: KEY, Authorization: "Bearer " + KEY, Accept: "application/json" };
@@ -83,6 +89,27 @@ if (scenario === "herdfull") {
     if (g < 2) await new Promise((r) => setTimeout(r, 20000));
   }
   report(`herdfull (old client): 3 waves × ${tabs} tabs × ${BOOT.length + RPCS.length} requests`);
+}
+const rpcPost = (name, body, k) => get(SB + "/rest/v1/rpc/" + name, k, { method: "POST", headers: { ...H, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+if (scenario === "s2boot") {
+  const visitors = +(process.env.VISITORS || 150), t0 = performance.now();
+  await Promise.all(Array.from({ length: visitors }, (_, v) => new Promise((res) => setTimeout(res, Math.floor(v * 60000 / visitors))).then(() => Promise.all([
+    get(SB + "/rest/v1/live_pulse?select=v,d,site_build,at&id=eq.1", "s2boot live_pulse", { headers: H }),
+    rpcPost("s2_league", {}, "s2boot s2_league()"),
+    rpcPost("s2_league", { p_season: 1 }, "s2boot s2_league(1)"),
+  ]))));
+  report(`s2boot: ${visitors} visitors over 60 s × 3 requests each, ${Math.round(performance.now() - t0)} ms wall`);
+}
+if (scenario === "s2herd") {
+  const tabs = +(process.env.TABS || 40), GAME = "2d09cb6e-7bd3-47a3-bc1b-7c09935209b9";
+  const body = { p_season: 1, p_sections: ["games", "ratings", "box", "career"], p_game_ids: [GAME] };
+  for (let g = 0; g < 3; g++) {
+    const t0 = performance.now();
+    await Promise.all(Array.from({ length: tabs }, () => new Promise((r) => setTimeout(r, Math.floor(Math.random() * 8000))).then(() => rpcPost("s2_league", body, "s2herd s2_league(sections, game)"))));
+    console.log(`s2herd wave ${g + 1}: ${tabs} requests in ${Math.round(performance.now() - t0)} ms`);
+    if (g < 2) await new Promise((r) => setTimeout(r, 20000));
+  }
+  report(`s2herd (Season 2 client): 3 waves × ${tabs} tabs × 1 request, jittered 0 to 8 s`);
 }
 if (scenario === "draft" || scenario === "all") {
   /* a pick lands: 170 open draft rooms reconcile within the same second, five times in a row */

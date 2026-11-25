@@ -3026,19 +3026,25 @@ CG.avatarHtml = function(){
 };
 CG.setRole = function(){ /* no-op in live — role comes from the real session */ };
 
+/* v5.00 swap (i2, 2026-11-24): where Discord sends a member back: the origin this page is served from. At the root that is
+   the bare origin, exactly as before, so after the flip the frozen Season 1 copy on its own Netlify site (site-build
+   --fallback) signs a member in on that origin, never on chelgamingleague.com; served under a path, it keeps the path
+   (js/live.js back() is the Season 2 twin). The fallback origin must be on Supabase Auth's redirect list (runbook). */
+CG.oauthBack = function(){ return location.pathname === "/" ? location.origin : location.origin + location.pathname; };
 CG.signIn = function(){
   if (!CG.sb || !CG.sb.auth) return;
   /* remember where the user was — OAuth bounces through Discord and lands on the origin,
      so without this every sign-in dumps them back on Home instead of the page they left */
   try { if (location.hash && location.hash.indexOf("#/")===0) localStorage.setItem("cg_return", JSON.stringify({ h:location.hash, at:Date.now() })); } catch(e){}
   /* match the current site's redirect exactly (origin only) so it stays within
-     Supabase's existing Discord redirect allowlist */
+     Supabase's existing Discord redirect allowlist. v5.00 swap: CG.oauthBack keeps that at the root of whichever origin
+     serves this page (the allowlist holds https://chelgamingleague.com/** since 2026-11-23) */
   /* We only need identity to sign in. We do NOT request guilds.join: silently adding people
      to the server proved unreliable (Discord rejects tokens that predate the scope), so on
      first login we instead drop an in-site notification with the server invite (see
      handle_new_user). Discord still forces the email scope on its side — see the register
      page copy — but the site never uses it. */
-  CG.sb.auth.signInWithOAuth({ provider:"discord", options:{ redirectTo: window.location.origin, scopes:"identify" } });
+  CG.sb.auth.signInWithOAuth({ provider:"discord", options:{ redirectTo: CG.oauthBack(), scopes:"identify" } });
 };
 CG.signOut = async function(){ if (CG.sb && CG.sb.auth){ try { await CG.sb.auth.signOut(); } catch(e){} } location.hash = "#/home"; };
 CG.enforceBan = function(){
@@ -3125,7 +3131,7 @@ CG.AFTER.signin = function(){
        kept following the old account, which is the very thing the member came here to change. */
     try { localStorage.setItem("cg_return", JSON.stringify({ h:"#/hub/settings", at:Date.now() }));
           localStorage.setItem("cg_dc_switch", JSON.stringify({ at:Date.now() })); } catch(e){}
-    CG.sb.auth.linkIdentity({ provider:"discord", options:{ redirectTo: window.location.origin, scopes:"identify" } })
+    CG.sb.auth.linkIdentity({ provider:"discord", options:{ redirectTo: CG.oauthBack(), scopes:"identify" } })
       .then(function(r){
         if (r && r.error){
           lk.disabled = false;
@@ -6692,7 +6698,7 @@ CG.rosterRoomCard = function(club, opts){
     return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+(opts.title||"Roster spots remaining")+'</h3>'+
       '<span class="chip'+(r.open===0?' chip-loss':'')+'">'+r.open+' of '+r.max+' open · '+r.used+' filled, '+r.mgmt+' by management</span></div>'+
       '<div class="card-b"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">'+mTiles+'</div>'+
-      '<p class="caption" style="margin-top:10px">There are no position maximums. Your Owner and General Manager hold roster spots in their own position groups and count toward the minimums. After each pick your club must still be able to reach at least '+CG.rosterMinWords()+' with the spots and picks it has left (Rule S2.4); the pool greys out a player who would make that impossible.</p></div></div>';
+      '<p class="caption" style="margin-top:10px">There are no position maximums. Your Owner and General Manager hold roster spots in their own position groups and count toward the minimums. After each pick your club must still be able to reach at least '+CG.rosterMinWords()+' with the spots and picks it has left (Rule S2.4); the pool grays out a player who would make that impossible.</p></div></div>';
   }
   var tiles = r.groups.map(function(x){
     var full = x.room === 0;
@@ -6702,7 +6708,7 @@ CG.rosterRoomCard = function(club, opts){
   return '<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>'+(opts.title||"Roster spots remaining")+'</h3>'+
     '<span class="chip'+(r.open===0?' chip-loss':'')+'">'+r.open+' of '+r.max+' open · '+r.used+' filled, '+r.mgmt+' by management'+(r.camp?' · '+r.camp+' in camp':'')+'</span></div>'+
     '<div class="card-b"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">'+tiles+'</div>'+
-    '<p class="caption" style="margin-top:10px">Your Owner, GM and AGM hold roster spots in their own position groups (Rule 2.6), so they are counted here. A group at its cap cannot take another pick; the pool greys those players out.</p></div></div>';
+    '<p class="caption" style="margin-top:10px">Your Owner, GM and AGM hold roster spots in their own position groups (Rule 2.6), so they are counted here. A group at its cap cannot take another pick; the pool grays those players out.</p></div></div>';
 };
 CG.draftPickModalLive = function(pickId, forCode){
   /* v2.72: read the pool live on every repaint (it used to be a snapshot taken when the dialog
@@ -8046,7 +8052,7 @@ CG.poolState = function(pid){
   var _mkPool = !!(CG.marketOn && CG.marketOn());
   if (!draftDone && _dl && reg.created_at && Date.parse(reg.created_at) > Date.parse(_dl))
     return _mkPool ? { key:"late", label:"Late sign-up: training camp pool", chip:"chip-warn" }
-      : { key:"late", label:"Late sign-up — placed after the draft", chip:"chip-warn" };
+      : { key:"late", label:"Late sign-up: placed after the draft", chip:"chip-warn" };
   if (!draftDone && _preOpen && !CG.isDraftEligible(pid))
     return { key:"needs_preseason", label:"Needs pre-season games", chip:"chip-warn" };
   if (!draftDone) return { key:"signup", label:"Signed up", chip:"chip" };
@@ -9910,7 +9916,11 @@ CG.subscribeLeague = function(){
    The build stamps a content id into the page (meta cg-build) and /version.json. The database reads version.json every
    10 minutes and copies the id into the pulse, so no member's page ever polls Netlify. A page running an older build
    takes the new one at the next click, when it is looked at again after half an hour away, or after 15 idle minutes,
-   and never while it is hidden, while a form is half done, while a dialog is open or during a live draft. */
+   and never while it is hidden, while a form is half done, while a dialog is open or during a live draft.
+   v5.00 swap (i2, 2026-11-24): the build-time switch for this check is the cg-build meta itself. The frozen Season 1 copy
+   on its own Netlify site (node tools/site-build.cjs --fallback) is built without it, so CG.BUILD is null and
+   CG._checkBuild returns at its first line: that copy reads the main site's pulse, whose build id after the flip is the
+   Season 2 page's, and must never chase it. The main site always carries the meta, so its behavior is unchanged. */
 CG.BUILD = (function(){ try { var m = document.querySelector('meta[name="cg-build"]'); return (m && m.getAttribute("content")) || null; } catch(e){ return null; } })();
 CG._isLiveHost = function(){ return /(^|\.)chelgamingleague\.com$/.test(location.hostname || ""); };
 CG._updateState = function(){ try { return JSON.parse(sessionStorage.getItem("cg_update") || "null"); } catch(e){ return null; } };
@@ -15878,7 +15888,7 @@ CG.renderDiscordAccounts = function(d){
     lk.disabled=true;
     try { localStorage.setItem("cg_return", JSON.stringify({ h:"#/hub/settings", at:Date.now() }));
           localStorage.setItem("cg_dc_switch", JSON.stringify({ at:Date.now() })); } catch(e){}
-    CG.sb.auth.linkIdentity({ provider:"discord", options:{ redirectTo: window.location.origin, scopes:"identify" } })
+    CG.sb.auth.linkIdentity({ provider:"discord", options:{ redirectTo: CG.oauthBack(), scopes:"identify" } })
       .then(function(r){ if (r && r.error){ lk.disabled=false; try { localStorage.removeItem("cg_dc_switch"); } catch(e){} var m=document.getElementById("dcLinkMsg2"); if(m){ m.textContent="Couldn’t start the link: "+r.error.message; m.style.color="var(--red)"; } } });
   });
 };
@@ -16163,6 +16173,9 @@ CG.mkWaiversCard = function(t){
   var now = CG.now(), rows = st.rows.filter(function(w){ return Date.parse(w.expires_at) > now; });
   var names = (CG.lg && CG.lg._profName) || {}, codeOf = (CG.lg && CG.lg._idToCode) || {};
   head += '<span class="chip'+(rows.length ? ' chip-warn' : '')+'">'+(rows.length ? rows.length+' open' : 'none open')+'</span></div>';
+  /* QA nits 2026-11-25: market_claim refuses a seat whose Owner approves its Free agents moves ("ask your Owner to make the
+     claim"), so that seat is told, not offered a button that always fails */
+  var ownerOnly = CG.mgmtAccess && CG.mgmtAccess("freeagents") === "approve";
   if (!rows.length) return head+'<div class="card-b"><p class="caption" style="margin:0">No player is on waivers right now.</p></div></div>';
   return head+rows.map(function(w){
     var code = codeOf[w.from_team_id], from = (code && CG.TEAM[code] && CG.TEAM[code].name) || "another club";
@@ -16174,6 +16187,7 @@ CG.mkWaiversCard = function(t){
       '<span class="caption" title="Closes '+esc(CG.fmtFull(Date.parse(w.expires_at)))+'">'+Math.floor(ms/3600000)+' h '+Math.floor(ms%3600000/60000)+' min left</span>'+
       ((t && t.id === w.from_team_id)
         ? '<span class="caption">your club waived them: no claim back</span>'
+        : ownerOnly ? '<span class="caption">only your Owner claims (Rule 2.6)</span>'
         : '<button class="btn btn-chrome btn-sm" data-mk-claim="'+esc(w.id)+'" data-name="'+esc(nm)+'" data-salary="'+esc(w.salary)+'">Claim</button>')+
       '</div>';
   }).join("")+'</div>';

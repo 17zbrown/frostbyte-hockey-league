@@ -1,0 +1,475 @@
+/* #/player/<id>, the Compare sheet and #/club/<code>. Owned by the profile builder; everything is namespaced pfx- (the
+   website frame shared by both pages), pf- (player) or pfc- (club). Tokens only, so dark mode and all three finishes follow.
+   League website v2 (commissioner, 2026-10-19: "feels too much like a dashboard and not a League Website"; liftfoils.com and
+   juventus.com; "Type and crests only"): a hero band in the club's own color, sections on the page instead of cards,
+   condensed uppercase headlines, an underline switch, cards only for things a reader picks up (a player on the roster).
+   Club colors appear only as the solid hero band, under text set in whichever of black or white the JS measured to read
+   best on it (profile.js clubVars), never as a fill inside a chart. */
+
+/* crests are drawn for a light ground, so wherever one sits on a club color or an ink band it rests on a light plate.
+   One fixed light gray in both themes (the logos do not change with the theme), built from the kit's fixed text pair */
+.pf, .pfc, .pf-cmp { --pfx-plate: color-mix(in srgb, var(--on-dark) 94%, var(--on-light)); }
+.pfx-sec { --pfx-bg: var(--canvas); }
+.pfx-sec.band.tint { --pfx-bg: var(--canvas-2); }
+.pfx-sec.band.ink { --pfx-bg: var(--ink-band); }
+
+/* ---------- the website frame ---------- */
+/* plain sections breathe from the one above; a band after a plain section keeps the same gap above its color */
+.pfx-sec:not(.band) { padding-top: clamp(48px, 7vw, 88px); }
+.pfx-sec:not(.band) + .band { margin-top: clamp(48px, 7vw, 88px); }
+.pfx-head .copy { min-width: 0; }
+.pfx-head .d-2 { overflow-wrap: anywhere; }
+.pfx-head .kicker { flex-wrap: wrap; }
+.pfx-sub { margin: 0 0 4px; font: 800 1rem/1 var(--font-brand); font-stretch: 85%; font-variation-settings: "wdth" 85; letter-spacing: .08em; text-transform: uppercase; color: var(--ink); }
+.pf-empty { display: grid; gap: 6px; padding: 6px 0; }
+.pf-empty p { margin: 0; }
+.pfx-empty-k { display: flex; margin: 0 0 4px; }   /* an empty section's label over its S2.empty box (QA visual 6) */
+/* each back link reaches 44px tall (v3 review: the padded links measured 38px). The reach is a hit area around the 11px type,
+   not a taller row, so a trail that wraps on a phone keeps its tight rhythm */
+.pfx-crumb { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0 0 clamp(22px, 4vw, 44px); font: 600 .8125rem/1.2 var(--font); letter-spacing: -0.006em; color: var(--muted); }
+.pfx-crumb a { position: relative; color: inherit; text-decoration: underline transparent; text-decoration-thickness: 1px; text-underline-offset: 4px; transition: text-decoration-color 160ms ease; }
+.pfx-crumb a::after { content: ""; position: absolute; inset: -16px -5px; }
+.pfx-crumb [aria-current] { opacity: 1; }
+@media (hover: hover) and (pointer: fine) { .pfx-crumb a:hover { text-decoration-color: currentColor; } }
+.pfx-flags { display: flex; flex-wrap: wrap; gap: 8px; }
+.pfx-flag { display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border-radius: 4px; box-shadow: inset 0 0 0 1.5px currentColor;
+  font: 700 .6875rem/1 var(--font); letter-spacing: .02em; text-transform: uppercase; }
+/* an honor (2026-11-21): the same mark, filled in the band's ink with the trophy glyph, so an award never reads as a status */
+.pfx-flag.honor { gap: 6px; background: currentColor; box-shadow: none; }
+.pfx-flag.honor > span { color: var(--club, var(--ink-band)); }   /* the band's own fallback ground (ui.css .band.club) */
+.pfx-flag.honor svg { width: 14px; height: 14px; flex: none; color: var(--club, var(--ink-band)); stroke-width: 2.2; }
+.pfx-plate { --pfx-ps: 96px; width: var(--pfx-ps); height: var(--pfx-ps); flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--pfx-plate); }
+.pfx-plate .crest { width: 72%; height: 72%; }
+.pfx-plate .crest-tile { width: 72%; height: 72%; display: grid; place-items: center; color: var(--on-light); font: 800 1.25rem/1 var(--font-brand); }
+.pfx-plate.sm { --pfx-ps: 44px; }
+.pfx-plate.md { --pfx-ps: 60px; }
+
+/* press answers on pointer-down (a class set in JS) and on :active, 120ms, never on release */
+.pf-press, .pfx-tabs button, .pf .arrow, .pfc .arrow, .pf-press { transition: transform var(--t-press) var(--ease-out), background-color 160ms ease, opacity 160ms ease; }
+.pf-press.is-down, .pf-press:active { transform: scale(.97); }
+.pf-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; }
+
+/* the switch: an uppercase underline row; ONE underline (S2.segmented's thumb) springs between options */
+.pfx-tabs { position: relative; display: flex; gap: 0 22px; max-width: 100%; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain;
+  box-shadow: inset 0 -1px 0 var(--separator); }
+.pfx-tabs::-webkit-scrollbar { display: none; }
+/* QA phone 2 (2026-11-25): the gap beside a label answers for it, as .lg-utabs (league.css): half the gap each way, the
+   ends stopped at the row's edge, and under every label (isolation here, z-index -1 there) so a label's own box wins on
+   the phone's space-between row, where the gap is whatever is left */
+.pfx-tabs { isolation: isolate; }
+.pfx-tabs button::before { content: ""; position: absolute; inset: 0 -11px; z-index: -1; }
+.pfx-tabs.lg button::before { inset: 0 -15px; }
+.pfx-tabs button:first-of-type::before { left: 0; }
+.pfx-tabs button:last-of-type::before { right: 0; }
+.pfx-tabs button { position: relative; flex: none; min-height: 44px; padding: 0 1px; white-space: nowrap; color: var(--muted);
+  font: 750 .8125rem/1 var(--font-brand); font-stretch: 85%; font-variation-settings: "wdth" 85; letter-spacing: .1em; text-transform: uppercase; transition: color 160ms ease; }
+.pfx-tabs button[aria-pressed="true"] { color: var(--ink); }
+.pfx-tabs button .num { margin-left: 3px; font: 600 .8125rem/1 var(--font-num); letter-spacing: 0; color: var(--muted); }
+.pfx-tabs .thumb { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--ink); pointer-events: none; will-change: transform; }
+.pfx-tabs.lg { gap: 0 30px; box-shadow: none; }
+.pfx-tabs.lg button { min-height: 56px; font-size: .9375rem; }
+/* phone: the five club sections fit one row, spread edge to edge instead of scrolling the last one out of view */
+@media (max-width: 559px) { .pfx-tabs.lg { gap: 0; justify-content: space-between; } .pfx-tabs.lg button { font-size: .8125rem; letter-spacing: .02em; } }
+@media (hover: hover) and (pointer: fine) { .pfx-tabs button:hover { color: var(--ink); } }
+.pfx-head > .pfx-tabs { align-self: flex-end; }
+@media (max-width: 699px) { .pfx-head > .pfx-tabs { flex: 1 1 100%; } }   /* phone: the switch takes its own row under the sentence */
+/* the position switch: full names while they fit, the short code on a phone when there are three or more */
+.pfx-tabs-pos .pf-ss { display: none; }
+@media (max-width: 559px) { .pfx-tabs-pos:has(button:nth-child(4)) .pf-sl { display: none; } .pfx-tabs-pos:has(button:nth-child(4)) .pf-ss { display: inline; } }
+
+/* the one disclosure that holds method and sources */
+
+/* rows on the page (results, moves, records, stints, honors): hairlines, no boxes */
+.pfx-rows { list-style: none; margin: 0; padding: 0; display: grid; }
+.pfx-rows > li { border-top: 1px solid var(--separator); }
+.pfx-rows > li:last-child { border-bottom: 1px solid var(--separator); }
+.pf-rec, .pfc-game { display: flex; align-items: center; gap: 14px; min-height: 60px; padding: 10px 0; color: var(--ink); }
+.pf-rec .grow, .pfc-game .grow { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.pf-rec b, .pfc-game b { font: 600 1rem/1.3 var(--font); letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.pf-rec .grow > span, .pfc-game .grow > span { font: 400 .875rem/1.4 var(--font); color: var(--muted); }
+a.pf-rec.pf-press:active, a.pf-rec.pf-press.is-down, a.pfc-game.pf-press:active, a.pfc-game.pf-press.is-down { transform: none; background: var(--fill-2); }
+@media (hover: hover) and (pointer: fine) { a.pf-rec:hover b, a.pfc-game:hover b { color: var(--accent-ink); } }
+.pfx-split.two { display: grid; gap: clamp(56px, 7vw, 88px); }
+@media (min-width: 900px) { .pfx-split.two { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 72px; align-items: start; } }
+.pfx-col { min-width: 0; }
+.pfx-split.two .d-2 { font-size: clamp(1.75rem, 2.8vw, 2.25rem); }   /* half a page wide, so one step down */
+
+/* ---------- the hero band ---------- */
+.pfx-hero.band { display: block; color: var(--club-ink, var(--on-dark)); padding-top: clamp(16px, 3vw, 28px); padding-bottom: clamp(32px, 5vw, 64px); }
+.pfx-hero .pfx-crumb, .pfx-hero .kicker { color: inherit; }   /* every word on the band is full ink: a faded white on Detroit red measured 3.8:1 */
+.pfx-hero :focus-visible { outline: 3px solid currentColor; outline-offset: 3px; }
+.pfx-hero-g { display: grid; gap: 22px; grid-template-columns: minmax(0, 1fr); grid-template-areas: "id" "art" "act"; }   /* a fixed track, so the column fitName measures against never grows */
+@media (min-width: 900px) { .pfx-hero-g { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "id art" "act art"; column-gap: 56px; row-gap: 28px; align-items: end; } }
+.pfx-hero-id { grid-area: id; display: grid; gap: 14px; justify-items: start; min-width: 0; }   /* source order puts it over .pfx-jersey */
+.pfx-hero-art { grid-area: art; display: flex; align-items: center; gap: 18px; min-width: 0; }
+@media (min-width: 900px) { .pfx-hero-art { flex-direction: column; align-items: flex-end; gap: 24px; } .pfx-hero .pfx-plate { --pfx-ps: 220px; } }
+.pfx-hero-act { grid-area: act; display: flex; flex-wrap: wrap; gap: 10px; }
+/* the jersey number: shares the name's grid area, pinned to its far end and drawn under the text (isolation keeps it above the
+   band's color). A zero-height box, so it never makes the hero taller; aria-hidden, the kicker says the number in full ink */
+.pfx-hero { isolation: isolate; overflow: clip; }
+.pfx-jersey { grid-area: id; justify-self: end; align-self: start; z-index: -1; height: 0; overflow: visible; pointer-events: none; user-select: none; -webkit-user-select: none;
+  margin-top: -.06em; font-size: clamp(13rem, 76vw, 34rem); line-height: .78; letter-spacing: -0.03em; color: color-mix(in srgb, var(--club-ink, var(--on-dark)) 12%, transparent); }
+.pfx-plate-a { display: block; border-radius: 50%; }
+/* the gamertag's largest size; profile.js fitName measures the name and shrinks a long one to its line (never under 2rem,
+   1.5rem on a phone under 560 px). overflow-wrap is only for one unbroken token still too wide at that floor */
+.pfx-name { font-size: clamp(2rem, 17vw, 8.5rem); max-width: 100%; overflow-wrap: anywhere; }
+.pfx-lede { margin: 0; max-width: 46ch; font: 500 clamp(1.0625rem, 1.7vw, 1.3125rem)/1.45 var(--font); letter-spacing: -0.012em; }
+.pfx-hero .btn.site.pfx-btn { background: var(--club-ink, var(--accent-fill)); color: var(--club, var(--accent-on)); }
+.pfx-btn svg { width: 18px; height: 18px; }
+/* the hero's front-office doors (trade, trade block, bid) are outlines in the band's ink; the page-wide outline color below is for the canvas */
+.pfx-hero .btn.site.outline { color: inherit; }
+.pfx-rate { display: flex; align-items: center; gap: 14px; }
+.pfx-rate-ring { position: relative; display: block; width: 104px; height: 104px; flex: none; }
+.pfx-rate-ring svg { width: 100%; height: 100%; }
+.pfx-rate-n { position: absolute; inset: 0; display: grid; place-items: center; font-size: 2.875rem; }
+.pfx-rate-l { display: grid; gap: 4px; max-width: 16ch; font: 500 .875rem/1.35 var(--font); }
+.pfx-rate-l b { font: 700 .6875rem/1.2 var(--font); letter-spacing: .02em; text-transform: uppercase; }
+@media (min-width: 900px) { .pfx-rate-ring { width: 120px; height: 120px; } .pfx-rate-n { font-size: 3.375rem; } }
+.pfx-hero-spec { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; margin: clamp(26px, 4vw, 44px) 0 0; padding-top: 18px;
+  border-top: 1px solid color-mix(in srgb, currentColor 32%, transparent); }
+@media (min-width: 700px) { .pfx-hero-spec { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); } }
+.pfx-hero-spec dt { font: 700 .6875rem/1.2 var(--font); letter-spacing: .02em; text-transform: uppercase; }
+.pfx-hero-spec dd { margin: 4px 0 0; font: 600 1.0625rem/1.25 var(--font); overflow-wrap: anywhere; }
+
+.pfx-nf { padding: clamp(28px, 6vw, 72px) 0 0; display: grid; gap: 18px; justify-items: start; }
+.pfx-nf-act { display: flex; flex-wrap: wrap; gap: 10px; }
+.pfx-nf .btn svg { width: 18px; height: 18px; }
+.btn.site.outline { color: var(--ink); }
+
+.pfx-rolebar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 20px; padding-top: 22px; }
+.pfx-rolebar-k { font: 600 .8125rem/1 var(--font); letter-spacing: -0.006em; color: var(--muted); }
+
+/* ---------- player: season ---------- */
+.pfx-season { display: grid; gap: 28px; align-items: center; }
+@media (min-width: 700px) { .pfx-season { grid-template-columns: auto minmax(0, 1fr); gap: 56px; } }
+.pfx-rings svg { width: 188px; height: 188px; }
+@media (min-width: 900px) { .pfx-rings svg { width: 220px; height: 220px; } }
+.pfx-bigs { list-style: none; margin: 0; padding: 0; display: grid; gap: 20px; }
+@media (min-width: 1000px) { .pfx-bigs { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; } }
+.pfx-bigs li { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; column-gap: 14px; }
+.pfx-big { font-size: clamp(3rem, 6vw, 4.5rem); }
+@media (max-width: 999px) { .pfx-big { min-width: 1.6em; } }   /* stacked: the three numbers line up */
+.pfx-big-l { display: grid; gap: 3px; min-width: 0; }
+.pfx-big-l b { font: 800 1rem/1 var(--font-brand); font-stretch: 85%; font-variation-settings: "wdth" 85; letter-spacing: .08em; text-transform: uppercase; }
+.pfx-big-l span { font: 400 .875rem/1.35 var(--font); color: var(--muted); }
+
+/* ---------- player: rating breakdown ---------- */
+.pfx-radar { display: grid; gap: 28px; align-items: center; }
+@media (min-width: 800px) { .pfx-radar { grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: 72px; } }
+.pfx-radar > svg { width: 100%; justify-self: center; }
+.pfx-cats { list-style: none; margin: 0; padding: 0; display: grid; max-width: 560px; }
+.pfx-cats li { display: grid; grid-template-columns: minmax(0, 1fr) auto 64px; align-items: baseline; gap: 16px; padding: 12px 0; border-top: 1px solid var(--separator); }
+.pfx-cats li:last-child { border-bottom: 1px solid var(--separator); }
+.pfx-cat-l { font: 800 1rem/1.2 var(--font-brand); font-stretch: 85%; font-variation-settings: "wdth" 85; letter-spacing: .08em; text-transform: uppercase; overflow-wrap: anywhere; }
+.pfx-cats b { font-size: 2.25rem; }
+.pf-delta { text-align: right; font: 600 .9375rem/1 var(--font-num); color: var(--muted); }
+.pf-delta.up { color: var(--win-ink); }
+.pf-delta.down { color: var(--loss-ink); }
+
+/* ---------- player: rank bars (M.rank) ---------- */
+.pf-pgrid { display: grid; gap: 36px; }
+@media (min-width: 760px) {
+  .pf-pgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px 44px; }
+  .pf-pgrid.one { grid-template-columns: minmax(0, 1fr); }
+  .pf-pgrid.one .pf-pgroup { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 18px 44px; }
+  .pf-pgrid.one .pf-pgroup > h3 { grid-column: 1 / -1; }
+}
+.pf-pgroup { display: grid; gap: 18px; align-content: start; }
+.pf-pb, .pfc-meter, .pfc-pay { display: grid; gap: 7px; }
+.pf-pb-h { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.pf-pb-l { font: 500 .9375rem/1.25 var(--font); color: var(--ink-2); min-width: 0; }
+.pf-pb-v { display: inline-flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.pf-pb-v b { font: 600 1.0625rem/1 var(--font-num); color: var(--ink); }
+.pf-pb-p { font: 600 .75rem/1 var(--font-num); color: var(--muted); min-width: 34px; text-align: right; }
+.pf-pb-p.hi { color: var(--win-ink); }
+.pf-pb-p.lo { color: var(--loss-ink); }
+.pf-pb-t { position: relative; height: 8px; border-radius: 4px; background: var(--fill); overflow: hidden; }
+.pf-pb-t > i { position: absolute; inset: 0; border-radius: 4px; background: var(--chart-a); transform-origin: left center; display: block; }
+.pf-pb-m { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--ink); opacity: .32; }
+.pf-pb-n { font: 400 .75rem/1.3 var(--font); color: var(--muted); }
+
+/* ---------- player: game log heat strip (on the ink band) ---------- */
+.pf-heat { display: grid; gap: 8px; }
+.pf-hrow { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 10px; }
+.pf-hwk { white-space: nowrap; font: 700 .6875rem/1 var(--font); letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
+.pf-hcells { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 6px; max-width: 480px; }
+@media (max-width: 559px) {   /* phone: the week label sits above its row so each square can be a 44px-class target */
+  .pf-hrow { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .pf-hcells { grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); max-width: none; }
+  .pf-heat { gap: 12px; }
+}
+.pf-hc { position: relative; aspect-ratio: 1; min-height: 34px; border-radius: 6px; display: grid; place-items: center; color: var(--ink);
+  font: 600 .9375rem/1 var(--font-num); box-shadow: inset 0 0 0 1px var(--hairline);
+  transition: transform var(--t-press) var(--ease-out), box-shadow 160ms ease; }
+.pf-hc[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--pfx-bg), 0 0 0 4px var(--accent); }
+.pf-hc .pf-hc-r { position: absolute; left: 22%; right: 22%; bottom: 4px; }
+.pf-hc-r { display: inline-block; height: 3px; width: 14px; border-radius: 2px; background: var(--faint); vertical-align: middle; margin-right: 6px; }
+.pf-hc-r.w { background: var(--win); }
+.pf-hc-r.l { background: var(--loss); }
+.pf-hc-r.otl { background: var(--warn); }
+.pf-hc-r.ff { opacity: .55; }
+.pf-heat-key { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 16px; font: 400 .8125rem/1.3 var(--font); color: var(--muted); }
+.pf-heat-key > span { display: inline-flex; align-items: center; }
+.pf-ramp { gap: 2px; }
+.pf-ramp i { width: 14px; height: 14px; border-radius: 3px; display: block; }
+/* the same 8 to 44% ramp the squares use (profile.js stripHTML), so the key matches what it explains */
+.pf-ramp i:nth-child(1) { background: color-mix(in srgb, var(--chart-a) 8%, var(--surface-2)); }
+.pf-ramp i:nth-child(2) { background: color-mix(in srgb, var(--chart-a) 20%, var(--surface-2)); }
+.pf-ramp i:nth-child(3) { background: color-mix(in srgb, var(--chart-a) 32%, var(--surface-2)); }
+.pf-ramp i:nth-child(4) { background: color-mix(in srgb, var(--chart-a) 44%, var(--surface-2)); }
+.pf-heat-x { display: grid; gap: 24px; }
+@media (min-width: 900px) { .pf-heat-x { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 56px; align-items: start; } }
+/* the selected game reads beside the strip: a scoreboard line, not a card */
+.pf-hd { display: grid; gap: 12px; align-content: start; padding-top: 16px; border-top: 3px solid var(--ink); }
+.pf-hd:empty { display: none; }
+.pfx-hd-top { display: flex; align-items: center; gap: 14px; }
+.pfx-hd-top .grow { min-width: 0; display: grid; gap: 6px; }
+.pfx-hd-k { font: 700 .6875rem/1 var(--font); letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
+.pfx-hd-t { margin: 0; font-size: 1.75rem; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.pfx-hd-l { margin: 0; font: 400 .9375rem/1.5 var(--font); color: var(--ink-2); }
+.pf-hd .arrow { justify-self: start; }
+.pfx-res { font: 700 .75rem/1 var(--font); font-style: normal; letter-spacing: .02em; text-transform: uppercase; }
+.pfx-res.w { color: var(--win-ink); }
+.pfx-res.l { color: var(--loss-ink); }
+.pfx-res.otl { color: var(--warn-ink); }
+
+/* sortable tables: the name column stays put while the numbers scroll (phone); they reach the screen edge on a phone */
+.pf-tbl-wrap { margin: 0 calc(-1 * var(--gutter)); border-radius: 0; }
+.pf-tbl th { background: var(--pfx-bg); }
+.pf-tbl th:first-child, .pf-tbl td:first-child { padding-left: var(--gutter); }
+.pf-tbl td:last-child, .pf-tbl thead th:last-child { padding-right: var(--gutter); }
+.pf-tbl th[scope="row"] { text-align: left; font: 500 .9375rem/1.3 var(--font); color: var(--ink); text-transform: none; letter-spacing: -0.005em; padding-top: 12px; padding-bottom: 12px;
+  border-bottom: 1px solid var(--separator); position: sticky; left: 0; z-index: 1; }
+.pf-tbl thead th:first-child { position: sticky; left: 0; z-index: 2; }
+.pf-tbl tr:last-child th[scope="row"] { border-bottom: 0; }
+/* sort headings are 44px tall and at least 32px wide (v3 review: G and A were 13 by 32). The heading cell gives its padding to
+   the button, so the label still lines up with the numbers under it and neighbors keep an 8px gap */
+.pf-tbl thead th { padding: 0 4px; }
+/* the career (M.career, careerSec): the same table as the game log, its headings labels (a career reads in order), each season
+   a row header with its kind of game under it, the number the headline counts in bold, a career total ruled off under the
+   seasons. A club is a crest and a name that opens the club, answered on pointer-down (.pf-press); a phone shows its code */
+/* its headings are text, not the sort buttons .pf-tbl's heading padding is built around (they carry 6px of their own), so
+   the heading text lines up with the column under it */
+.pf-tbl.pf-car thead th { padding: 0 10px; height: 44px; }
+.pf-tbl.pf-car thead th:first-child { padding-left: var(--gutter); }
+.pf-tbl.pf-car thead th:last-child { padding-right: var(--gutter); }
+.pf-car th[scope="row"] { min-width: 132px; }
+.pf-car-s { display: block; font: 600 .9375rem/1.25 var(--font); color: var(--ink); }
+.pf-car-st { display: block; margin-top: 2px; font: 400 .75rem/1.3 var(--font); color: var(--muted); }
+.pf-car td { vertical-align: middle; }
+.pf-car td.lead { font-weight: 700; color: var(--ink); }
+.pf-car-clubh, .pf-car-clubs { text-align: left !important; }
+.pf-car-clubs { display: flex; gap: 4px 14px; flex-wrap: wrap; }
+.pf-car-club { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: var(--ink); text-decoration: none; white-space: nowrap; border-radius: 8px; }
+.pf-car-club .crest { width: 22px; height: 22px; }
+.pf-car-cd { display: none; font: 600 .75rem/1 var(--font); letter-spacing: .04em; }
+.pf-car-tot th[scope="row"], .pf-car-tot td { border-top: 1.5px solid var(--ink); }
+.pf-car-tot .pf-car-s { font-weight: 700; }
+.pf-car-role { margin: 26px 0 4px; font: 600 .6875rem/1 var(--font); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.pf-car-role:first-of-type { margin-top: 6px; }
+@media (hover: hover) and (pointer: fine) { .pf-car-club:hover .pf-car-nm { text-decoration: underline; text-underline-offset: 3px; } }
+.pf-car-club:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 560px) { .pf-car-nm { display: none; } .pf-car-cd { display: inline; } .pf-car th[scope="row"] { min-width: 108px; } }
+.pf-tbl thead th:first-child { padding-left: calc(var(--gutter) - 6px); }
+.pf-tbl thead th:last-child { padding-right: calc(var(--gutter) - 6px); }
+.pf-tbl th button { width: 100%; min-width: 32px; min-height: 44px; padding: 0 6px; justify-content: flex-end; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.pf-tbl thead th:first-child button { justify-content: flex-start; }
+.pf-tbl th button:active { background: var(--fill-2); border-radius: 6px; }   /* answered on press; the sort itself lands on click */
+/* QA phone 11 and 12 (2026-11-25): under a finger a sort heading is at least 44 px wide, and the whole name cell opens the
+   player (as the box score's, today.css): the link was its text's 18 px in a 45 px row. The row header is sticky, so it
+   holds the reach and the next row's cell keeps its own link */
+@media (pointer: coarse) {
+  .pf-tbl th button { min-width: 44px; }
+  .pf-tbl tbody th a::after { content: ""; position: absolute; inset: 0; }
+}
+.pf-tbl th a, .pf-tbl td a { color: var(--ink); }
+.pf-tbl .chip { min-height: 20px; padding: 0 7px; font-size: .6875rem; margin-left: 4px; }
+.pf-tbl td { font-size: .9375rem; }
+@media (hover: hover) and (pointer: fine) { .pf-tbl th a:hover, .pf-tbl td a:hover { color: var(--accent-ink); } .pf-tbl tbody tr:hover th[scope="row"] { background: color-mix(in srgb, var(--fill-2) 100%, var(--pfx-bg)); } }
+
+/* ---------- player: honors and club stints ---------- */
+.pfx-hon-n { width: 64px; flex: none; font-size: 2rem; color: var(--ink); }
+.pfx-hon li > .pfx-hon-n + .grow, .pfx-hon li { min-width: 0; }
+.pfx-hon > li:not(:has(a)) { display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 10px 0; }
+.pfx-hon > li .grow { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.pfx-hon > li .grow b { font: 600 1rem/1.3 var(--font); overflow-wrap: anywhere; }
+.pfx-hon > li .grow span { font: 400 .875rem/1.4 var(--font); color: var(--muted); }
+.pf-tens .crest { width: 36px; height: 36px; }
+.pf-ten.now b::after { content: "Now"; margin-left: 10px; font: 700 .6875rem/1 var(--font); letter-spacing: .02em; text-transform: uppercase; color: var(--win-ink); vertical-align: 2px; }
+
+/* ---------- Compare sheet ---------- */
+.pf-cmp { display: grid; gap: 18px; padding-top: 2px; }
+.pf-cmp-who { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: start; gap: 10px; }
+.pf-cw { container-type: inline-size; display: grid; justify-items: center; text-align: center; gap: 5px; min-width: 0; }
+.pf-cw .crest.lg { width: 48px; height: 48px; }
+/* the name sizes to its own column, so a 13-letter gamertag fits a phone's 120 px side whole (review 2026-10-20: THE16THGU/NNER) */
+.pf-cw-n { font-size: min(1.375rem, 100cqi / 7.5); color: var(--ink); overflow-wrap: break-word; max-width: 100%; }
+.pf-cw-o { display: grid; justify-items: center; gap: 2px; margin-top: 4px; }
+.pf-cw-o b { font-size: 3rem; }
+.pf-cw-a .pf-cw-o b { color: var(--chart-a); }
+.pf-vs { padding-top: 34px; color: var(--muted); }
+.pf-cmp-pick { display: grid; gap: 10px; }
+.pf-cmp-sugg { display: flex; flex-wrap: wrap; gap: 6px; }
+.pf-cmp-sugg .chip { min-height: 32px; padding: 0 12px; font-size: .8125rem; }
+.pf-cmp-sugg .chip[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink); }
+.pf-cmp-res { display: grid; border-radius: var(--r-sm); overflow: hidden; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--hairline); }
+.pf-cmp-res:empty { display: none; }
+.pf-cmp-res .row .title { overflow-wrap: anywhere; }
+.pf-cmp-none { padding: 12px 16px; margin: 0; }
+.pfx-cmp-s { margin: 0; font: 400 .875rem/1.45 var(--font); color: var(--muted); text-align: center; }
+.pf-cmp-key { display: flex; gap: 16px; justify-content: center; }
+.pf-cmp-key span { display: inline-flex; align-items: center; gap: 6px; }
+.pf-bfs { display: grid; gap: 12px; }
+/* butterfly rows: the left player grows leftward from the middle, the right player rightward */
+.pf-bf { display: grid; grid-template-columns: 74px minmax(0, 1fr) minmax(0, 1fr) 74px; grid-template-areas: "l l l l" "va a b vb"; align-items: center; gap: 4px 6px; }
+.pf-bf-l { grid-area: l; text-align: center; font: 500 .8125rem/1.25 var(--font); color: var(--muted); }
+.pf-bf-va { grid-area: va; text-align: left; }
+.pf-bf-vb { grid-area: vb; text-align: right; }
+.pf-bf-va, .pf-bf-vb { font: 500 .9375rem/1 var(--font-num); color: var(--muted); }
+.pf-bf-va.win, .pf-bf-vb.win { color: var(--ink); font-weight: 700; }
+/* the rank in words under each value (ranks, 2026-10-20): it stays muted and regular when its value is the bold one. The
+   value columns are 74px so "T-28th of 35" keeps one line (72px); a longer one wraps rather than overflows */
+.pf-bf-rk { display: block; margin-top: 3px; font: 400 .75rem/1.25 var(--font); color: var(--muted); }
+.pf-bf-a, .pf-bf-b { position: relative; height: 10px; border-radius: 5px; background: var(--fill-2); overflow: hidden; display: block; }
+.pf-bf-a { grid-area: a; } .pf-bf-b { grid-area: b; }
+.pf-bf-a i, .pf-bf-b i { position: absolute; inset: 0; display: block; border-radius: 5px; transition: transform 460ms var(--ease-out); }
+.pf-bf-a i { background: var(--chart-a); transform-origin: right center; }
+.pf-bf-b i { background: var(--chart-b); transform-origin: left center; }
+@media (min-width: 560px) { .pf-bf { grid-template-columns: 74px minmax(0, 1fr) 150px minmax(0, 1fr) 74px; grid-template-areas: "va a l b vb"; } }
+.pf-cmp-r { display: grid; gap: 10px; justify-items: center; border-top: 1px solid var(--separator); padding-top: 16px; }
+.pf-cmp-r svg { max-width: 250px; }
+@media (pointer: coarse) { .pf-cmp-sugg .chip { min-height: 44px; } .pf-cw-n { display: inline-flex; align-items: center; min-height: 44px; } }
+
+/* ---------- club: hero ---------- */
+.pfc-hero-g { display: grid; gap: 22px; align-items: center; }
+@media (min-width: 760px) { .pfc-hero-g { grid-template-columns: auto minmax(0, 1fr); gap: 44px; } }
+.pfc-hero .pfx-plate { --pfx-ps: 112px; }
+@media (min-width: 760px) { .pfc-hero .pfx-plate { --pfx-ps: 200px; } }
+@media (min-width: 1100px) { .pfc-hero .pfx-plate { --pfx-ps: 248px; } }
+.pfc-hero-id { display: grid; gap: 14px; justify-items: start; min-width: 0; }
+.pfc-hero-id .btn { margin-top: 6px; }
+.pfc-name { font-size: clamp(3rem, 11.5vw, 7.75rem); overflow-wrap: anywhere; }
+.pfc-name span { display: block; }
+.pfc-nums { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 24px; margin: clamp(28px, 4vw, 48px) 0 0; padding-top: 20px;
+  border-top: 1px solid color-mix(in srgb, currentColor 32%, transparent); }
+@media (min-width: 700px) { .pfc-nums { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.pfc-nums dt { font: 700 .6875rem/1.2 var(--font); letter-spacing: .02em; text-transform: uppercase; }
+.pfc-nums dd { margin: 8px 0 0; font-size: clamp(2.5rem, 6vw, 4.5rem); }
+
+/* the season so far, on the tint band */
+.pfc-gd { margin-top: 4px; }
+/* the kit centers the first date under the first point, 8px in, so a line chart keeps 14px of its own on the left or the date is cut at the screen edge */
+.pfx-form, .pfc-gd { padding-left: 14px; }
+.pfc-strip { display: grid; grid-template-columns: repeat(18, minmax(0, 1fr)); gap: 4px; margin-top: 22px; }   /* half a 36-game season per row, no orphans */
+.pfc-r { height: 22px; border-radius: 3px; background: var(--faint); }
+.pfc-r.w { background: var(--win); }
+.pfc-r.l { background: var(--loss); }
+.pfc-r.otl { background: var(--warn); }
+.pfc-r.last { box-shadow: 0 0 0 2px var(--pfx-bg), 0 0 0 3.5px var(--ink); }
+@media (min-width: 900px) { .pfc-strip { grid-template-columns: repeat(36, minmax(0, 1fr)); } }
+
+/* the section tabs: a full-width underline row that sticks under the header */
+/* QA phone 16 (2026-11-25): full bleed, so it keeps clear of a landscape notch as .lg-tabsbar does (league.css) */
+.pfc-tabs { position: sticky; top: var(--nav-h); z-index: 6; width: 100vw; margin-left: calc(50% - 50vw);
+  padding: 0 max(var(--gutter), env(safe-area-inset-right), calc((100vw - var(--maxw)) / 2 + var(--gutter))) 0 max(var(--gutter), env(safe-area-inset-left), calc((100vw - var(--maxw)) / 2 + var(--gutter))); background: var(--canvas); box-shadow: inset 0 -1px 0 var(--separator); }
+#pfcPanel > .pfx-sec:first-child:not(.band) { padding-top: clamp(32px, 5vw, 56px); }
+
+/* roster: seats and payroll, then the lineup in rink order (LW C RW across, then LD RD G) */
+.pfc-ros-top { display: grid; gap: 28px; margin-bottom: clamp(36px, 5vw, 60px); }
+@media (min-width: 900px) { .pfc-ros-top { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 64px; align-items: end; } }
+.pfc-seats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pfc-seats dd { overflow-wrap: anywhere; }
+/* a phone gives each seat its own row, title left and gamertag right, so a tag is never cut mid-word in an 84 px column
+   (review 2026-10-20: <LockinChi/ef> at 320) */
+@media (max-width: 559px) {
+  .pfc-seats { grid-template-columns: 1fr; }
+  .pfc-seats > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .pfc-seats dd { overflow-wrap: break-word; text-align: right; min-width: 0; }
+}
+.pfc-seats a { color: var(--ink); }
+@media (hover: hover) and (pointer: fine) { .pfc-seats a:hover { color: var(--accent-ink); } }
+@media (pointer: coarse) { .pfc-seats a { display: inline-flex; align-items: center; min-height: 44px; } }
+.pfc-pay .pf-pb-v b { font-size: 1.25rem; }
+.pfc-depth { display: grid; gap: 36px 22px; }
+@media (min-width: 700px) { .pfc-depth { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.pfc-col { min-width: 0; }
+/* the Season 1 camp stand-ins: their own group under the active columns, laid out the same way (audit 2026-11-09) */
+.pfc-camp { margin-top: clamp(32px, 4vw, 48px); }
+@media (min-width: 700px) { .pfc-camp .pfc-pls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 22px; } }
+.pfc-col-h { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin: 0 0 12px; padding-bottom: 10px; border-bottom: 3px solid var(--ink);
+  font: 800 1.25rem/1 var(--font-brand); font-stretch: 75%; font-variation-settings: "wdth" 75; letter-spacing: .02em; text-transform: uppercase; }
+.pfc-col-h .num { font: 600 .9375rem/1 var(--font-num); color: var(--muted); letter-spacing: 0; }
+.pfc-pls { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.pfc-pl { display: grid; grid-template-columns: 2.2em minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 64px; padding: 10px 14px; border-radius: var(--r-xs);
+  background: var(--surface); color: var(--ink); }
+.pfc-pl.pf-press.is-down, .pfc-pl.pf-press:active { transform: scale(.98); }
+.pfc-pl-no { font-size: 1.75rem; color: var(--muted); }
+.pfc-pl-id { display: grid; gap: 3px; min-width: 0; }
+.pfc-pl-id b { font: 600 1rem/1.25 var(--font); letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.pfc-pl-id > span { font: 400 .8125rem/1.35 var(--font); color: var(--muted); }
+.pfc-tags { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.pfc-tags i { font: 700 .6875rem/1.3 var(--font); font-style: normal; letter-spacing: .02em; text-transform: uppercase; color: var(--accent-ink); }
+.pfc-pl-r { font-size: 1.875rem; }
+.pfc-pl-r.prov { color: var(--muted); }   /* gray while provisional; faint measured 2.99:1 on the card */
+.pfc-none { margin: 0; padding: 12px 0; font: 400 .9375rem/1.4 var(--font); color: var(--muted); }
+@media (hover: hover) and (pointer: fine) { .pfc-pl:hover b { color: var(--accent-ink); } }
+
+/* stats: special teams meters */
+.pfc-meters { display: grid; gap: 28px; }
+@media (min-width: 800px) { .pfc-meters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 56px; } }
+.pfc-meter .pf-pb-v b { font-size: 2.25rem; }
+.pfc-meter .pf-pb-t { height: 10px; border-radius: 5px; }
+.pfc-meter .pf-pb-m { opacity: .55; }
+
+/* games: the next game on the ink band (Juventus match center) */
+.pfc-mc { display: grid; gap: 22px; align-items: center; }
+@media (min-width: 860px) { .pfc-mc { grid-template-columns: auto minmax(0, 1fr) auto; gap: 48px; } }
+.pfc-mc-date { display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto; column-gap: 12px; align-items: end; justify-content: start; }
+.pfc-mc-date .d-num { grid-row: span 2; font-size: clamp(3.5rem, 7vw, 5rem); }
+.pfc-mc-date span:not(.d-num) { font: 700 .75rem/1.2 var(--font); letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
+.pfc-mc-date .pfc-mc-m { color: var(--ink); font-size: .875rem; }
+@media (min-width: 860px) { .pfc-mc-date { padding-right: 44px; border-right: 1px solid var(--separator); } }
+.pfc-mc-main { display: grid; gap: 14px; min-width: 0; }
+.pfc-mc-teams { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px; }
+.pfc-mc-side { display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto; column-gap: 12px; align-items: center; }
+.pfc-mc-side .pfx-plate { grid-row: span 2; }
+.pfc-mc-side .d-1 { font-size: clamp(2.25rem, 5vw, 3.75rem); line-height: .9; }
+.pfc-mc-n { font: 500 .8125rem/1.2 var(--font); color: var(--muted); }
+/* "at" as a word, as Today, Games and Game Center say it (review 2026-10-20: a large @ here only) */
+.pfc-mc-at { font: 600 .8125rem/1 var(--font); letter-spacing: -0.006em; color: var(--muted); }
+.pfc-mc-t { margin: 0; font: 400 .9375rem/1.45 var(--font); color: var(--ink-2); }
+.pfc-mc-go { justify-self: start; }
+@media (min-width: 860px) { .pfc-mc-go { justify-self: end; } }
+
+/* games and moves lists */
+.pfc-wk + .pfc-wk { margin-top: 28px; }
+.pfc-wk .pfx-sub { margin-bottom: 10px; }
+.pfc-date { width: 58px; flex: none; display: grid; gap: 2px; }
+.pfc-date b { font: 600 .9375rem/1.2 var(--font); }
+.pfc-date span { font: 400 .8125rem/1.2 var(--font); color: var(--muted); }
+.pfc-game > .crest { width: 34px; height: 34px; }
+.pfc-score { display: inline-flex; align-items: baseline; gap: 10px; white-space: nowrap; }
+.pfc-score b { font-size: 1.875rem; }
+.pfc-time { font: 600 .9375rem/1 var(--font-num); color: var(--ink-2); white-space: nowrap; }
+.pfc-mv { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--fill); color: var(--ink-2); }
+.pfc-mv.in { background: color-mix(in srgb, var(--win) 16%, transparent); color: var(--win-ink); }
+.pfc-mv svg { width: 16px; height: 16px; }
+.pfc-mv-w { font: 700 .6875rem/1 var(--font); letter-spacing: .02em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+.pfc-sum { margin: 0 0 18px; font: 400 .9375rem/1.45 var(--font); color: var(--muted); }
+.pfc-more { margin-top: 24px; }
+@media (max-width: 419px) { .pfc-mv-w { display: none; } .pfc-score b { font-size: 1.5rem; } }
+
+/* history */
+.pfc-bars { max-width: 820px; }
+.pfc-rec-n { width: 72px; flex: none; font-size: 2rem; }
+
+/* the other clubs: crests are the navigation */
+.pfc-others .kicker { margin-bottom: 18px; }
+.pfc-others-l { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+.pfc-others-l a { display: grid; justify-items: center; gap: 10px; padding: 18px 6px; border-radius: var(--r-sm); color: var(--ink);
+  font: 750 .8125rem/1.1 var(--font-brand); font-stretch: 85%; font-variation-settings: "wdth" 85; letter-spacing: .08em; text-transform: uppercase; text-align: center; }
+@media (hover: hover) and (pointer: fine) { .pfc-others-l a:hover { background: var(--surface); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .pf-bf-a i, .pf-bf-b i,   .pf-press.is-down, .pf-press:active, .pf-hc, .pfc-pl.pf-press:active, .pfc-pl.pf-press.is-down { transform: none; }
+}

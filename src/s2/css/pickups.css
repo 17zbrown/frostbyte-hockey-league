@@ -1,0 +1,89 @@
+/* Pickup games (js/pages/pickups.js, S2 swap stream g5, 2026-11-24): the list, the import from EA, one game's box score and
+   the statistics staff's editor. Namespace .pu-. Tokens only, so dark mode follows; no glass, no shadow. Presses answer on
+   pointer-down (:active) and reduced motion keeps no transform. The EA status line is the Game desk's (.ea-status in
+   desk.css), so the three EA boxes on the site look alike. */
+.pu-hero { padding-bottom: clamp(18px, 3vw, 32px); }
+.pu-hero .d-1 { margin: 0; text-wrap: balance; }
+/* qa (worst 6): an EA club name can be one long word ("OkanaganValleySeniorHockeyClub"), and the score line and a club's
+   section head carry it: break it rather than run the page wider than the phone */
+.pu-hero .d-1, .pu-sec .sec-head h2 { overflow-wrap: anywhere; }
+.pu-sec { padding: clamp(18px, 3vw, 32px) 0; border-top: 1px solid var(--hairline); }
+.pu-wait { margin: 12px 0; }
+.pu-cap { margin: 16px 0 6px; }
+
+/* the import */
+.pu-imp { max-width: 680px; }
+.pu-qrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pu-qrow .input { flex: 1 1 220px; min-width: 0; }
+.pu-list { margin: 6px 0 14px; }
+.pu-list .grow { display: grid; gap: 2px; }
+.pu-m { cursor: pointer; }
+.pu-m input { width: 22px; height: 22px; accent-color: var(--accent); flex: none; }
+.pu-club { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 16px 0 4px; }
+.pu-bar { display: grid; gap: 8px; justify-items: start; margin-top: 4px; }
+.pu-bar .t-foot { margin: 0; max-width: 60ch; }
+.pu-done { margin-top: 14px; outline: none; }
+#puProfsNote { outline: none; }   /* takes focus only when the Try again inside it is replaced */
+.pu-players { list-style: none; margin: 10px 0 14px; padding: 0; display: grid; gap: 6px; font: 400 .875rem/1.4 var(--font); }
+.pu-players li { display: flex; align-items: baseline; gap: 8px; }
+.pu-players li::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--win); transform: translateY(-1px); }
+.pu-players li.is-miss::before { background: var(--loss); }
+.pu-acts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+
+/* results said in place */
+.pu-good, .pu-err { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0; font: 500 .875rem/1.45 var(--font); outline: none; }
+.pu-good { color: var(--win-ink); }
+.pu-err { color: var(--loss-ink); }
+.pu-good svg, .pu-err svg { flex: none; width: 18px; height: 18px; margin-top: 1px; }
+.pu-good a, .pu-err a { color: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: .18em; }
+.pu-say { margin: 8px 0; min-height: 1.4em; font: 500 .8125rem/1.4 var(--font); color: var(--muted); }
+.pu-say.pu-good, .pu-say.pu-err { display: block; }
+.pu-say.pu-good { color: var(--win-ink); }
+.pu-say.pu-err { color: var(--loss-ink); }
+
+/* the list and the box score */
+.pu-tbl td:first-child a, .pu-side td:first-child a { color: var(--ink); font-weight: 600; text-decoration: none; }
+.pu-tbl .chip { margin-left: 4px; }
+.pu-side .tbl-wrap + .tbl-wrap { margin-top: 12px; }
+@media (hover: hover) and (pointer: fine) {
+  .pu-tbl td:first-child a:hover, .pu-side td:first-child a:hover { text-decoration: underline; text-underline-offset: .18em; }
+}
+
+/* a member's pickup lines on their profile (S2.pickups.profileHtml): the figures, then the game log, per role */
+.pu-role + .pu-role { margin-top: 24px; }
+.pu-role .t-head { margin: 0 0 10px; }
+.pu-figs { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 14px 18px; margin: 4px 0 18px; }
+.pu-figs dd { order: -1; margin: 0; }
+.pu-prof td:nth-child(2) a { color: var(--ink); font-weight: 600; text-decoration: none; }
+@media (hover: hover) and (pointer: fine) {
+  .pu-prof td:nth-child(2) a:hover { text-decoration: underline; text-underline-offset: .18em; }
+}
+
+/* the editor (statistics staff) */
+.pu-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; align-items: end; max-width: 900px; }
+.pu-meta .input { min-width: 0; }
+.pu-check { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; font: 500 .875rem/1.2 var(--font); color: var(--ink); cursor: pointer; }
+.pu-check input, .pu-ed input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--accent); }
+.pu-ed td { vertical-align: top; padding-top: 8px; padding-bottom: 8px; }
+.pu-ed .pu-who { min-width: 190px; white-space: normal; text-align: left; }
+.pu-ed .pu-who .t-foot { display: block; margin-top: 4px; }
+/* qa (phone 4): ui.css's select.input outranks a lone class, so the member select keeps the kit's 44px and 16px; only its
+   width is set here (a 36px height and .875rem written here never applied) */
+.pu-sel { max-width: 240px; }
+.pu-n { width: 56px; min-height: 36px; padding: 6px 4px; text-align: center; font-variant-numeric: tabular-nums; }
+/* the box-score numbers are compact for a mouse; a finger gets the kit's 44px target */
+@media (pointer: coarse) { .pu-n { min-height: 44px; } }
+.pu-miss { color: var(--loss-ink); font-weight: 600; }
+.pu-rowacts { white-space: nowrap; }
+.pu-rowacts .btn + .btn { margin-left: 4px; }
+.pu-del { color: var(--loss-ink); }
+.pu-add { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--separator); }
+.pu-add .field { flex: 0 1 220px; }
+
+@media (max-width: 560px) {
+  .pu-club { flex-wrap: wrap; }
+  .pu-add .field { flex: 1 1 100%; }
+}
+@media (forced-colors: active) {
+  .pu-players li::before { background: CanvasText; }
+}

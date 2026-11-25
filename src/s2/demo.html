@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en" data-theme="light" data-finish="glacier">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<!-- one status-bar color, set by S2.applyLook from the theme chosen in You, Settings (not only the system setting) -->
+<meta name="theme-color" content="#f5f5f7">
+<title>CGHL · Season 2</title>
+<meta name="description" content="The Chel Gaming Hockey League site, as the suites serve it (the site build puts the real head, src/s2/head.html, here).">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Inter covers devices without Apple's SF Pro (Windows, Android); Apple devices render the system faces -->
+<!-- Archivo is the league's own brand face; its width axis gives the condensed sports display cut (league website v2) -->
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/ui.css">
+<link rel="stylesheet" href="css/today.css">
+<link rel="stylesheet" href="css/league.css">
+<link rel="stylesheet" href="css/profile.css">
+<link rel="stylesheet" href="css/hq.css">
+<link rel="stylesheet" href="css/lineups.css">
+<link rel="stylesheet" href="css/you.css">
+<link rel="stylesheet" href="css/desk.css">
+<link rel="stylesheet" href="css/pickups.css">
+<link rel="stylesheet" href="css/control.css">
+<link rel="stylesheet" href="css/flows.css">
+<link rel="stylesheet" href="css/trade.css">
+<link rel="stylesheet" href="css/tradebuild.css">
+<link rel="stylesheet" href="css/survey.css">
+<link rel="stylesheet" href="css/market.css">
+<link rel="stylesheet" href="css/bidding.css">
+<link rel="stylesheet" href="css/camp.css">
+<link rel="stylesheet" href="css/office.css">
+<link rel="stylesheet" href="css/abbr.css">
+</head>
+<body>
+<div id="app" class="shell"></div>
+<!-- the page's scripts, in order. js/load.js loads them once the league data is in hand (the s2_league read), then calls
+     window.S2_START. A new script gets its tag here, never a <script> tag of its own -->
+<template id="s2-scripts">
+<script src="js/core.js"></script>
+<script src="js/live.js"></script>
+<script src="js/rulebook.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/cg-engine.js"></script>
+<script src="js/model.js"></script>
+<script src="js/market.js"></script>
+<script src="js/lobby.js"></script>
+<script src="js/flows.js"></script>
+<script src="js/trade.js"></script>
+<script src="js/pages/today.js"></script>
+<script src="js/pages/league.js"></script>
+<script src="js/pages/draft.js"></script>
+<script src="js/pages/profile.js"></script>
+<script src="js/pages/hq.js"></script>
+<script src="js/inbox.js"></script>
+<script src="js/pages/you.js"></script>
+<script src="js/pages/lineups.js"></script>
+<script src="js/pages/tradebuild.js"></script>
+<script src="js/pages/desk.js"></script>
+<script src="js/pages/gamedesk.js"></script>
+<script src="js/pages/pickups.js"></script>
+<script src="js/pages/control.js"></script>
+<script src="js/pages/bidding.js"></script>
+<script src="js/pages/camp.js"></script>
+<script src="js/pages/office.js"></script>
+<script src="js/survey.js"></script>
+<script src="js/abbr.js"></script>
+<script src="js/search.js"></script>
+</template>
+<script>
+  /* run by js/load.js once every script above is in: a first visit follows the system theme (You, Settings remembers a
+     chosen one), then the first page is drawn. i3f (2026-11-25): the shared copy's claude.ai theme is gone with it */
+  window.S2_START = function () {
+    if (S2.store.get("theme", null) == null) S2.state.theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    S2.boot();
+  };
+</script>
+<script src="js/load.js"></script>
+</body>
+</html>

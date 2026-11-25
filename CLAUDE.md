@@ -23,6 +23,24 @@ The GitHub repo is public: nothing secret belongs in it.
   is strict. `part8_blueprint_init.js` ends with the closing `</script></body></html>` tags (expected parser errors).
   `part_live.js` is the live data layer (Supabase reads, RPCs, league pulse); `part3_content.js` is ONE line holding
   `CG.CONTENT` and the rulebook; `part1_head.html` holds the CSS tokens and the phone layer (720/560/430).
+- `src/s2/`: the Season 2 site (v5.00 swap). `demo.html` is the shell and the ONE list of stylesheets and scripts (every
+  script tag goes inside `<template id="s2-scripts">`); `js/` and `js/pages/` are IIFEs on the global `S2`, each with
+  "use strict" inside it; `js/load.js` reads `s2_league` and loads the list; `js/live.js` is sign-in, `S2.write` (the one
+  write door, contract in the private client-api.md), the pulse and the version check; `head.html` is the real page head.
+  `data/snapshot.js` is the PRIVATE fixture the suites link in (never committed, never published). Its Playwright suites
+  live in `tools/ui/` and run only through `node tools/ui/run.cjs` (not in `npm test`).
+- `tools/site-build.cjs` (what Netlify runs) builds `_site/`, and ONE constant, `ROOT`, picks the root: `"classic"` (the
+  classic page alone, until the release), `"s2"` (the flip: chelgamingleague.com serves ONLY the Season 2 site; `/classic`
+  and `/next` answer a 302 to `/`) or `"next"` (the classic root plus the Season 2 site at `/next/`, for the suites, never
+  shipped). The Season 2 page is one html file (stylesheets and `js/load.js` inlined, pinned supabase-js first) plus one
+  bundle `/s2/app-<hash>.js` of the template's scripts; every path in it is absolute. At `"s2"` the build id is a hash of
+  that page, in the page and `version.json`. The flip build REFUSES while the page carries a demo device or concept
+  wording (`flipGuard`). Every `_redirects` rule is a 302 (a rollback reverses them; browsers cache a 301).
+  `node tools/site-build.cjs --fallback <dir>` builds the frozen Season 1 site for its own free Netlify site (commissioner,
+  2026-11-24: the classic site leaves the domain as a fallback): the classic page minus its build id (so it never reloads
+  toward the new root), plus noindex and a backup notice; its own `netlify.toml` proxies `/api/*` to chelgamingleague.com
+  and it deploys with NO functions. Release and rollback: the runbook in the private briefs; `tools/s2-site-modes.test.cjs`
+  pins every mode and the fallback.
 - `netlify/functions/*.js`: HTTP functions (ingest-stats, discord-interactions, discord-ops, pickup-import, ea-poll
   fallback) plus gated stand-ins for the five jobs. Every file is ESM; CommonJS must be `.cjs` (Netlify's bundler
   refuses it; `tools/netlify-functions-esm.test.cjs`). A file there with no schedule export is a PUBLIC endpoint.
@@ -60,13 +78,14 @@ The GitHub repo is public: nothing secret belongs in it.
 
 ## Commands
 - Local preview: `node src/live/build.cjs index.html`, served by `site-local` in `.claude/launch.json` (port 8766).
+  The whole deploy as Netlify builds it: `node tools/site-build.cjs <dir>`.
 - Test: `npm test` (builds, runs every `tools/*.test.cjs|mjs`, must end with ALL TESTS PASSED); one file:
   `node tools/<name>.test.cjs`. macOS has no `timeout` command. After touching league-live or the pulse also run
   `TABS=40 node tools/loadtest.mjs herd`.
 - Edge jobs (Supabase does not deploy on push):
   `node tools/edge/build.mjs && npx supabase@2.118.0 functions deploy discord-sync twitch-live-sync lfg-timers discord-scheduler discord-welcome --project-ref bzbuyclwdhmhdzujxeqd --use-api`
 - Deploy: push `main`; Netlify runs `node tools/site-build.cjs` (about 20 s), which builds `index.html` into `_site/` and
-  publishes only that folder (v4.62). `tools/netlify-ignore.sh` skips the build when only sql/, tools/ (except
+  publishes only that folder (v4.62); `ROOT` says which site that is. `tools/netlify-ignore.sh` skips the build when only sql/, tools/ (except
   tools/site-build.cjs), docs/, .github/, .claude/, bot/ (except the two files discord-sync bundles), README, CLAUDE or
   jsconfig files change.
 

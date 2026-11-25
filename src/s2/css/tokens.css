@@ -1,0 +1,105 @@
+/* CGHL Season 2 concept: design tokens.
+   Apple grammar: neutral grays carry the page, ONE accent (a "finish") carries action and focus, semantic colors
+   only mean something (live, win, loss, warning). Every text color clears WCAG AA on the surface it sits on.
+   The finish is Glacier, the one accent (commissioner, 2026-11-23: "I prefer glacier"); Gold and Ember are retired. */
+:root {
+  color-scheme: light;
+  /* surfaces */
+  --canvas: #f5f5f7;          /* Apple's page gray */
+  --surface: #ffffff;
+  --surface-2: #fbfbfd;       /* grouped-list inset */
+  --raised: #ffffff;
+  --fill: rgba(120, 120, 128, .12);      /* tertiary system fill: segmented tracks, chips */
+  --fill-2: rgba(120, 120, 128, .08);
+  --hairline: rgba(0, 0, 0, .09);
+  --separator: rgba(60, 60, 67, .16);
+  /* text */
+  --ink: #1d1d1f;             /* 16.0:1 on white */
+  --ink-2: #424245;           /* 10.0:1 */
+  --muted: #6e6e73;           /* 5.0:1 on white, 4.6:1 on canvas */
+  --faint: #8e8e93;           /* labels only at >= 15px semibold, 3.3:1: large-text rule */
+  /* semantic (fills; text uses the -ink twins) */
+  --live: #ff3b30;  --live-ink: #d70015;
+  --win: #34c759;   --win-ink: #1a7f37;
+  --loss: #ff453a;  --loss-ink: #c4161c;
+  --warn: #ff9f0a;  --warn-ink: #9a5a00;
+  --discord: #5865f2;          /* ruling 2026-10-16: the Join button stays Discord purple */
+  /* the accent: Glacier, the one finish (commissioner, 2026-11-23: "I prefer glacier"; Gold and Ember retired) */
+  --accent: #0a6cdf;           /* 4.9:1 on white */
+  --accent-ink: #0a5fc4;
+  --accent-soft: rgba(10, 108, 223, .10);
+  --accent-on: #ffffff;
+  /* the accent as a FILL under --accent-on text (buttons, selected rows). It equals --accent except in dark Glacier, where
+     the bright mark color would put white text at 3.1:1 (review 2026-10-19) */
+  --accent-fill: var(--accent);
+  /* text on a fill whose lightness is only known once drawn (heat cells, S2.charts.ink): fixed in every theme */
+  --on-light: #000000; --on-dark: #ffffff;
+  --accent-2: #5ac8fa;         /* secondary series in charts */
+  --chart-a: var(--accent);
+  --chart-b: #8e8e93;
+  /* bars: SOLID. Commissioner, 2026-10-19: "I am not so much a fan of the liquid glass texture Apple uses for a website,
+     but their overall design aside from that feels timeless but modern." No translucency, no blur, anywhere. */
+  --bar: #f5f5f7;              /* the navigation bar is the page's own gray; a hairline appears once content scrolls under */
+  --bar-tab: #fbfbfd;          /* the phone tab bar sits one step lighter so it reads as a separate layer */
+  /* geometry */
+  --r-xs: 8px; --r-sm: 12px; --r-md: 16px; --r-lg: 22px; --r-xl: 28px;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .04), 0 1px 1px rgba(0, 0, 0, .03);
+  --shadow-2: 0 10px 30px -12px rgba(0, 0, 0, .18), 0 2px 6px rgba(0, 0, 0, .05);
+  --shadow-sheet: 0 -10px 40px -10px rgba(0, 0, 0, .25);
+  /* header v2 menus: the light dim under an open menu, and the tallest a menu may grow (it scrolls inside past that) */
+  --nav-dim: rgba(0, 0, 0, .18);
+  --nav-panel-max: calc(100dvh - var(--nav-h) - 44px);
+  --gutter: 16px;
+  --maxw: 1180px;
+  /* type: Apple's own faces where the device has them (SF Pro, SF Pro Rounded for big numerals), Inter elsewhere */
+  --font: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-display: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-num: ui-rounded, "SF Pro Rounded", -apple-system, "Inter", system-ui, sans-serif;
+  /* league website v2: the brand face, condensed, for heroes, headlines, scores and big numerals */
+  --font-brand: "Archivo", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --ink-band: #0b0b0c;          /* the match-center band (Juventus reference): near black in both themes */
+  --canvas-2: #f5f5f7;          /* the light alternate band */
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  /* motion */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --t-press: 120ms; --t-quick: 180ms; --t-ui: 240ms;
+  /* layout */
+  --nav-h: 60px; --tab-h: 0px;   /* league website v2: no app tab bar; the header and a full-screen menu carry navigation */
+}
+/* dark: true black canvas like iOS, elevated grays for surfaces */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #000000; --surface: #1c1c1e; --surface-2: #161618; --raised: #2c2c2e;
+  --fill: rgba(120, 120, 128, .24); --fill-2: rgba(120, 120, 128, .16);
+  --hairline: rgba(255, 255, 255, .10); --separator: rgba(84, 84, 88, .55);
+  --ink: #f5f5f7; --ink-2: #d1d1d6; --muted: #a1a1a6; --faint: #8e8e93;
+  --live-ink: #ff6961; --win-ink: #30d158; --loss-ink: #ff6961; --warn-ink: #ffb340;
+  --accent: #3b94ff; --accent-ink: #64a9ff; --accent-soft: rgba(59, 148, 255, .18); --accent-2: #64d2ff; --chart-a: #3b94ff; --chart-b: #636366;
+  --accent-fill: #1668dc;     /* 5.2:1 under white text; marks and links keep the brighter #3b94ff */
+  --bar: #000000; --bar-tab: #161618;
+  --nav-dim: rgba(0, 0, 0, .5);   /* on black the band's hairline does the separating; the dim only quiets the page */
+  --shadow-1: 0 0 0 1px rgba(255, 255, 255, .04); --shadow-2: 0 12px 34px -10px rgba(0, 0, 0, .7);
+}
+@media (prefers-contrast: more) {
+  :root { --hairline: rgba(0, 0, 0, .35); --muted: #48484a; }
+  [data-theme="dark"] { --hairline: rgba(255, 255, 255, .4); --muted: #d1d1d6; }
+}
+/* league website v2: public pages are a white WEBSITE (tiles are light gray, no card shadows); workspaces keep the gray
+   app canvas with white cards. S2.route sets html[data-mode] from the page definition (mode: "app" for workspaces). */
+:root[data-mode="site"]:not([data-theme="dark"]) {
+  --canvas: #ffffff; --surface: #f5f5f7; --surface-2: #ffffff; --raised: #ffffff; --canvas-2: #f5f5f7;
+  --shadow-1: none; --bar: #ffffff;
+}
+[data-theme="dark"] { --canvas-2: #111113; }
+/* dark: the ink band (match center, Game Center scoreboard, bracket, footer) is lifted to the elevated gray so it stands
+   off the black canvas and above the quieter tint band (#111113). Review 2026-10-19: at #0b0b0c it measured 1.07:1 on
+   black and the tint band came out LIGHTER than the match center. Set on :root only, so a band or the footer that scopes
+   data-theme="dark" onto itself in LIGHT mode keeps the near-black band. Tiles on the band step up one level with it */
+:root[data-theme="dark"] { --ink-band: #1c1c1e; }
+:root[data-theme="dark"] .band.ink { --surface: #2c2c2e; --raised: #3a3a3c; }
+:root[data-mode="site"][data-theme="dark"] { --surface: #141416; --surface-2: #0b0b0c; }
+/* in the workspaces the canvas is already gray, so a tint band is white there (otherwise it would vanish) */
+:root[data-mode="app"]:not([data-theme="dark"]) { --canvas-2: #ffffff; }
+:root[data-mode="app"][data-theme="dark"] { --canvas-2: #1c1c1e; }

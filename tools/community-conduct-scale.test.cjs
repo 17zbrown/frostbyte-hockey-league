@@ -82,12 +82,14 @@ console.log("\n— Rule 7.7");
     A("...lists " + h, !!s77 && s77[0].indexOf(h) >= 0));
   A("...requires words when Other is used", !!s77 && /other, which requires the ruling to say in words what happened/.test(s77[0]));
   A("...allows more than one heading, with a reason", !!s77 && /should not be narrowed to fit a single label/.test(s77[0]));
-  A("...sets the scale at 3 to 18 in steps of three (v3.51)", !!s77 && /runs three \(3\) to eighteen \(18\) games in steps of three \(3\)/.test(s77[1]));
+  /* v5.00 swap, the staffing flip: 7.7 suspends as 7.2 provides (a committee manager, 3 to 18 games or 14 days; anything
+     longer, and the rest of a season, only on a commissioner's approval) */
+  A("...sets the scale at 3 to 18 in steps of three, by a committee manager (v3.51, the flip)", !!s77 && /A suspension under this rule is imposed as Rule 7\.2 provides: a committee manager suspends a rostered member for three \(3\) to eighteen \(18\) games in steps of three \(3\), and a member who holds no roster spot to a date no more than fourteen \(14\) days from the start of the suspension\./.test(s77[1]));
   A("...and reserves longer, expulsion and staff to a commissioner",
-    !!s77 && /longer than eighteen \(18\) games, an expulsion from the league, and any sanction against a commissioner or a member of league staff are imposed only by a commissioner/.test(s77[1]));
+    !!s77 && /A longer suspension, and any suspension for the remainder of a season, takes effect only when a commissioner approves it \(Rule 7\.2\); an expulsion from the league, and any sanction against a commissioner or a member of league staff, are imposed only by a commissioner/.test(s77[1]));
   A("...tells the member the headings", !!s77 && /told the headings recorded against them/.test(s77[2]));
   A("...and settles the two-department case", !!s77 && /whichever rule fits the conduct they are ruling on/.test(s77[2]));
-  A("7.1 points at the ceilings of 7.2 (v3.51)", /within the ceilings of Rule 7\.2/.test(ch7.sections.find((x) => x.id === "7.1").paragraphs[1]));
+  A("7.1 points at the limits of 7.2 (v3.51; \"limits\" since the flip)", /suspends within the limits of Rule 7\.2/.test(ch7.sections.find((x) => x.id === "7.1").paragraphs[1]));
   A("7.2 carries one staff ceiling for both departments (v3.51)",
     /from three \(3\) to eighteen \(18\) games/.test(ch7.sections.find((x) => x.id === "7.2").paragraphs[0]));
   A("7.4's mandatory baseline is three games since v3.51 (the shortest step of the scale)",

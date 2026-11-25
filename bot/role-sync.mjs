@@ -32,7 +32,7 @@
 //
 // Dependency-free of discord.js so tools/role-sync.test.mjs can drive it with a stubbed fetch.
 
-import { desiredRolesFor, applyManagedRoles, managedRoleIds, roleIdMap } from "../shared/roles.mjs";
+import { desiredRolesFor, applyManagedRoles, managedRoleIds, roleIdMap, STAFF_MODEL_KEY, committeesLive } from "../shared/roles.mjs";
 import { timedFetch, SB_TIMEOUT_MS, DISCORD_TIMEOUT_MS } from "./handlers.mjs";
 
 export function createRoleSyncer(env, opts = {}) {
@@ -97,12 +97,16 @@ export function createRoleSyncer(env, opts = {}) {
   let slow = null, slowAt = 0;
   async function slowCtx() {
     if (slow && Date.now() - slowAt < 60_000) return slow;
-    const [guildRoles, seasons, rfaCfg, nsuCfg] = await Promise.all([
+    const [guildRoles, seasons, rfaCfg, nsuCfg, modelCfg] = await Promise.all([
       dApi("GET", `/guilds/${GUILD}/roles`),
       sbGet("seasons?select=id,number,status,registration_open,format&status=neq.complete&order=number.asc"),
       sbGet("app_config?key=eq.rfa_offseasons&select=value"),
       sbGet("app_config?key=eq.discord_not_signed_up_role_id&select=value"),
+      sbGet(`app_config?key=eq.${STAFF_MODEL_KEY}&select=value`),
     ]);
+    /* v463 (FLIP): the staff model, the sweep's exact switch (shared/roles.mjs); an unknown value throws, so no member is
+       synced on a guess */
+    const committeesOn = committeesLive(modelCfg && modelCfg[0] && modelCfg[0].value);
     if (!Array.isArray(guildRoles)) throw new Error("guild roles unavailable");
     /* v4.38: the sign-up role is named for its season ("S2 Not Signed Up"); the sweep's stored id finds it, as there */
     const roleId = roleIdMap(guildRoles, nsuCfg && nsuCfg[0] && nsuCfg[0].value);
@@ -119,7 +123,7 @@ export function createRoleSyncer(env, opts = {}) {
     const rfaYears = Math.max(1, parseInt((rfaCfg && rfaCfg[0] && rfaCfg[0].value) || "4", 10) || 4);
     /* v2.48: rights classes exist only in the full season format (Rule 2.2) */
     const rightsOn = !!curSeason && curSeason.format === "full";
-    slow = { roleId, regSeason, posSeason, playSeason, regOpen: !!(regSeason && regSeason.registration_open), rfaYears, rightsOn };
+    slow = { roleId, regSeason, posSeason, playSeason, regOpen: !!(regSeason && regSeason.registration_open), rfaYears, rightsOn, committeesOn };
     slowAt = Date.now();
     return slow;
   }
@@ -149,7 +153,12 @@ export function createRoleSyncer(env, opts = {}) {
          that triggered us */
       const teams = await sbGet("teams?select=id,discord_role_id,owner_profile_id,gm_profile_id,agm_profile_id");
       const teamRoleId = Object.fromEntries((teams || []).filter((t) => t.discord_role_id).map((t) => [t.id, t.discord_role_id]));
-      const managedIds = managedRoleIds(C.roleId, teams);
+      /* v463 (FLIP): committee seats, fresh like the club seats (a seat filled by a vote must show at once); their roles
+         are managed in every staff model, exactly as the sweep manages them */
+      const committees = await sbGet("committees?select=key,name,manager_profile_id&order=sort.asc");
+      const committeeSeats = {};
+      for (const c of committees || []) if (c.manager_profile_id === profileId) (committeeSeats[profileId] = committeeSeats[profileId] || []).push(c.name);
+      const managedIds = managedRoleIds(C.roleId, teams, committees);
 
       /* PARITY MATTERS MORE THAN ELEGANCE in this whole block: any divergence from the sweep's
          construction — even on degenerate data the role-conflict rules forbid — makes the two
@@ -175,6 +184,13 @@ export function createRoleSyncer(env, opts = {}) {
           if (s.position) pos = s.position;   // roster spot (season in play) wins over signup
           if (s.squad === "tc" && (s.status || "active") === "active") inCamp = true;   // v2.72: Training Camp role
         }
+      }
+      /* v463: Season 2's league training camp pool, the sweep's exact source (public.market_pool for the season in play),
+         filtered to this member; empty in a season the market does not run */
+      let inPool = false;
+      if (C.posSeason) {
+        const pr = await sbGet(`rpc/market_pool?p_season=${C.posSeason.id}&profile_id=eq.${encodeURIComponent(profileId)}&select=profile_id`);
+        inPool = !!(pr && pr[0]);
       }
 
       /* club seat — held on the team row, not the profile; same overwrite order as the sweep's
@@ -218,6 +234,8 @@ export function createRoleSyncer(env, opts = {}) {
         rfa: isRfa ? new Set([profileId]) : new Set(),
         rookies: isRookie ? new Set([profileId]) : new Set(),
         camp: inCamp ? new Set([profileId]) : new Set(),
+        pool: inPool ? new Set([profileId]) : new Set(),
+        committees: C.committeesOn, committeeSeats,
       });
       const { next, changed } = applyManagedRoles(mem.roles, desired, managedIds);
       if (!changed) { sum.noop++; return "no-op"; }

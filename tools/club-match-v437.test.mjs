@@ -48,6 +48,9 @@ globalThis.fetch = async (url, opts = {}) => {
   const u = String(url), m = opts.method || "GET", d = decodeURIComponent(u);
   const J = (b, c) => new Response(JSON.stringify(b), { status: c || 200, headers: { "content-type": "application/json" } });
   if (u.includes("/auth/v1/user")) return J({ id: "stats" });
+  /* v463: staffActor asks the database for the statistics key (rpc/is_stats_staff under the member's JWT); this
+     answers as the database does before the Season 2 flip records apply (the departments column) */
+  if (u.includes("/rest/v1/rpc/is_stats_staff")) return J(true);
   if (u.includes("/rest/v1/profiles?id=eq.stats")) return J([{ role: "staff", departments: ["statistics"], gamertag: "StatsGuy", banned: false }]);
   if (u.includes("proclubs.ea.com")) throw new Error("Netlify must never call EA itself: " + u);
   if (m !== "GET") {

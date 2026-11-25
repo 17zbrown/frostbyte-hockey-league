@@ -8,5 +8,8 @@ Disallow: /src/
 Disallow: /tools/
 Disallow: /docs/
 Disallow: /.netlify/
+# v5.00 swap: old addresses that redirect to / after the flip (the Season 1 site has its own Netlify site)
+Disallow: /next/
+Disallow: /classic/
 
 Sitemap: https://chelgamingleague.com/sitemap.xml

@@ -44,7 +44,9 @@ A("2.1.4: camp of ten (v3.58 raised it from eight)", /up to ten \(10\) training-
 /* v3.72 replaced "joins ... on the active roster where it has room" with a place-for-place rule; the overflow to
    camp and the like-for-like case both survive it (tools/trade-placement-v372.test.cjs pins the rest). */
 A("2.1.4: trades overflow to camp; like-for-like between full clubs does not", /a player who would be joins the training camp instead/.test(secs["2.1"].paragraphs[3]) && /The front office is told of every player a trade places in its camp/.test(secs["2.1"].paragraphs[3]) && /two full clubs exchanging like for like send nobody to camp/.test(secs["2.1"].paragraphs[3]));
-A("2.1.4: transactions staff in special circumstances", /in special circumstances the transactions department may make that move for a club/.test(secs["2.1"].paragraphs[3]));
+/* v5.00 swap, the staffing flip (commissioner, 2026-10-19: "we will remove the different departments"): league staff, not
+   the transactions department, make the move in special circumstances */
+A("2.1.4: league staff in special circumstances", /in special circumstances a member of league staff may make that move for a club, and the club is told\./.test(secs["2.1"].paragraphs[3]));
 A("2.2.3: signing into camp", /the player joins its training camp, which must have room under Rule 2\.1/.test(secs["2.2"].paragraphs[2]));
 A("2.5.4: no waiver period, no claim", /^Waiving a player removes the player's cap hit from the club immediately\. There is no waiver period and no claim/.test(secs["2.5"].paragraphs[3]));
 A("2.5.1: sign, not claim", /complete a trade or sign a waived player/.test(secs["2.5"].paragraphs[0]));

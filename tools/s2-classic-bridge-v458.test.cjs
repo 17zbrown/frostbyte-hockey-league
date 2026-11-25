@@ -213,7 +213,8 @@ const sec = (id) => (rb.chapters.flatMap((c) => c.sections || []).find((s) => s.
   ["2.1: minimums, no maximums, no club camps", "with minimums of three (3) forwards, two (2) defensemen and one (1) goaltender, no maximum in any position group and no club training camps (Rules S2.4 and S2.5)"],
   ["2.2: no free agency or depth placement", "Season 2 has no free agency, no signings and no placement as depth"],
   ["2.6: the Season 2 windows", "For Season 2, Rule S2.3 governs the windows"],
-  ["2.7: the application conflict rule, in the db-apps wording", "No staff department is exempt from this rule. A commissioner or staff member shall not file an application to own a club, and a club's Owner, General Manager or Assistant General Manager shall not file an application to join the staff, until they step down from, or are removed from, the conflicting seat."],
+  /* v5.00 swap, the staffing flip: "No staff role" (Season 2 has no departments) */
+  ["2.7: the application conflict rule, in the db-apps wording", "No staff role is exempt from this rule. A commissioner or staff member shall not file an application to own a club, and a club's Owner, General Manager or Assistant General Manager shall not file an application to join the staff, until they step down from, or are removed from, the conflicting seat."],
   /* v4.58 review: the commissioner-approved exception as an objective test that matches the filing rule in 2.7[1] */
   ["2.7: an owner application filed after leaving the staff is not a sit-out", "The one-season wait does not apply to a member who leaves the staff before their owner application is decided."],
   ["2.7: an office member may play, with no club seat in the sentence", "A member of the league office who plays has access by virtue of the office to other clubs' filed lineups"],

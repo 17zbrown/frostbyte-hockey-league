@@ -1,0 +1,32 @@
+/* You on the real site (js/pages/you.js, v5.00 swap stream e3, 2026-11-24). Only the rules the real page adds; every rule
+   it shares with Team HQ stays in hq.css (e1's). Loaded after hq.css. */
+
+/* a pane while its rows are read from the league */
+.yx-wait { margin: 0; color: var(--ink-2); }
+
+/* an availability answer on its way, and one the league refused (kept on screen with its reason and Try again) */
+.yx-av-say { margin: 4px 0 0; min-height: 0; }
+.yx-av-say:empty { display: none; }
+.yx-uns { color: var(--loss-ink); }
+.yx-av-say .btn { margin-left: 6px; vertical-align: middle; }
+.hqx-av-b:disabled { cursor: default; }
+.hqx-av-b.is-saving { background: var(--surface); color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--separator); }
+.hqx-av-b.is-unsaved { box-shadow: inset 0 0 0 1.5px var(--loss); }
+@media (prefers-reduced-motion: no-preference) { .hqx-av-b.is-saving svg { animation: yx-pulse 1s ease-in-out infinite alternate; } }
+@keyframes yx-pulse { from { opacity: .35; } to { opacity: 1; } }
+
+/* a sign-up step not done yet: an open ring, not a green check */
+.hqx-ck.is-todo .hqx-ck-i { background: var(--fill-2); color: var(--ink-2); }
+
+/* the league profile form under its rows; a gamertag with no spaces still wraps inside its row */
+.yx-tag { font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.yx-prof { margin-top: 14px; }
+.yx-prof .input { min-height: 44px; font-size: 1rem; }   /* 16px: iOS does not zoom the page on focus */
+.yx-prof .hqx-fine { margin-top: 2px; }
+.yx-prof .hqx-fine .btn { margin-left: 4px; vertical-align: middle; }
+.yx-msg { margin: 0; min-height: 1.2em; }
+.yx-msg.is-bad { color: var(--loss-ink); }
+
+/* Your data: the plain summary and its two links (i3c, 2026-11-25) */
+.yx-data { display: grid; gap: 12px; }
+.yx-data .t-body { margin: 0; }

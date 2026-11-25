@@ -1,0 +1,298 @@
+/* audit 2026-11-09: one label voice. Labels speak in sentence case like .kicker; table heads and data keys keep the
+   small capitals of .t-cap at .02em; the tracked capitals (.1em to .2em) the commissioner called AI slop are gone */
+/* CGHL Season 2: the Bid room (#/bidding, js/pages/bidding.js) and the Control Center's short Bids list.
+   Tokens only (dark mode and all three finishes follow), no glass, one soft shadow at most. Motion (Emil): presses answer
+   on pointer-down through the kit's .btn scale; a price rolls up and a new bid flashes the lot edge (WAAPI in the page);
+   the countdown ring is linear, constant motion; nothing scales from zero; reduced motion keeps fades only. */
+
+.bd > * { min-width: 0; }
+/* the room's own controls answer like the kit's (ui.css): no double-tap delay, no selection or callout on a long press */
+.bd-lot-name, .bd-link, .bd-sum { touch-action: manipulation; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.bd-crumbs .crumbs { margin-bottom: 18px; }
+
+/* ---- the ink band: the event head ---- */
+.bd-band { margin-top: 0; padding-top: clamp(28px, 5vw, 60px); padding-bottom: clamp(28px, 4vw, 44px); }
+.bd-now { display: grid; gap: 22px; }
+.bd-now > *, .bd-who > * { min-width: 0; }
+.bd-who { display: grid; gap: 14px; justify-items: start; }
+.bd-h1 { margin: 0; flex-wrap: wrap; row-gap: 4px; }
+.bd-h1-n { color: var(--muted); }
+.bd-h1-n::before { content: "·"; margin-right: 10px; }
+/* a phone gives the night its own line under the label, so no line starts with the dot */
+@media (max-width: 559px) { .bd-h1-n { flex-basis: 100%; } .bd-h1-n::before { display: none; } }
+.bd-head { color: var(--ink); overflow-wrap: anywhere; text-wrap: balance; }
+.bd-meta { margin: 0; max-width: 62ch; font: 400 1rem/1.5 var(--font); color: var(--ink-2); }
+/* a later read that failed while the last one still shows: said in the band, in the kit's warning ink */
+.bd-stale { margin: 0; max-width: 62ch; padding: 8px 12px; border-radius: var(--r-xs); background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--ink); font: 500 .875rem/1.45 var(--font); overflow-wrap: anywhere; }
+.bd-clockbox { display: grid; gap: 8px; justify-items: start; align-content: end; }
+.bd-state { display: inline-flex; align-items: center; gap: 8px; margin: 0; color: var(--ink);
+  font: 600 .875rem/1 var(--font); letter-spacing: -0.006em; }
+.bd-state[data-bd-state="live"] { color: var(--live-ink); }
+.bd-big { display: grid; justify-items: inherit; gap: 6px; margin: 0; }
+/* tabular figures: the seconds tick without the numeral shifting under the eye */
+.bd-big-n { font-size: clamp(3.75rem, 17vw, 8.5rem); color: var(--ink); white-space: nowrap; transition: color 200ms ease; }
+.bd-big-n.low { color: var(--live-ink); }
+.bd-big-l { font: 600 .8125rem/1.3 var(--font); letter-spacing: -0.006em; color: var(--muted); }
+@media (min-width: 900px) {
+  .bd-now { grid-template-columns: minmax(0, 1fr) auto; align-items: end; column-gap: 56px; }
+  .bd-clockbox { justify-items: end; text-align: right; }
+}
+.bd-band-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-top: clamp(24px, 4vw, 40px); padding-top: 20px; box-shadow: inset 0 1px 0 var(--hairline); }
+.bd-band-ctl > * { min-width: 0; }
+/* QA 2026-11-25: with no bid nights yet the picker has no buttons, and its padded fill drew a 4px dot under the hairline.
+   The empty picker stays in the DOM (the room swaps it in place once the nights arrive) but draws nothing, and its row
+   and hairline go with it */
+.bd-nights:empty { display: none; }
+.bd-band-ctl:has(> .bd-nights:empty) { display: none; }
+/* a holiday Saturday stays in the picker, struck through, so the gap in the calendar is explained where it shows */
+.bd-nights { flex: 0 1 auto; }
+.bd-nights button { padding: 7px 12px; font-variant-numeric: tabular-nums; }
+/* the strike says skipped; the label still reads at AA (review 2026-11-03: --faint measured 3.91:1 in dark mode, and it is
+   a live button that opens the skipped night) */
+.bd-nights button.skip { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px; }
+.bd-nights button.skip[aria-pressed="true"] { color: var(--ink-2); }
+/* a phone gives the picker the full width; large text never squeezes a date below its own width, the picker scrolls instead */
+.bd-nights { overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; grid-auto-columns: minmax(max-content, 1fr); }
+.bd-nights::-webkit-scrollbar { display: none; }
+@media (max-width: 559px) {
+  .bd-nights { display: grid; width: 100%; }
+  .bd-nights button { padding: 7px 6px; }
+}
+
+/* ---- the recap of a closed night ---- */
+.bd-sec { margin-top: clamp(48px, 7vw, 88px); }
+/* in the lots column, in reading order: the signings, then the players back in the pool */
+.bd-recap-g { display: grid; gap: 32px; }
+.bd-recap-g > * { min-width: 0; }
+.bd-signed { list-style: none; margin: 0; padding: 0; }
+.bd-signed li { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 14px 0; box-shadow: inset 0 -1px 0 var(--separator); }
+.bd-signed li:first-child { box-shadow: inset 0 1px 0 var(--separator), inset 0 -1px 0 var(--separator); }
+.bd-signed .crest { width: 36px; height: 36px; }
+.bd-signed-t { display: grid; gap: 2px; min-width: 0; }
+.bd-signed-t a { font: 600 1.0625rem/1.25 var(--font); color: var(--ink); overflow-wrap: anywhere; }
+.bd-signed-p { font-size: 1.75rem; color: var(--ink); }
+.bd-rs-h.bd-back-h { margin-top: 32px; }
+.bd-signed-t .bd-link { font-size: 1.0625rem; }
+.bd-back { list-style: none; margin: 10px 0 6px; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr)); gap: 0 18px; }
+.bd-back .bd-dim { white-space: nowrap; flex: none; }
+.bd-back li { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-height: 40px; padding: 8px 0; box-shadow: inset 0 -1px 0 var(--separator); min-width: 0; }
+.bd-back a { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; min-width: 0; }
+/* sales voided: the player left the pool while the countdown ran; the engine's sentence sits under the name */
+.bd-void { list-style: none; margin: 10px 0 6px; padding: 0; }
+.bd-void li { display: grid; gap: 2px; padding: 10px 0; box-shadow: inset 0 -1px 0 var(--separator); min-width: 0; }
+.bd-void a { justify-self: start; color: var(--ink); font-weight: 500; overflow-wrap: anywhere; min-width: 0; }
+.bd-void .bd-dim { font: 400 .875rem/1.4 var(--font); }
+
+/* ---- the room: lots, and the club rail pinned beside them on a desktop ---- */
+.bd-main { display: grid; gap: 28px; margin-top: clamp(36px, 6vw, 64px); }
+.bd-main > * { min-width: 0; }
+.bd-rail { display: none; }
+@media (min-width: 1000px) {
+  /* the rail grows with the text size (review 2026-11-03: at 200% text its figures ran off the screen) */
+  .bd-main { grid-template-columns: minmax(0, 1fr) minmax(300px, 19rem); gap: 48px; align-items: start; }
+  /* pinned, and never taller than the screen: a full board with three led bids measured 1,080px against a 900px window
+     (more at 200% text), so the board and Edit your board sat below the fold until the 25 lots ran out. The rail scrolls
+     inside itself instead and its end does not hand the scroll on to the page (second pass, 2026-11-03) */
+  .bd-rail { display: block; grid-column: 2; grid-row: 1; position: sticky; top: calc(var(--nav-h) + 18px);
+    max-height: calc(100dvh - var(--nav-h) - 36px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; border-radius: var(--r-md); }
+  .bd-lots-col { grid-column: 1; grid-row: 1; }
+  .bd-sum-host { display: none; }
+}
+.bd-lots-h { margin-bottom: 18px; }
+.bd-tools { display: flex; flex-wrap: wrap; gap: 10px 12px; margin-bottom: 12px; }
+.bd-tools .seg { overflow-x: auto; scrollbar-width: none; grid-auto-columns: minmax(max-content, 1fr); }
+.bd-tools .seg::-webkit-scrollbar { display: none; }
+.bd-count { margin: 0 0 14px; font: 400 .875rem/1.4 var(--font); color: var(--muted); min-height: 1.4em; }
+.bd.is-skipped .bd-tools, .bd.is-skipped .bd-count, .bd.is-skipped .bd-lots-h,
+.bd.is-closed .bd-tools, .bd.is-closed .bd-count, .bd.is-closed .bd-lots-h, .bd.is-closed .bd-lots { display: none; }
+.bd-empty { display: grid; gap: 16px; justify-items: start; margin: 0; padding: 28px 0; max-width: 60ch; font: 400 1rem/1.5 var(--font); color: var(--muted); box-shadow: inset 0 1px 0 var(--separator); }
+.bd-empty p { margin: 0; }
+
+/* phone and tablet: the rail is a sticky summary under the header that opens it in a sheet */
+.bd-sum-host { position: sticky; top: calc(var(--nav-h) + 8px); z-index: 5; margin-bottom: 18px; }
+.bd-sum { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 14px; border-radius: var(--r-sm); text-align: left;
+  background: var(--raised); color: var(--ink); box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow-2);
+  transition: transform var(--t-press) var(--ease-out); -webkit-user-select: none; user-select: none; }
+.bd-sum:active { transform: scale(.98); }
+.bd-sum .crest { width: 30px; height: 30px; }
+.bd-sum-t { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; font: 500 .875rem/1.3 var(--font); color: var(--ink-2); }
+.bd-sum-t b { font-weight: 650; color: var(--ink); }
+
+/* columns in rem, so large text gives fewer, wider cards rather than three narrow ones */
+.bd-lots { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr)); }
+.bd-lots > .bd-empty { grid-column: 1 / -1; }
+/* the card is the size container and .bd-lot-in its grid (a container cannot style itself), so the phone layout below
+   follows the card's own width */
+.bd-lot { position: relative; container: bdlot / inline-size; border-radius: var(--r-sm); background: var(--surface); min-width: 0; }
+.bd-lot-in { display: grid; gap: 12px; align-content: start; padding: 16px; min-width: 0; }
+.bd-lot-in > *, .bd-lot-body > * { min-width: 0; }   /* break-ui: a long state line ran under the button in the phone layout */
+/* a lot that is over: its old content lies over the new and fades out (js/pages/bidding.js animateLot) */
+.bd-lot.is-swapping { overflow: clip; }
+.bd-lot-ghost { position: absolute; inset: 0 0 auto; pointer-events: none; }
+.bd-lot:focus { outline: none; }
+.bd-lot.is-mine { box-shadow: inset 0 0 0 1.5px var(--accent); }
+/* a new bid flashes the edge once (opacity only, driven by WAAPI in the page) */
+.bd-flash { position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 2px var(--accent); opacity: 0; pointer-events: none; }
+.bd-lot-top { display: grid; gap: 4px; min-width: 0; }
+.bd-lot-name { justify-self: start; max-width: 100%; text-align: left; font: 650 1.0625rem/1.25 var(--font); letter-spacing: -0.012em; color: var(--ink);
+  overflow-wrap: anywhere; transition: opacity 140ms ease; }
+.bd-lot-name:active { opacity: .6; transition-duration: 0ms; }
+.bd-lot-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font: 400 .8125rem/1.3 var(--font); color: var(--muted); }
+.bd-lot-meta b { font-weight: 650; color: var(--ink-2); }
+.bd-lot-meta abbr { text-decoration: none; font-weight: 650; color: var(--ink-2); }
+.bd-lot-b { margin: 0; font: 600 .75rem/1.3 var(--font); letter-spacing: .02em; color: var(--accent-ink); }
+.bd-lot-body { display: grid; gap: 8px; min-width: 0; }
+.bd-lot-mid, .bd-sh-now { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; min-width: 0; }
+.bd-price { display: grid; gap: 4px; margin: 0; min-width: 0; }
+.bd-price-k { font: 600 .6875rem/1.2 var(--font); letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
+/* the numeral rolls inside its own line, so a price change reads as one figure turning over */
+.bd-price-w { display: block; overflow: hidden; padding-top: 2px; }
+.bd-price-n { display: inline-block; font-size: 2.5rem; color: var(--ink); white-space: nowrap; }
+.bd-lot.is-unsold .bd-price-n, .bd-lot.is-open .bd-price-n, .bd-lot.is-void .bd-price-n { color: var(--muted); }
+.bd-lot-st { margin: 0; font: 500 .875rem/1.35 var(--font); color: var(--ink-2); }
+.bd-lot.is-mine .bd-lot-st { color: var(--accent-ink); }
+.bd-lot.is-unsold .bd-lot-st, .bd-lot.is-void .bd-lot-st { color: var(--muted); }
+.bd-sold { display: flex; align-items: center; gap: 10px; margin: 0; font: 600 .875rem/1.3 var(--font); color: var(--ink); min-width: 0; }
+.bd-sold span { overflow-wrap: anywhere; min-width: 0; }
+.bd-cr { display: inline-flex; flex: none; }
+.bd-sold .crest { width: 28px; height: 28px; }
+.bd-act { width: 100%; min-height: 46px; }
+.bd-warn { display: inline-flex; align-items: flex-start; gap: 6px; margin: 0; font: 600 .8125rem/1.35 var(--font); color: color-mix(in srgb, var(--warn-ink) 72%, var(--ink)); }
+[data-theme="dark"] .bd-warn { color: var(--warn-ink); }
+.bd-warn svg { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+
+/* phone: a lot is two columns, the player and the state on the left, the price and the one button on the right, so 25
+   lots read as a list rather than 25 screens of cards. The body steps aside (display: contents) to place its parts.
+   The query reads the CARD in rem: a card narrower than 19rem keeps the stacked layout. Review 2026-11-03: the old query
+   read the whole list, so at 560px, or 150% and 200% text on a desktop, two or three 250px cards each got the phone
+   layout and a gamertag wrapped a letter per line under the ring */
+@container bdlot (min-width: 19rem) {
+  .bd-lot-in { grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; row-gap: 0; padding: 14px; }
+  .bd-lot-in > *, .bd-lot-body > * { grid-column: 1 / -1; }
+  .bd-lot-body { display: contents; }
+  .bd-lot-top { grid-column: 1; grid-row: 1; align-self: start; }
+  .bd-lot-mid { grid-column: 2; grid-row: 1; justify-content: flex-end; align-items: center; gap: 10px; flex-wrap: nowrap; }
+  .bd-lot-mid .bd-ring { order: -1; width: 2.75rem; height: 2.75rem; }
+  .bd-lot-mid .bd-price { justify-items: end; text-align: right; }
+  .bd-lot-in .bd-price-n { font-size: 1.875rem; }
+  .bd-lot-b { grid-row: 2; margin-top: 8px; }
+  .bd-lot-in .bd-lot-st { grid-column: 1; grid-row: 3; align-self: center; margin-top: 12px; }
+  .bd-lot-in:not(:has(.bd-act)) .bd-lot-st { grid-column: 1 / -1; }   /* no button (sold, back to the pool, voided, a watcher before 9 PM) */
+  .bd-lot-in .bd-act { grid-column: 2; grid-row: 3; width: auto; min-height: 44px; padding: 0 14px; margin-top: 12px; font-size: .8125rem; }
+  .bd-lot-in .bd-warn { grid-row: 4; margin-top: 8px; }
+  .bd-lot-in .bd-say { grid-row: 5; margin-top: 10px; }
+}
+
+/* the countdown ring: five minutes running down, linear (constant motion); the last minute turns live red */
+/* sized in rem, so its time still fits inside it at large text sizes */
+.bd-ring { position: relative; width: 3.125rem; height: 3.125rem; flex: none; display: grid; place-items: center; }
+.bd-ring svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.bd-ring circle { fill: none; stroke-width: 3.5; }
+.bd-ring-t { stroke: var(--fill); }
+.bd-ring-v { stroke: var(--ink); stroke-linecap: round; transition: stroke-dashoffset 1000ms linear, stroke 200ms ease; }
+.bd-lot.is-mine .bd-ring-v { stroke: var(--accent); }
+.bd-ring.low .bd-ring-v { stroke: var(--live); }
+.bd-ring-n { position: relative; font: 600 .75rem/1 var(--font-num); font-variant-numeric: tabular-nums; color: var(--ink); }
+.bd-ring.low .bd-ring-n { color: var(--live-ink); }
+
+/* a refusal, said in place on the lot: the database's own sentence */
+.bd-say { display: grid; gap: 8px; justify-items: start; padding: 10px 12px; border-radius: var(--r-xs); background: color-mix(in srgb, var(--loss) 12%, transparent);
+  color: var(--ink); font: 400 .875rem/1.45 var(--font); }
+.bd-say p { margin: 0; overflow-wrap: anywhere; }
+
+/* ---- the club rail ---- */
+.bd-rail-in { display: grid; gap: 22px; padding: 20px; border-radius: var(--r-md); background: var(--surface); }
+.bd-sheet-w .bd-rail-in { padding: 0; background: none; }
+.bd-rail-h { display: grid; gap: 10px; }
+.bd-pickclub { display: grid; gap: 6px; }
+.bd-pickclub .kicker { color: var(--muted); }
+.bd-pickclub select { font-size: 1rem; }
+.bd-club { display: flex; align-items: center; gap: 12px; margin: 0; min-width: 0; }
+.bd-club .crest { width: 40px; height: 40px; }
+.bd-club .d-3 { overflow-wrap: anywhere; }
+/* the two figures sit side by side while they fit and stack when they do not; the numeral eases down with the viewport
+   (review 2026-11-03: at 200% text "$34.25M" ran past the rail and off the screen). 8.5rem, not 7rem: in the 19rem
+   rail a 7rem column left "$48.75M" two pixels of room and wrapped SEASON 2 CAP ROOM onto two lines, so the two numerals
+   sat 13px apart; stacked, each label holds one line and the figures share a left edge (second pass, 2026-11-03) */
+.bd-figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8.5rem), 1fr)); gap: 16px; margin: 0; }
+.bd-figs > div { display: grid; gap: 4px; align-content: start; min-width: 0; }
+.bd-figs dt { font: 600 .6875rem/1.2 var(--font); letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
+.bd-figs dd { margin: 0; }
+.bd-figs .d-num { font-size: clamp(1.75rem, 1.2rem + 1.4vw, 2.25rem); color: var(--ink); white-space: nowrap; min-width: 0; }
+.bd-over, .bd-figs .d-num.bd-over { color: var(--loss-ink); }
+.bd-figs-s { font: 400 .75rem/1.35 var(--font); color: var(--muted); }
+.bd-alert { display: flex; gap: 8px; margin: 0; padding: 10px 12px; border-radius: var(--r-xs); background: color-mix(in srgb, var(--warn) 16%, transparent); font: 400 .8125rem/1.45 var(--font); color: var(--ink); }
+.bd-alert svg { width: 15px; height: 15px; flex: none; margin-top: 2px; color: var(--warn-ink); }
+.bd-rs { display: grid; gap: 10px; }
+.bd-rs-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 0;
+  font: 600 .9375rem/1.3 var(--font); letter-spacing: -0.01em; color: var(--ink); }
+.bd-rs-h .num { font: 500 .875rem/1 var(--font-num); letter-spacing: 0; color: var(--muted); }
+.bd-note { margin: 0; font: 400 .875rem/1.5 var(--font); color: var(--muted); max-width: 62ch; }
+.bd-more { margin: 0; font: 400 .8125rem/1.4 var(--font); color: var(--muted); }
+.bd-dim { color: var(--muted); }
+.bd-link { text-align: left; font: 600 .9375rem/1.3 var(--font); color: var(--ink); overflow-wrap: anywhere; min-width: 0; }
+/* a 44px reach around the text buttons and links without moving the layout (review 2026-11-03: the lot name, the only
+   door to the lot sheet, measured 33px tall at 375px; the recap and back-to-the-pool links 24 to 30px) */
+.bd-lot-name, .bd-link, .bd-back a, .bd-void a { position: relative; }
+.bd-lot-name::after, .bd-link::after, .bd-back a::after, .bd-void a::after {
+  content: ""; position: absolute; left: 50%; top: 50%; width: max(calc(100% + 16px), 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+.bd-link:active { opacity: .6; }
+.bd-lead { list-style: none; margin: 0; padding: 0; }
+.bd-lead li { display: grid; grid-template-columns: minmax(0, 1fr) auto 44px; align-items: baseline; gap: 10px; padding: 9px 0; box-shadow: inset 0 -1px 0 var(--separator); font-size: .9375rem; }
+.bd-lead li > .bd-dim { text-align: right; }
+.bd-board { list-style: none; margin: 0; padding: 0; }
+.bd-board li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 10px 0; box-shadow: inset 0 -1px 0 var(--separator); }
+.bd-bn { font: 600 .8125rem/1.6 var(--font-num); color: var(--muted); }
+.bd-bt { display: grid; gap: 3px; min-width: 0; }
+.bd-bs { font: 400 .8125rem/1.35 var(--font); color: var(--muted); }
+.bd-bc { font: 600 .875rem/1.5 var(--font-num); color: var(--ink); white-space: nowrap; }
+.bd-watch-h { overflow-wrap: anywhere; }
+.bd-watch-a { display: grid; gap: 10px; justify-items: start; }
+.bd-watch-a .btn { width: 100%; }
+
+/* ---- the lot sheet ---- */
+.bd-sheet { display: grid; gap: 14px; padding-bottom: 6px; }
+.bd-sheet > * { min-width: 0; }
+.bd-sh-meta { margin: 0; font: 500 .9375rem/1.4 var(--font); color: var(--ink-2); }
+.bd-sheet .bd-rs-h { margin-top: 10px; }
+.bd-hist { list-style: none; margin: 0; padding: 0; }
+.bd-hist li { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; align-items: baseline; gap: 12px; padding: 9px 0; box-shadow: inset 0 -1px 0 var(--separator); font-size: .9375rem; }
+.bd-hist-a { font-weight: 650; color: var(--ink); }
+.bd-hist-w { color: var(--ink-2); overflow-wrap: anywhere; min-width: 0; }
+.bd-hist li.mine .bd-hist-w { color: var(--accent-ink); font-weight: 600; }
+
+/* ---- how it works ---- */
+.bd-facts { display: grid; gap: 0 40px; margin: 0; }
+@media (min-width: 700px) { .bd-facts { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 1100px) { .bd-facts { grid-template-columns: 1fr 1fr 1fr; } }
+.bd-facts > div { display: grid; gap: 4px; padding: 16px 0; box-shadow: inset 0 1px 0 var(--separator); min-width: 0; }
+.bd-facts dt { font: 600 .6875rem/1.2 var(--font); letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
+.bd-facts dd { margin: 0; font: 400 .9375rem/1.5 var(--font); color: var(--ink); }
+
+/* ---- the Control Center's pool step: a short read of the room ---- */
+.bd-cc { display: grid; gap: 8px; margin: 16px 0 4px; }
+.bd-cc-h { margin: 0; }
+.bd-cc-l .row .grow { display: grid; gap: 2px; }
+.bd-cc-l .row .title { overflow-wrap: anywhere; }
+
+@media (hover: hover) and (pointer: fine) {
+  .bd-lot-name:hover, .bd-link:hover, .bd-signed-t a:hover, .bd-back a:hover, .bd-void a:hover { text-decoration: underline; text-underline-offset: 3px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bd-ring-v { transition: stroke 200ms ease; }
+  .bd-sum:active { transform: none; }
+}
+/* the lot's name is the door to its sheet: on touch it reaches 44px around the 21px line, a positioned ::after that
+   leaves the row's rhythm alone (audit 2026-11-09) */
+@media (pointer: coarse) {
+  .bd-lot-name { position: relative; }
+  .bd-lot-name::after { content: ""; position: absolute; inset: -12px -8px; min-width: 44px; }
+}
+
+/* v5.00 swap (b4, 2026-11-24): the office's withdraw door on a lot, and its reason box, said in the sheet */
+.bd-void { margin-top: 10px; }
+.bd-why { display: grid; gap: 6px; margin: 14px 0 0; font: 500 .875rem/1.35 var(--font); color: var(--ink-2); }
+.bd-why textarea { width: 100%; min-height: 72px; resize: vertical; font-size: 1rem; }
+.bd-err { margin: 8px 0 0; font: 500 .875rem/1.4 var(--font); color: var(--loss-ink); }
+.bd-err:empty { margin: 0; }

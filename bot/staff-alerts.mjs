@@ -26,6 +26,7 @@
 
 import { timedFetch, SB_TIMEOUT_MS, DISCORD_TIMEOUT_MS } from "./handlers.mjs";
 import { noLinkPreviews } from "../shared/discord-links.cjs";
+import { STAFF_MODEL_KEY, committeesLive } from "../shared/roles.mjs";
 
 /* Desk routes mirror CG.STAFF_DESKS — key is the department, value the hash route of its desk. */
 const DESK_PATH = {
@@ -48,10 +49,35 @@ const SITE = "https://chelgamingleague.com/";
 /* Discord moderation is Community's, not Officials'. */
 const DISCORD_SUBJECT = "discord behavior";
 
+/* v463 (FLIP; commissioner, 2026-11-23: "There should be a staff notifications channel in the discord which is where
+   all the automated notifications should go that the bot sends out for staff"): once app_config.staff_model is
+   "committees" (shared/roles.mjs committeesLive) there are no department rooms. What is left for the bot goes to the ONE
+   staff channel through the database's own door, public.notify_staff_ch, which the staff powers record points at
+   #staff-casework for every caller; the bot never names a channel of its own. Only the applications are the bot's to
+   announce there: a new case and a new staff vote are already posted to that same channel by the database
+   (notify_action_request, staff_vote_create), so a second alert would be the same notice twice. Every staffer and
+   commissioner votes on an application after the flip (the all-staff voting record), so the post tags the Staff role
+   and nothing else.
+   The claim ref keeps the department key ("applications"), so an application announced in #review-board just before
+   the flip is never announced again by the catch-up just after it. */
+function routeCommittees(table, row, extra) {
+  const r = routeDepartments(table, row, extra);
+  if (!r || r.suppressed) return r;
+  if (table === "action_requests") return { dept: null, suppressed: "the database posts every new case to the staff channel (notify_action_request)" };
+  if (table === "staff_votes") return { dept: null, suppressed: "the database posts every new staff vote to the staff channel (staff_vote_create)" };
+  if (r.dept !== "applications") return { dept: null, suppressed: `no staff channel route for ${table}` };
+  const who = extra.gamertag || "A member";
+  const line = table === "staff_applications" ? `**${who}** applied to join the league staff.` : r.line;
+  return { ...r, line, one: true, cta: "Every staff member and commissioner votes on it." };
+}
+
 /* One arrival -> one department, or null to stay silent. Pure: no I/O, so the test can walk every
    branch. `row` is the raw inserted row; `extra` carries anything the caller looked up (a gamertag,
-   a club code) and is never required for routing. */
-export function route(table, row, extra = {}) {
+   a club code) and is never required for routing. `committees` is the staff model (v463, above). */
+export function route(table, row, extra = {}, committees = false) {
+  return committees ? routeCommittees(table, row, extra) : routeDepartments(table, row, extra);
+}
+function routeDepartments(table, row, extra = {}) {
   if (!row) return null;
   const who = extra.gamertag || "A member";
 
@@ -187,9 +213,11 @@ export function createStaffAlerter(env, opts = {}) {
   let maps = null, mapsAt = 0;
   async function loadMaps() {
     if (maps && Date.now() - mapsAt < 60_000) return maps;
-    const rows = await sbGet("app_config?key=in.(discord_dept_channel_ids,discord_dept_role_ids)&select=key,value");
-    const out = { chan: {}, role: {} };
+    const rows = await sbGet(`app_config?key=in.(discord_dept_channel_ids,discord_dept_role_ids,${STAFF_MODEL_KEY})&select=key,value`);
+    const out = { chan: {}, role: {}, committees: false };
     for (const r of rows || []) {
+      /* v463 (FLIP): an unknown staff model throws here, so nothing is announced on a guess */
+      if (r.key === STAFF_MODEL_KEY) { out.committees = committeesLive(r.value); continue; }
       let v = {}; try { v = JSON.parse(r.value); } catch { v = {}; }
       if (r.key === "discord_dept_channel_ids") out.chan = v || {};
       if (r.key === "discord_dept_role_ids") out.role = v || {};
@@ -221,6 +249,17 @@ export function createStaffAlerter(env, opts = {}) {
     const e = new Error(`post ${channelId} -> rate-limited after retries`); e.provable = true; throw e;
   }
 
+  /* v463 (FLIP): the one staff channel, through public.notify_staff_ch (service role). p_ping tags the Staff role
+     (app_config.discord_staff_role_id) with allowed_mentions naming only it. A 4xx from PostgREST means the call rolled
+     back and nothing was queued (provable, the claim goes back); a 5xx or a timeout is unknown and keeps the claim. */
+  async function postStaffChannel(content) {
+    const r = await timedFetch(`${SB_URL}/rest/v1/rpc/notify_staff_ch`, {
+      method: "POST", headers: sbHead(), body: JSON.stringify({ p_channel: "casework", p_content: content, p_ping: true }),
+    }, SB_MS);
+    if (r.status >= 500) { const e = new Error(`notify_staff_ch -> ${r.status} (delivery unknown)`); e.ambiguous = true; throw e; }
+    if (!r.ok) { const e = new Error(`notify_staff_ch -> ${r.status}`); e.provable = true; throw e; }
+  }
+
   /* Look up only what the message needs to be readable — a name, a club, a fixture. Never the
      body of a complaint: that stays behind the site's own access control. */
   async function enrich(table, row) {
@@ -244,22 +283,36 @@ export function createStaffAlerter(env, opts = {}) {
     try {
       const key = rowKey(table, row);
       if (!key) { sum.skipped++; return "skip"; }
+      /* v463 (FLIP): the staff model first, since it decides the route */
+      const { chan, role, committees } = await loadMaps();
       /* route once WITHOUT enrichment to decide whether this is even ours — cheap, and it means a
          suppressed complaint never triggers a profile lookup */
-      const first = route(table, row);
+      const first = route(table, row, {}, committees);
       if (!first) { sum.skipped++; return "skip"; }
       if (first.suppressed) { sum.suppressed++; return `suppressed:${first.suppressed}`; }
 
       const extra = await enrich(table, row);
-      const r = route(table, row, extra);
+      const r = route(table, row, extra, committees);
       if (!r) { sum.skipped++; return "skip"; }
       if (r.suppressed) { sum.suppressed++; return `suppressed:${r.suppressed}`; }
 
       const targets = r.depts || (r.dept ? [r.dept] : []);
       if (!targets.length) { sum.skipped++; return "skip"; }
 
-      const { chan, role } = await loadMaps();
       let sent = 0, missing = [];
+      if (r.one) {
+        const ref = `${table}:${key}:${targets[0]}`;
+        if (!(await claim(ref))) return "no-op";        // already announced (before the flip too)
+        try {
+          await postStaffChannel(`\u{1F4E5} **${r.kind}** \u00b7 ${r.line} ${r.cta} Open the Staff Desk: ${SITE}#/hub/staffdesk`);
+          sum.announced++;
+          return "announced";
+        } catch (e) {
+          note(e);
+          if (e && e.provable) await release(ref); else sum.unconfirmed++;
+          return "error";
+        }
+      }
       for (const dept of targets) {
         const cid = chan[dept];
         if (!cid) { missing.push(dept); continue; }

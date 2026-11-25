@@ -1,0 +1,106 @@
+/* CGHL Season 2 concept: the Season 2 survey (js/survey.js). Commissioner, 2026-10-20: "Make sure the survey doesn't
+   feel long or tedious so we can minimize the amount of people who skip it." So: one question per screen in the kit's
+   sheet, the progress on top, Back and Next pinned to the bottom at one height for every question (they never move under
+   the finger), answers as the form kit's pills and cards (flows.css) or a tidy checklist, big tap targets. */
+:root { --sv-gold: #b88a00; --sv-blue: #0a74e6; --sv-red: #e0352b; }
+[data-theme="dark"] { --sv-gold: #ffd60a; --sv-blue: #409cff; --sv-red: #ff6961; }
+
+/* the sheet is a column: the progress stays on top, the middle scrolls, the buttons stay at the bottom */
+/* the footer's fill would square off the card's rounded corners */
+.sheet:has(.sv) { overflow: hidden; }
+.sheet:has(.sv) .sheet-b { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 0; }
+.sv, .sv-form { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+/* one height for every question (Next stays put); the intro and the thanks are compact */
+.sheet:has(.sv[data-fixed]) { height: min(92dvh, 700px); }
+@media (min-width: 900px) { .sheet:has(.sv[data-fixed]) { height: min(720px, 84dvh); } }
+.sv-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 4px 16px 24px; }
+.sv-foot { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); background: var(--surface); }
+.sv[data-fixed] .sv-foot { border-top: 1px solid var(--separator); }
+/* v5.00 (e5): the real site's refusal of the answers sits right above Finish, every answer kept */
+.sv-err { flex: none; margin: 0; padding: 10px 16px; background: color-mix(in srgb, var(--loss) 10%, transparent); font: 500 .875rem/1.4 var(--font); color: var(--loss-ink); }
+.sv-err[hidden] { display: none; }
+.sv-foot .btn[aria-busy="true"] { opacity: .7; cursor: progress; }
+.sv-gap { flex: 1 1 0; }
+/* the way out is always there, and quiet */
+.sv-foot .sv-skip { padding: 0 8px 0 0; color: var(--muted); font-weight: 500; }
+@media (hover: hover) and (pointer: fine) { .sv-foot .sv-skip:hover { color: var(--ink); filter: none; } }
+
+/* progress: segments, never a percentage */
+.sv-top { flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px 16px; }
+.sv-prog { flex: 1 1 auto; display: flex; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.sv-prog li { flex: 1 1 0; height: 4px; border-radius: 2px; background: var(--fill); }
+.sv-prog li.on { background: var(--accent-fill); }
+.sv-of { flex: none; font: 500 .8125rem/1 var(--font-num); color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* the question */
+.sv-k { margin: 0 0 10px; }
+.sv-tier { flex: none; align-self: center; width: 10px; height: 10px; border-radius: 3px; background: var(--sv-gold); }
+.sv-tier.blue { background: var(--sv-blue); }
+.sv-tier.red { background: var(--sv-red); }
+.sv-k .sv-tier + span { margin-left: -4px; color: var(--ink); }
+.sv-q { margin: 0; max-width: 30ch; font: 700 1.5rem/1.16 var(--font-display); letter-spacing: -0.022em; color: var(--ink); text-wrap: balance; }
+.sv-hint { margin: 8px 0 20px; font: 400 .9375rem/1.45 var(--font); color: var(--muted); }
+.sv-f { margin: 0; padding: 0; border: 0; min-width: 0; }
+.sv-l { display: block; margin: 0 0 8px; padding: 0; font: 600 .875rem/1.3 var(--font); color: var(--ink); }
+.sv-sub { margin-top: 26px; }
+.sv-cards { grid-template-columns: 1fr !important; }   /* three choices read top to bottom, not two and one */
+.sv-all { min-height: 40px; }
+.sv .fl-pills { align-items: center; }
+/* the open boxes (questions 1, 2 and 8): room for a few sentences without scrolling the box */
+.sv textarea.input { resize: vertical; line-height: 1.45; }
+.sv-text { min-height: 150px; }
+
+/* the X-Factor lists: one tidy checklist per tier, two columns on a desktop sheet, the tools pinned on top */
+.sv-tools { position: sticky; top: -4px; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 -16px; padding: 8px 16px;
+  background: var(--surface); box-shadow: 0 1px 0 var(--separator); }
+.sv-tools .btn[aria-pressed="true"] { background: var(--accent-fill); color: var(--accent-on); }
+.sv-count { margin-left: auto; font: 500 .8125rem/1 var(--font-num); color: var(--muted); font-variant-numeric: tabular-nums; }
+.sv-grp { margin: 18px 0 6px; }
+.sv-xfs { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 2px 28px; }   /* a checked row's tint never touches its neighbor */
+.sv-xf { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 10px; margin: 0 -10px; border-radius: var(--r-xs); cursor: pointer;
+  -webkit-user-select: none; user-select: none; touch-action: manipulation; transition: background-color 140ms ease; }
+.sv-xf input { width: 20px; height: 20px; flex: none; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.sv-xf-n { flex: 1 1 auto; min-width: 0; font: 400 .9375rem/1.25 var(--font); color: var(--ink); }
+.sv-xf:has(input:checked) { background: var(--accent-soft); }
+.sv-xf:has(input:checked) .sv-xf-n { font-weight: 600; }
+.sv-xf:active { background: var(--fill); }
+@media (hover: hover) and (pointer: fine) { .sv-xf:not(:has(input:checked)):hover { background: var(--fill-2); } }
+/* "Banned now": a quiet tag, never a pre-checked box */
+.sv-now { flex: none; padding: 4px 8px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--separator); font: 600 .75rem/1 var(--font);
+  color: var(--muted); white-space: nowrap; }
+
+/* intro and thanks */
+.sv-intro, .sv-done { display: grid; gap: 12px; align-content: start; justify-items: start; padding-top: 6px; }
+.sv-h { max-width: 20ch; text-wrap: balance; }
+.sv-lede { margin: 0; max-width: 46ch; text-wrap: pretty; font: 400 1.0625rem/1.45 var(--font); color: var(--ink-2); }
+
+.sv-status { margin: 0; color: var(--ink-2); }
+/* the last answers read as a compact two-column list (label, answer) */
+.sv-sum > div { grid-template-columns: minmax(6.5rem, auto) minmax(0, 1fr); align-items: baseline; padding: 9px 14px; }
+.sv-sum dt { grid-column: 1; }
+.sv-sum dd { grid-column: 2; }   /* typed answers keep their line breaks (flows.css) */
+
+/* phones: the tools are full-size tap targets like the rest of the sheet (review 2026-10-20: they were 34 px). The day
+   pills (40 px) are the form kit's (flows.css .fl-pill): change them together with the sign-up form */
+@media (max-width: 899px) { .sv-tools .btn { min-height: 44px; } }
+/* phones from 360 px: two columns of X-Factors, so each tier is about two screens of scrolling, not three or four (review
+   2026-10-20), and a "Banned now" tag wraps under its name. Rows stay 44 px; the 4 px bleed leaves the gap between two
+   checked rows' tints. Under 360 px a name and its tag no longer fit side by side, so it stays one column */
+@media (max-width: 559px) and (min-width: 360px) {
+  .sv-xfs { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 12px; }
+  .sv-xf { flex-wrap: wrap; row-gap: 2px; padding: 6px 4px; margin: 0 -4px; }
+  /* the name keeps the first line beside its box (it never drops under the box); only the tag wraps, under the name */
+  .sv-xf-n { flex: 1 1 calc(100% - 40px); }
+  .sv-now { margin-left: 32px; }
+}
+@media (max-width: 429px) {
+  .sv-q { font-size: 1.3125rem; }
+  .sv-hint { margin-bottom: 16px; }
+}
+/* a short phone (320 by 568): the question gives the list more room; the tier is still in the question itself */
+@media (max-height: 640px) {
+  .sv-k { display: none; }
+  .sv-top { padding-bottom: 12px; }
+  .sv-hint { margin: 4px 0 12px; }
+}
+@media (prefers-reduced-motion: reduce) { .sv-xf { transition: none; } }

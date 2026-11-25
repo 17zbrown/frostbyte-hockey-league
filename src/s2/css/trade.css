@@ -1,0 +1,187 @@
+/* audit 2026-11-09: one label voice. Labels speak in sentence case like .kicker; table heads and data keys keep the
+   small capitals of .t-cap at .02em; the tracked capitals (.1em to .2em) the commissioner called AI slop are gone */
+/* CGHL Season 2 concept: the trade reading (js/trade.js, S2.trade). Tokens only, so both themes and all three finishes
+   work. A website section, not a card wall: hairlines and space separate the parts; club colors appear only as a thin
+   rule over each side and on the crests (README: never fill bars with club colors). The reading lays itself out by the
+   width it is given (a container query), so the same markup reads on the trade page, the wide Details sheet and a
+   phone. */
+/* one track that may shrink below its content (minmax(0, 1fr)): an auto track let one wide table widen every section of
+   the reading past a 320 phone (review 2026-10-20) */
+.tr { container-type: inline-size; display: grid; grid-template-columns: minmax(0, 1fr); gap: clamp(28px, 5cqi, 44px); padding: 4px 0 8px; }
+.tr p { margin: 0; }
+
+/* the lead: kicker, a short headline, one sentence in body type, the verdict */
+.tr-hd { display: grid; gap: 12px; justify-items: start; }
+.tr-h-s { max-width: 62ch; font-size: 1rem; line-height: 1.45; color: var(--ink-2); }
+.tr-k { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.tr-h { margin: 0; max-width: 34ch; font: 800 clamp(1.375rem, 1rem + 2.4cqi, 2rem)/1.02 var(--font-brand); font-stretch: 75%;
+  font-variation-settings: "wdth" 75; text-transform: uppercase; letter-spacing: -0.004em; color: var(--ink); text-wrap: balance; overflow-wrap: anywhere; }
+
+/* the verdict's tone: a colored dot and plain words (semantic colors mean something: even, leaning, lopsided) */
+.tr-pill, .tr-mini, .tr-bal { --tone: var(--faint); }
+:is(.tr-pill, .tr-mini, .tr-bal)[data-tone="even"] { --tone: var(--win-ink); }
+:is(.tr-pill, .tr-mini, .tr-bal):is([data-tone="lean"], [data-tone="warn"]) { --tone: var(--warn-ink); }
+:is(.tr-pill, .tr-mini, .tr-bal)[data-tone="lopsided"] { --tone: var(--loss-ink); }
+:is(.tr-pill, .tr-mini, .tr-bal)[data-tone="mine"] { --tone: var(--accent); }   /* it leans the reader's way (S2.trade.tone) */
+.tr-tone { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--tone); }
+.tr-pill { display: inline-flex; align-items: center; gap: 8px; font: 600 .875rem/1.25 var(--font); color: var(--ink); }
+
+/* the two sides: what each club gets, under the page's ink rule; the crest names the club. Until 2026-11-09 the rule was
+   in the club's color (commissioner: these "give me AI slop vibes"), and a club rule could vanish into the sheet
+   (Vancouver's navy in dark, about 1.1:1; Seattle's ice in light, about 1.6:1) unless lifted toward the ink (review
+   2026-10-20). The ink rule has neither problem. */
+.tr-sides { display: grid; gap: 32px; }
+.tr-side { min-width: 0; border-top: 2px solid var(--ink); padding-top: 16px; }
+.tr-side-h { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; }
+.tr-side-h .crest.lg { width: 52px; height: 52px; }
+.tr-side-t { display: grid; gap: 5px; min-width: 0; }
+.tr-side-t .d-3 { overflow-wrap: anywhere; }
+.tr-side-v { display: grid; justify-items: end; gap: 2px; }
+.tr-side-v .d-num { font-size: 2.5rem; color: var(--ink); }
+.tr-side-v span, .tr-p-v span { font: 600 .6875rem/1 var(--font); letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
+.tr-plist { list-style: none; margin: 16px 0 0; padding: 0; }
+.tr-p { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 14px; padding: 16px 0; border-top: 1px solid var(--hairline); }
+.tr-p > p, .tr-p > .tr-pcts { grid-column: 1 / -1; }
+.tr-p-a { display: grid; gap: 2px; min-width: 0; }
+/* a 44px reach without moving the layout (the name alone was 22px tall) */
+.tr-p-n { justify-self: start; padding: 11px 0; margin: -11px 0; font: 600 1.0625rem/1.3 var(--font); color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
+.tr-p-n.is-gone { padding: 0; margin: 0; color: var(--muted); }
+.tr-p-n:active { opacity: .6; }
+@media (hover: hover) and (pointer: fine) { .tr-p-n:hover { text-decoration: underline; text-underline-offset: 3px; } }
+.tr-p-m { font-size: .8125rem; color: var(--muted); }
+.tr-p-v { display: grid; justify-items: end; align-content: start; gap: 3px; }
+.tr-p-v b { font: 700 1.375rem/1 var(--font-num); color: var(--ink); }
+.tr-p-r { font-size: .875rem; color: var(--ink-2); }
+.tr-p-l { font-size: .8125rem; line-height: 1.5; color: var(--muted); }
+.tr .nw, .tr-mini .nw { white-space: nowrap; }
+.tr-p-role { margin-right: 2px; font-weight: 600; color: var(--ink-2); }
+.tr-p-x { font-size: .75rem; line-height: 1.45; color: var(--muted); }
+.tr-few { font-size: .8125rem; color: var(--muted); }
+/* thin rank bars against the position: label, bar with the middle tick, the rank in words. The rows share one column
+   grid (subgrid), so the rank column is as wide as its longest rank ("Tied for 24th of 36") and every bar lines up */
+.tr-pc-cap { margin-top: 4px !important; font-size: .75rem; color: var(--muted); }
+.tr-pcts { display: grid; grid-template-columns: 4.4em minmax(0, 1fr) auto; gap: 7px 10px; margin-top: 2px; font-size: .75rem; }
+.tr-pc { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; }
+.tr-pc-l { font-weight: 600; color: var(--muted); white-space: nowrap; }
+.tr-pc-t { position: relative; height: 6px; border-radius: 3px; background: var(--fill); }
+.tr-pc-t i { position: absolute; inset: 0 auto 0 0; width: var(--p); border-radius: 3px; background: var(--chart-a); }
+.tr-pc-m { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--ink); opacity: .25; }
+.tr-pc-v { text-align: right; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+.tr-pc-v.hi { color: var(--win-ink); }
+.tr-pc-v.lo { color: var(--loss-ink); }
+.tr-form { display: flex; align-items: center; gap: 10px; font-size: .8125rem; color: var(--muted); }
+.tr-form svg { flex: none; }
+.tr-side-f { margin-top: 2px !important; padding-top: 12px; border-top: 1px solid var(--hairline); font-size: .8125rem; color: var(--muted); }
+
+/* the balance: one track, the left club's share of the value received, the even mark at the middle */
+.tr-bal { display: grid; gap: 12px; padding: clamp(20px, 4cqi, 30px) 0; border-top: 1px solid var(--separator); border-bottom: 1px solid var(--separator); }
+.tr-ends { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: .875rem; color: var(--ink-2); }
+.tr-ends > span { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.tr-ends > span.r { text-align: right; }
+.tr-ends .crest { width: 26px; height: 26px; flex: none; }
+.tr-ends b { font: 700 1.0625rem/1 var(--font-num); color: var(--ink); }
+.tr-bar { position: relative; height: 12px; border-radius: 6px; overflow: hidden; background: var(--chart-b); }
+.tr-bar.sm { height: 8px; border-radius: 4px; }
+/* no players on either side yet: a neutral track, not a balanced half */
+.tr-bar.is-empty { background: var(--fill); }
+/* transform only (no layout per frame); a transition, so a quick run of ticks retargets instead of restarting */
+.tr-bar-a { position: absolute; inset: 0; background: var(--chart-a); transform-origin: left center; transition: transform 300ms var(--ease-out); }
+.tr-bar-mid { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--surface); }
+.tr-verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: .9375rem; color: var(--ink-2); }
+.tr-verdict b { font: 800 1.375rem/1 var(--font-brand); font-stretch: 75%; font-variation-settings: "wdth" 75; text-transform: uppercase; color: var(--ink); }
+.tr-guide { max-width: 72ch; font-size: .875rem; line-height: 1.5; color: var(--muted); }
+
+/* section heads inside the reading */
+.tr-sec-h { display: grid; gap: 8px; margin-bottom: 18px; }
+.tr-sec-h p { max-width: 62ch; color: var(--muted); font-size: .9375rem; line-height: 1.5; }
+
+/* head to head */
+.tr-cmp-g { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: center; }
+.tr-cmp-r { display: grid; gap: 6px; justify-items: center; }
+.tr-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 16px; font-size: .75rem; color: var(--muted); }
+.tr-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.tr-legend .sw { display: inline-block; width: 16px; height: 0; border-top: 3px solid var(--chart-a); border-radius: 2px; }
+.tr-legend .sw.b { border-top: 2px dashed var(--chart-b); }
+
+/* tables: the comparison and each club after the trade */
+.tr-tbl { width: 100%; border-collapse: collapse; font-size: .875rem; }
+.tr-tbl th, .tr-tbl td { padding: 9px 6px; text-align: left; border-bottom: 1px solid var(--hairline); vertical-align: baseline; }
+.tr-tbl th:first-child { padding-left: 0; }
+.tr-tbl thead th { font: 600 .6875rem/1.2 var(--font); letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
+.tr-tbl tbody th { font-weight: 500; color: var(--ink-2); }
+.tr-tbl td.num, .tr-tbl thead th:nth-child(2), .tr-tbl thead th:nth-child(3) { text-align: right; font-variant-numeric: tabular-nums; }
+.tr-tbl td.num { white-space: nowrap; }
+/* side names keep one line once there is room (Pittsburgh beside Vancouver needs 308px; a 320 phone gives 288) */
+@container (min-width: 340px) { .tr-cmp-t thead th { white-space: nowrap; } }
+/* a rank in full ("Tied for 13th of 17") once both columns have room beside the radar, the short one ("T-13th") below */
+.tr-rk-l { display: none; }
+/* tabular figures give the hyphen a figure's width, so "T-21st" read as "T - 21st"; the short rank sets proportionally */
+.tr-tbl td .tr-rk-s { font-variant-numeric: proportional-nums; }
+@container (min-width: 760px) { .tr-rk-l { display: inline; } .tr-rk-s { display: none; } }
+.tr-tbl thead .sw { display: inline-block; width: 12px; height: 0; margin: 0 6px 2px 0; vertical-align: middle; border-top: 3px solid var(--chart-a); border-radius: 2px; }
+.tr-tbl thead .sw.b { border-top: 2px dashed var(--chart-b); }
+/* the unit, said where the cells are read: bare ordinals read as league ranks */
+.tr-cap { caption-side: top; padding: 0 0 8px; text-align: left; font-size: .75rem; color: var(--muted); }
+.tr-tbl td.ch, .tr-tbl td.lead { font-weight: 700; color: var(--ink); }
+.tr-tbl td.bad { font-weight: 700; color: var(--loss-ink); }
+.tr-rule { font-size: .75rem; color: var(--muted); }
+
+/* after the trade */
+.tr-chk { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 18px !important; font-weight: 600; color: var(--ink); }
+.tr-chk svg { flex: none; width: 18px; height: 18px; margin-top: 2px; }
+.tr-chk.ok svg { color: var(--win-ink); }
+.tr-chk.bad svg { color: var(--loss-ink); }
+.tr-after-g { display: grid; gap: 30px; }
+.tr-club { min-width: 0; border-top: 2px solid var(--ink); padding-top: 12px; }
+.tr-club-h { display: flex; align-items: center; gap: 10px; margin: 0 0 6px; font: 700 1rem/1.3 var(--font); color: var(--ink); }
+.tr-club-h .crest { flex: none; }
+.tr-needs { display: grid; gap: 6px; margin: 12px 0 0; padding-left: 18px; font-size: .8125rem; line-height: 1.45; color: var(--ink-2); }
+.tr-needs li.bad { color: var(--loss-ink); font-weight: 600; }
+.tr-needs-none { margin-top: 12px !important; font-size: .8125rem; color: var(--muted); }
+
+/* how it is worked out: one small disclosure at the foot */
+.tr-about { border-top: 1px solid var(--separator); }
+.tr-about summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; font: 600 .875rem/1.2 var(--font); color: var(--accent-ink); list-style: none; }
+.tr-about summary::-webkit-details-marker { display: none; }
+.tr-about summary::after { content: "+"; margin-left: 8px; font-weight: 500; }
+.tr-about[open] summary::after { content: "\2212"; }
+.tr-about div { display: grid; gap: 10px; padding-bottom: 6px; }
+.tr-about p { max-width: 72ch; font-size: .875rem; line-height: 1.55; color: var(--ink-2); }
+
+/* the compact reading (S2.trade.compact): the verdict, the values and the bar in one band */
+.tr-mini { display: grid; gap: 10px; padding: 16px 0; border-top: 1px solid var(--separator); border-bottom: 1px solid var(--separator); }
+.tr-mini p { margin: 0; }
+.tr-mini-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.tr-mini-v { font: 800 1.375rem/1 var(--font-brand); font-stretch: 75%; font-variation-settings: "wdth" 75; text-transform: uppercase; color: var(--ink); }
+.tr-mini-k { font-size: .75rem; color: var(--muted); }
+.tr-mini .tr-ends { font-size: .8125rem; }
+.tr-mini .tr-ends .crest { width: 22px; height: 22px; }
+.tr-mini-s { font-size: .875rem; line-height: 1.45; color: var(--ink-2); }
+
+/* wide enough for two columns */
+@container (min-width: 620px) {
+  .tr-sides, .tr-after-g { grid-template-columns: 1fr 1fr; gap: 36px; }
+  .tr-cmp-g { grid-template-columns: 270px minmax(0, 1fr); gap: 32px; }
+}
+
+/* a phone keeps the three answers on one row: the primary drops "the trade" (the sheet's title names the offer) */
+/* the longer half of a button label ("Accept" + " the trade") sits beside its first word, so the button's flex gap must
+   not open between them (it read as a double space) */
+.btn .tr-long { margin-left: calc(-1 * var(--btn-gap, 7px)); white-space: pre; }
+@media (max-width: 419px) { .tr-long { display: none; } }
+/* a sheet's answers pinned under the reading (the Staff Desk; Team HQ pins its own, .hqx-sh-foot) */
+.sheet .tr-sheet-foot { flex: none; display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--separator); }
+/* a reading inside a list row (Team HQ offers, the desk's trades) */
+.hqx-off-rd, .dk-trow-rd { display: block; margin-top: 6px; }
+.hqx-off-rd { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.hqx-off-more { font: 600 .8125rem/1.25 var(--font); color: var(--accent-ink); }
+.hqx-off-rd .tr-pill, .dk-trow-rd .tr-pill { font-size: .8125rem; }
+
+/* the Details sheets are wide on a desktop, so both sides sit side by side */
+@media (min-width: 900px) {
+  .sheet.tr-wide { width: min(1000px, 94vw); }
+  .sheet.tr-wide .sheet-h, .sheet.tr-wide .sheet-b, .sheet.tr-wide .tr-sheet-foot, .sheet.tr-wide .hqx-sh-foot { padding-left: 28px; padding-right: 28px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tr-bar-a { transition: none; }
+}

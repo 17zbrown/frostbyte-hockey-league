@@ -16,7 +16,9 @@ const plain = path.join(tmp, "plain");
 fs.mkdirSync(plain);
 execFileSync(process.execPath, [path.join(REPO, "src/live/build.cjs"), path.join(plain, "index.html")], { stdio: "ignore" });
 const out = path.join(tmp, "_site");
-const res = SB.build(out);
+/* v5.00 swap (i2): the classic build by name, so these checks hold after the release sets ROOT to "s2" (the value of ROOT
+   is pinned once, in tools/s2-site-modes.test.cjs) */
+const res = SB.build(out, { root: "classic" });
 const page = fs.readFileSync(path.join(out, "index.html"));
 A("_site/index.html is byte-equal to the plain build", page.equals(fs.readFileSync(path.join(plain, "index.html"))));
 A("_site/version.json is byte-equal too (same build id, version, rules card and Edge ids)",
@@ -30,7 +32,8 @@ console.log("\nevery allowlisted path is published and is a tracked repo file");
 const tracked = new Set(execFileSync("git", ["ls-files", "-z"], { cwd: REPO, encoding: "utf8" }).split("\0").filter(Boolean).map((f) => "/" + f));
 const missing = res.files.filter((p) => !fs.statSync(path.join(out, p), { throwIfNoEntry: false }));
 A("every allowlisted path exists in _site/", missing.length === 0, missing.join(" "));
-const untracked = res.files.filter((p) => !["/index.html", "/version.json"].includes(p) && !tracked.has(p));
+/* v5.00 swap: what the build writes itself (the pages, version.json, the Season 2 bundle) is res.built, never copied */
+const untracked = res.files.filter((p) => !res.built.includes(p) && !tracked.has(p));
 A("every copied file is tracked in git, so Netlify's checkout has it too", untracked.length === 0, untracked.join(" "));
 const sbjs = R("src/live/build.cjs").match(/const SUPABASE_JS = "([0-9.]+)";/)[1];
 const NEED = ["/index.html", "/version.json", `/vendor/supabase-js-${sbjs}.min.js`, "/favicon.svg", "/og.png", "/apple-touch-icon.png",
@@ -84,7 +87,9 @@ console.log("\nthe crawl");
 console.log("\nnetlify.toml, .gitignore and the moved briefings");
 {
   const toml = R("netlify.toml");
-  A("ROOT is classic (the /classic and Season 2 modes come later)", SB.ROOT === "classic");
+  /* v5.00 swap (i2): the Season 2 modes came, and ONE release sets ROOT to "s2"; tools/s2-site-modes.test.cjs pins its value
+     and every mode, so this file checks only that it is one of them */
+  A("ROOT is one of the builder's modes", SB.MODES.includes(SB.ROOT), SB.ROOT);
   A("publish = \"_site\"", /^\s*publish = "_site"$/m.test(toml) && !/^\s*publish = "\."$/m.test(toml));
   A("the build command is the site builder", /^\s*command = "node tools\/site-build\.cjs"$/m.test(toml));
   A("functions and their included role icons still come from the repo",

@@ -85,7 +85,9 @@ const lanes = [...ls("netlify/functions", /\.js$/), ...ls("jobs", /\.js$/), ...l
 const writers = lanes.filter((f) => MARK.test(R(f)) && !NO_MESSAGES[f]);
 const unguarded = writers.filter((f) => !/from "\.\.\/(\.\.\/)?shared\/discord-links\.cjs"/.test(R(f)) || !/noLinkPreviews(Edit)?\(/.test(R(f)));
 A("every file that writes a Discord message imports and calls the helper", unguarded.length === 0, unguarded.join(", "));
-A("...and that is at least the thirteen known writers", writers.length >= 13, writers.length + ": " + writers.join(", "));
+/* v463: twelve since netlify/functions/ingest-stats.js stopped posting to a webhook itself; its staff notes go through
+   public.notify_staff_ch, one of the database writers pinned below (tools/ingest-batch.test.mjs pins the door) */
+A("...and that is at least the twelve known writers", writers.length >= 12, writers.length + ": " + writers.join(", "));
 A("the exceptions still exist (a stale exception hides nothing)", Object.keys(NO_MESSAGES).every((f) => fsx.existsSync(path.join(__dirname, "..", f))));
 const adhoc = writers.filter((f) => /flags\s*:\s*4\s*[,}]/.test(R(f)));
 A("no competing hand-set flags: 4 left beside the helper", adhoc.length === 0, adhoc.join(", "));

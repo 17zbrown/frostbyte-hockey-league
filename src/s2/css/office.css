@@ -1,0 +1,64 @@
+/* The league office's public pages brought back 2026-11-23 (js/pages/office.js: News, a story, Terms, Privacy, pickup
+   import) and the Game Center's Lobby section (js/lobby.js). Namespaces .of- and .lb-. Tokens only, so dark mode follows;
+   no glass, no shadow; type and crests are the imagery. Presses answer on pointer-down (:active), hover only where a
+   pointer can hover, and reduced motion keeps no transform. Reading text holds a 65ch measure. */
+
+/* ---- News ---- */
+.of-hero { padding-bottom: clamp(18px, 3vw, 32px); }
+.of-lead { border-top: 1px solid var(--hairline); padding: clamp(22px, 4vw, 40px) 0; }
+.of-lead-a { display: grid; gap: 12px; color: var(--ink); text-decoration: none; max-width: 70ch; border-radius: var(--r-sm);
+  transition: transform var(--t-press) var(--ease-out); }
+.of-lead-a:active { transform: scale(.985); }
+.of-lead-t { margin: 0; }
+/* QA worst 7 (2026-11-25): a headline naming a member's 21-character spaceless tag pushed a 390 px page 107 px wide;
+   a display title breaks inside a word rather than leave the page */
+.of-lead-t, .of-n-t, .of-art-h .d-1 { overflow-wrap: anywhere; }
+/* QA nits 23: a re-read that failed while the earlier stories are on screen says so above them, with its Try again */
+.of-stale { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 8px; padding: 12px 0; border-bottom: 1px solid var(--hairline);
+  font: 400 .875rem/1.4 var(--font); color: var(--ink-2); }
+.of-stale svg { width: 18px; height: 18px; flex: none; color: var(--warn-ink); }
+.of-stale span { flex: 1 1 240px; }
+.of-lead-a .arrow { justify-self: start; }
+.of-sec { padding: clamp(18px, 3vw, 32px) 0; border-top: 1px solid var(--hairline); }
+.of-n-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; }
+.of-n-list li + li { border-top: 1px solid var(--separator); }
+.of-n-row { display: grid; gap: 6px; padding: 18px 0; color: var(--ink); text-decoration: none; max-width: 70ch; border-radius: var(--r-xs);
+  transition: transform var(--t-press) var(--ease-out); }
+.of-n-row:active { transform: scale(.985); }
+.of-n-t { margin: 0; }
+.of-n-l { margin: 0; }
+@media (hover: hover) and (pointer: fine) {
+  .of-lead-a:hover .of-lead-t, .of-n-row:hover .of-n-t { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: .18em; }
+}
+
+/* ---- a story ---- */
+.of-art { padding: clamp(10px, 2vw, 20px) 0 8px; }
+.of-art-h { display: grid; gap: 10px; max-width: 65ch; padding-bottom: 18px; border-bottom: 1px solid var(--hairline); }
+.of-art-h .d-1 { margin: 0; }
+.of-art-h .t-foot { margin: 0; }
+.of-art-b { padding-top: 20px; max-width: 65ch; }
+.of-p { font: 400 1.0625rem/1.6 var(--font); color: var(--ink); max-width: 65ch; margin: 0 0 16px; }
+.of-p a { color: var(--accent-ink); }
+.of-back { margin: 8px 0 clamp(24px, 4vw, 48px); }
+
+/* ---- Terms and Privacy ---- */
+.of-legal { border-top: 1px solid var(--hairline); padding-top: clamp(18px, 3vw, 32px); }
+.of-l-sec { max-width: 65ch; margin-bottom: clamp(20px, 3vw, 32px); }
+.of-l-sec h2 { margin: 0 0 12px; }
+.of-upd { margin: 0 0 8px; }
+
+/* ---- pickup import (the importer's own rules are pickups.css) ---- */
+.of-pu #ofPu { max-width: 640px; }
+.lg-bal-r .grow { display: grid; gap: 2px; }   /* a label row's title and line stack, as in the kit's lists */
+
+/* ---- the Game Center's Lobby (Rule 4.2) ---- */
+.lb-spec { max-width: 560px; }
+.lb-code { letter-spacing: .04em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+@media (prefers-reduced-motion: reduce) {
+  .of-lead-a, .of-n-row { transition: none; }
+  .of-lead-a:active, .of-n-row:active { transform: none; opacity: .7; }
+}
+/* v5.00 swap (e7): live stories carry their whole body, so the list shows two lines of each and the lead four */
+.of-n-l { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.of-lead-a .lede-l { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }

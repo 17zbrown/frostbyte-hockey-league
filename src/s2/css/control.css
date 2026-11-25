@@ -1,0 +1,568 @@
+/* #/control: the Control Center. Everything is namespaced cc-. League website v2 (commissioner, 2026-10-19: "feels too
+   much like a dashboard and not a League Website"): an uppercase condensed title, a sticky uppercase tab strip, and each
+   tab as full-width bands (canvas, white, ink) instead of a wall of cards. Phone first; the pane is a size container, so
+   the layout answers to the room the pane has. Colors are tokens only, so dark mode and all three finishes follow. Club
+   colors appear only as crest rings and swatches, never as fills. Hovers only on fine pointers; presses answer on
+   pointer-down. */
+
+/* ---- title and tab strip -------------------------------------------------------------------------------------- */
+.cc-head { display: grid; justify-items: start; gap: 14px; padding: clamp(20px, 4vw, 48px) 0 clamp(22px, 3.2vw, 36px); }
+.cc-head .lede-l { max-width: 52ch; }
+/* the strip sticks under the header; it sits below the full-screen menu (z 39) so the phone menu still covers it */
+.cc-tabs { position: sticky; top: calc(var(--nav-h) - 1px); z-index: 30;   /* tucked 1px under the header (z 40), so no fractional gap opens between them on a scaled screen */
+  width: 100vw; margin-left: calc(50% - 50vw); background: var(--canvas);
+  box-shadow: inset 0 -1px 0 var(--separator); transition: background-color 300ms ease; }
+.cc-tabs-in { display: flex; gap: 2px; max-width: var(--maxw); margin: 0 auto; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain;
+  padding: 0 max(calc(var(--gutter) - 12px), env(safe-area-inset-right)) 0 max(calc(var(--gutter) - 12px), env(safe-area-inset-left)); scroll-padding-inline: 12px; }
+.cc-tabs-in::-webkit-scrollbar { display: none; }
+/* a strip that scrolls fades at the edge with more tabs behind it, so a label cut at the edge reads as "scroll", not as a
+   rendering bug (review 2026-10-20: "W 9" and "ROWTH & RETENTION" at the edges); centerChip and the strip's scroll set
+   is-l and is-r, so a strip that fits has no mask at all */
+.cc-tabs-in { scroll-snap-type: x proximity; }
+.cc-tabs-in.is-l, .cc-tabs-in.is-r { -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--fl, 0px), #000 calc(100% - var(--fr, 0px)), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 var(--fl, 0px), #000 calc(100% - var(--fr, 0px)), transparent); }
+.cc-tabs-in.is-l { --fl: 28px; }
+.cc-tabs-in.is-r { --fr: 28px; }
+.cc-tabs a { position: relative; flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: 50px; padding: 0 12px; color: var(--ink-2);
+  font: 700 .8125rem/1 var(--font-brand); font-stretch: 85%; font-variation-settings: "wdth" 85; letter-spacing: .08em; text-transform: uppercase;
+  scroll-snap-align: center; transition: color 160ms ease, opacity var(--t-press) ease; }
+.cc-tabs a::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: 0; height: 3px; background: var(--ink); transform: scaleX(0); transform-origin: left;
+  transition: transform 220ms var(--ease-out); }
+.cc-tabs a[aria-current="page"] { color: var(--ink); }
+.cc-tabs a[aria-current="page"]::after { transform: scaleX(1); }
+.cc-tabs a:active { opacity: .6; }
+.cc-tabs .count { font: 600 .75rem/1 var(--font-num); letter-spacing: 0; text-transform: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* the strip is chrome under the header: focus clears both, and the header's own scroll hairline gives way to the strip's */
+html:has(.cc-tabs) { scroll-padding-top: calc(var(--nav-h) + 64px); }
+html:has(.cc-tabs) .navbar.scrolled { border-bottom-color: transparent; }
+
+/* ---- bands ------------------------------------------------------------------------------------------------------ */
+.cc-pane { container: ccpane / inline-size; min-width: 0;
+  /* a strong neutral for a second series (the club share of departures, the second ring): finish-independent, so it never
+     collides with an Ember or Gold accent, and over 3:1 against both the surface and --chart-b in light and dark */
+  --cc-strong: color-mix(in srgb, var(--ink) 70%, var(--chart-b)); }
+.cc-band { padding-top: clamp(36px, 5.5vw, 72px); padding-bottom: clamp(40px, 6vw, 80px); }
+.cc-w { background: var(--surface); }
+/* dark: the app canvas is black and the ink band is lifted to #1c1c1e, so the white band takes the kit's quiet tint
+   (#111113) and sits between them; without it the ink band and the next white band were one gray (review 2026-10-20).
+   Everything inside that paints var(--surface) follows: stepper nodes, sticky first cells, table headers */
+:root[data-theme="dark"] .cc-w { --surface: #111113; }
+:root[data-theme="dark"] .cc-ink { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), inset 0 -1px 0 rgba(255, 255, 255, .08); }   /* near black on black: a hairline keeps the edge */
+.cc-sec { margin-bottom: clamp(24px, 3.4vw, 40px); }
+.cc-sec .d-2, .cc-lead .d-3 { text-wrap: balance; }
+.cc-ink .sec-head p { color: var(--ink-2); }
+.cc-lead { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 20px; margin: 0 0 18px; }
+.cc-lead .grow { flex: 1 1 280px; min-width: 0; display: grid; gap: 8px; max-width: 68ch; }
+.cc-lead p { margin: 0; font: 400 .9375rem/1.5 var(--font); color: var(--ink-2); }
+.cc-lead .chip { flex: none; }
+.cc-block + .cc-block { margin-top: clamp(40px, 6vw, 64px); }
+.cc-cols { display: grid; gap: clamp(44px, 6vw, 56px) clamp(32px, 4.5vw, 64px); }
+.cc-cols > * { min-width: 0; }
+@container ccpane (min-width: 860px) { .cc-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.cc-col-h { display: block; margin: 0 0 12px; font: 600 .8125rem/1.3 var(--font); letter-spacing: -0.003em; color: var(--muted); }   /* audit 2026-11-09: one label voice, no tracked capitals */
+/* a list is a white panel on the canvas band, and hairline rows on a white band */
+.cc-list { box-shadow: none; border-radius: var(--r-sm); }
+.cc-w .cc-list { background: transparent; border-radius: 0; border-top: 1px solid var(--separator); border-bottom: 1px solid var(--separator); }
+
+.cc-tail { padding-top: clamp(16px, 2.4vw, 28px); padding-bottom: 0; }
+.cc-tail .about { margin-top: 0; border-top: 0; }
+
+/* ---- small parts ------------------------------------------------------------------------------------------------ */
+.cc-sub-h { margin: 18px 0 8px; }
+.cc-ic { width: 20px; height: 20px; flex: none; }
+.cc-pad { padding: 18px 18px 0; }
+.cc-note { margin: 12px 0 0; }
+.cc-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; flex: none; vertical-align: 1px; background: var(--faint); }
+.cc-dot.ok { background: var(--win); }
+.cc-dot.warn { background: var(--warn); }
+.cc-dot.loss { background: var(--loss); }
+.cc-dot.live { background: var(--live); animation: pulse 1.6s var(--ease-out) infinite; }
+.cc-warn { color: var(--warn-ink); }
+.cc-bad { color: var(--loss-ink); font-weight: 600; }
+.cc-error { display: flex; gap: 14px; align-items: flex-start; }
+.cc-error .cc-ic { width: 28px; height: 28px; color: var(--warn-ink); }
+.cc-error p { margin: 6px 0 14px; }
+.cc-flat { box-shadow: none; background: transparent; border: 1px solid var(--separator); }
+/* a two-column grid, not the list's flex row (review 2026-11-03: at 375px step 7's long values, "Within the cap and the
+   roster limit, ...", took the whole row and crushed "Every bid" and "Waivers" to zero width, so the words ran into each
+   other). The label keeps its own width up to 45% and wraps inside it; the value takes the rest, wraps and sits right,
+   its first line level with the label's */
+.cc-kv .row { min-height: 44px; display: grid; grid-template-columns: fit-content(45%) minmax(0, 1fr); align-items: first baseline; }
+.cc-kv .trail { justify-self: end; min-width: 0; }
+.cc-flat .row .title, .cc-flat .row .sub { display: block; }
+.cc-chips { transition: opacity 200ms ease; }
+.cc-chips.is-off { opacity: .4; }
+.cc-kv .trail { color: var(--ink); text-align: right; font-family: var(--font); }   /* values are prose as often as numbers: the numeral face put wide gaps around the hyphen in "5-minute" */
+.cc-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 8px; font: 400 .8125rem/1.3 var(--font); color: var(--muted); }
+.cc-legend span { display: inline-flex; align-items: center; }
+.cc-key { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; flex: none; background: var(--chart-a); }
+.cc-key.b { background: var(--chart-b); }
+.cc-key.b.dash { height: 0; width: 14px; border-radius: 0; background: none; border-top: 2px dashed var(--chart-b); }
+.cc-key.hot, .cc-key.strong { background: var(--cc-strong); }
+.cc-key.fill { background: var(--fill); box-shadow: inset 0 0 0 1px var(--hairline); }
+.cc-key.light { background: color-mix(in srgb, var(--chart-a) 34%, var(--surface)); box-shadow: inset 0 0 0 1px var(--chart-a); }
+.cc-k { font: 600 .8125rem/1.3 var(--font); letter-spacing: -0.003em; color: var(--muted); }
+.cc-count { color: var(--ink); font-weight: 600; margin-left: 2px; white-space: nowrap; }   /* "in 27:58" never splits */
+
+/* ---- charts drawn at their measured width ---------------------------------------------------------------------- */
+.cc-fig { margin: 0; }
+.cc-svg { display: block; overflow: visible; touch-action: pan-y; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+.cc-svg:focus-visible { outline-offset: 6px; }
+.cc-axis { font: 500 11px/1 var(--font); fill: var(--muted); letter-spacing: 0; }
+.cc-val { font: 600 12px/1 var(--font-num); fill: var(--ink-2); }
+.cc-gl { stroke: var(--separator); stroke-width: 1; stroke-dasharray: 2 4; }
+.cc-gl.base, .cc-zero { stroke: var(--separator); stroke-width: 1; stroke-dasharray: none; }
+.cc-cur { transition: opacity 120ms ease; pointer-events: none; }
+.cc-cur line { stroke: var(--ink); stroke-opacity: .25; stroke-width: 1; }
+.cc-cur circle { fill: var(--surface); stroke-width: 2.5; }
+.cc-end { fill: var(--chart-a); stroke: var(--surface); stroke-width: 2; }
+.cc-scrub { fill: var(--fill-2); opacity: 0; transition: opacity 120ms ease; }
+.cc-scrub.on { opacity: 1; }
+/* the first-week tint is too pale to hold 3:1 on its own, so its edge carries the accent (4.5:1 or more in every finish) */
+.cc-light { fill: color-mix(in srgb, var(--chart-a) 34%, var(--surface)); stroke: var(--chart-a); stroke-width: 1; }
+.cc-read { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; min-height: 2.9em; margin-top: 8px; font: 400 .8125rem/1.35 var(--font); color: var(--muted); }
+.cc-read b { color: var(--ink); font-weight: 600; }
+.cc-rk { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.cc-seg { flex: none; }
+
+/* horizontal bars: label and value on one line, the bar under them (reads at 375px with long labels) */
+.cc-funnel { display: grid; gap: 12px; }
+.cc-hb { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "l v" "t t"; gap: 6px 12px; align-items: baseline; }
+.cc-hb-l { grid-area: l; font: 400 .9375rem/1.3 var(--font); color: var(--ink-2); min-width: 0; }
+.cc-hb-v { grid-area: v; font-weight: 600; white-space: nowrap; }
+.cc-hb-t { grid-area: t; display: block; height: 10px; border-radius: 5px; background: var(--fill); overflow: hidden; }
+.cc-hb-t i { display: block; height: 100%; border-radius: 5px; background: var(--chart-a); }
+.cc-hb.is-now .cc-hb-t i, .cc-hb.is-former .cc-hb-t i { background: var(--chart-b); }
+.cc-hb .chip { min-height: 20px; padding: 0 7px; font-size: .6875rem; vertical-align: 1px; }
+.cc-churn .cc-hb-l { display: flex; align-items: center; gap: 8px; }
+.cc-churn .cc-hb { align-items: center; }   /* the label row starts with a crest, whose foot would be its baseline: center the count on the row instead */
+.cc-churn .crest { width: 24px; height: 24px; }
+.cc-crest-ph { width: 24px; height: 24px; border-radius: 7px; background: var(--fill); flex: none; }
+
+/* ---- growth ----------------------------------------------------------------------------------------------------- */
+.cc-gapn { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; }
+.cc-gapn .d-num { font-size: clamp(3.25rem, 8vw, 5rem); color: var(--accent-ink); }
+.cc-gapn span:last-child { font: 500 .9375rem/1.3 var(--font); color: var(--ink-2); }
+.cc-stackbar { height: 14px; border-radius: 7px; background: var(--fill); overflow: hidden; margin: 16px 0 10px; box-shadow: inset 0 0 0 1px var(--hairline); }
+.cc-stackbar i { display: block; height: 100%; background: var(--chart-a); }
+.cc-ret { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 16px; margin: 22px 0 0; border-top: 1px solid var(--separator); }
+/* the label row is shared across the three (subgrid), so a label that wraps never pushes its numeral below the others */
+.cc-ret > div { display: grid; grid-row: span 2; grid-template-rows: subgrid; gap: 6px; align-content: start; padding-top: 12px; min-width: 0; }
+.cc-ret dt { font: 600 .8125rem/1.3 var(--font); letter-spacing: -0.003em; color: var(--muted); text-wrap: balance; }
+.cc-ret dd { margin: 0; display: grid; gap: 4px; }
+.cc-ret .d-num { font-size: clamp(1.75rem, 4vw, 2.25rem); }
+.cc-return { display: flex; align-items: center; gap: 22px; }
+.cc-return > svg { flex: none; }
+.cc-return-t { display: grid; gap: 14px; min-width: 0; }
+.cc-return-t > div { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: baseline; }
+.cc-return-t .cc-key { grid-row: span 2; align-self: start; margin-top: 4px; }
+.cc-return-t b { font-size: 1.0625rem; }
+@media (max-width: 380px) { .cc-return { flex-direction: column; align-items: flex-start; } }
+
+/* ---- overview --------------------------------------------------------------------------------------------------- */
+.cc-attn .cc-col-h { margin-top: 2px; }
+.cc-arow { align-items: center; -webkit-tap-highlight-color: transparent; }
+.cc-arow .title { display: block; font: 500 .9375rem/1.3 var(--font); }
+.cc-arow .sub { display: block; margin-top: 2px; }
+.cc-arow.row + .cc-arow.row::before { left: 58px; }
+.cc-ico { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; flex: none; background: var(--fill-2); color: var(--ink-2); }   /* neutral tile: in Ember an accent tile read as an alert (review 2026-10-20) */
+.cc-ico .cc-ic { width: 18px; height: 18px; }
+.cc-ico.warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn-ink); }
+.cc-n { font: 600 1.0625rem/1 var(--font-num); flex: none; }
+/* a narrow pane gives the title the row: the shapes drop under the meta line (attnRow renders both copies, one shows) */
+.cc-arow .cc-shapes-in { display: none; }
+@container ccpane (max-width: 480px) { .cc-arow > .shapes { display: none; } .cc-arow .cc-shapes-in { display: flex; width: fit-content; margin-top: 7px; } }
+/* trade requests sit with the clubs (Rule 2.3): a quiet line under the Staff Desk list, not a row in it */
+.cc-trade { margin: 12px 0 0; max-width: 62ch; font: 400 .8125rem/1.5 var(--font); color: var(--muted); }
+/* the league today: one statement sentence on the ink band (the four KPI tiles are gone, review 2026-10-19). The bright
+   words carry the numbers and the rest steps back, so the sentence reads in one glance; tracking tightens as it grows */
+.cc-today { margin: clamp(18px, 2.4vw, 26px) 0 0; max-width: 34ch; font: 600 clamp(1.5rem, 3.6vw, 2.5rem)/1.18 var(--font); letter-spacing: -0.022em;
+  color: var(--muted); text-wrap: balance; }
+.cc-today b { font-weight: inherit; color: var(--ink); }
+.cc-today-go { display: flex; flex-wrap: wrap; gap: 4px 28px; margin-top: clamp(18px, 2.4vw, 26px); }
+/* season clock: six weeks as bars, then the next five dates */
+.cc-weeks { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.cc-wk { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center; gap: 14px; }
+.cc-wk-n { font: 760 1.0625rem/1 var(--font-brand); font-stretch: 75%; font-variation-settings: "wdth" 75; letter-spacing: .02em; text-transform: uppercase; color: var(--ink-2); }
+.cc-wk-t { display: block; height: 10px; border-radius: 5px; background: var(--fill); overflow: hidden; }
+.cc-wk-t i { display: block; height: 100%; border-radius: 5px; background: var(--chart-a); }
+.cc-wk-v { min-width: 6.5em; text-align: right; font: 500 .8125rem/1 var(--font); color: var(--muted); }
+.cc-wk.cur .cc-wk-n, .cc-wk.cur .cc-wk-v { color: var(--accent-ink); }
+.cc-wk.cur .cc-wk-t { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.cc-when { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--separator); }
+.cc-when li { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--separator); }
+.cc-date { width: 44px; flex: none; display: grid; justify-items: start; gap: 3px; }
+.cc-date span { font: 600 .8125rem/1.3 var(--font); letter-spacing: -0.003em; color: var(--accent-ink); }
+.cc-date b { font-size: 2rem; }
+.cc-when .grow { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.cc-when-t { font: 600 .9375rem/1.3 var(--font); }
+.cc-when-t .chip { min-height: 20px; padding: 0 7px; font-size: .6875rem; vertical-align: 1px; }
+.cc-in { font: 400 .8125rem/1.2 var(--font); color: var(--muted); white-space: nowrap; flex: none; }
+
+/* ---- tonight: the match-center band, then the slots ------------------------------------------------------------- */
+.cc-night { display: grid; gap: 22px; }
+@container ccpane (min-width: 760px) { .cc-night { grid-template-columns: minmax(0, 1fr) auto; align-items: end; } }
+.cc-night .copy { display: grid; gap: 14px; min-width: 0; }
+.cc-night-k { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.cc-night .d-1 { text-wrap: balance; }
+.cc-night-s { margin: 0; max-width: 60ch; font: 400 1.0625rem/1.5 var(--font); color: var(--ink-2); }
+.cc-clockface { display: grid; gap: 10px; justify-items: start; }
+@container ccpane (min-width: 760px) { .cc-clockface { justify-items: end; } }
+#ccClock { font-size: clamp(2.5rem, 6vw, 4rem); color: var(--ink); }
+.cc-health { display: grid; gap: 8px 28px; margin-top: clamp(24px, 3vw, 36px); padding-top: 18px; border-top: 1px solid var(--separator); }
+@container ccpane (min-width: 760px) { .cc-health { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.cc-health p { margin: 0; display: flex; align-items: baseline; font: 400 .875rem/1.45 var(--font); color: var(--ink-2); }
+.cc-health b { color: var(--ink); font-weight: 600; }
+.cc-slot + .cc-slot { margin-top: clamp(36px, 5vw, 52px); }
+.cc-slot-h { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 14px; font: inherit; }
+.cc-slot-s { font: 600 .8125rem/1.3 var(--font); letter-spacing: -0.003em; color: var(--muted); }
+.cc-fxs { display: grid; gap: 10px; }
+@container ccpane (min-width: 1000px) { .cc-fxs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.cc-fx { position: relative; display: grid; gap: 14px; padding: 16px 18px; border-radius: var(--r-sm); background: var(--surface); color: var(--ink); min-width: 0;
+  -webkit-tap-highlight-color: transparent; transition: transform var(--t-press) var(--ease-out), box-shadow 200ms ease; }
+.cc-fx:active { transform: scale(.985); }
+.cc-fx > .chev { position: absolute; right: 16px; top: 28px; }
+.cc-fx-m { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding-right: 20px; min-width: 0; }
+.cc-team { display: inline-flex; align-items: center; gap: 8px; }
+.cc-team .crest { width: 32px; height: 32px; }
+.cc-code { font: 760 1.125rem/1 var(--font-brand); font-stretch: 75%; font-variation-settings: "wdth" 75; letter-spacing: .03em; }
+.cc-team b { font-size: 2rem; color: var(--muted); min-width: 1ch; }
+.cc-team.win b { color: var(--ink); }
+.cc-at { font: 400 .8125rem/1 var(--font); color: var(--muted); }
+.cc-fx-s { margin-left: auto; display: inline-flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; justify-content: flex-end; }
+@container ccpane (max-width: 400px) { .cc-fx-s { flex-basis: 100%; margin-left: 0; justify-content: flex-start; } }   /* a phone puts the state on its own line: read it from the left, not floating right */
+/* a game's state is small uppercase text, as on the public game pages (today.css .td-ts): never a chip, never a score
+   while it plays */
+.cc-ts { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; font: 700 .6875rem/1 var(--font); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.cc-ts.live { color: var(--live-ink); }
+.cc-fx-cs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; padding-top: 14px; border-top: 1px solid var(--separator); }
+/* one card per row has room for the four checks side by side; two cards per row (1000px and up) keep them two by two */
+@container ccpane (min-width: 620px) and (max-width: 999px) { .cc-fx-cs { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.cc-fx-c { display: grid; gap: 5px; align-content: start; min-width: 0; font: 400 .8125rem/1.35 var(--font); color: var(--ink-2); }
+
+/* ---- season setup ----------------------------------------------------------------------------------------------- */
+.cc-dates { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 20px; }
+@container ccpane (min-width: 760px) { .cc-dates { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.cc-dates li { display: grid; grid-row: span 3; grid-template-rows: subgrid; gap: 8px; align-content: start; padding-top: 14px; border-top: 2px solid var(--ink); min-width: 0; }   /* label, numeral, foot share rows across a line, so a wrapped label never drops its numeral */
+.cc-dates-l { font: 600 .8125rem/1.3 var(--font); letter-spacing: -0.003em; color: var(--muted); }
+.cc-dates b { font-size: clamp(2.25rem, 5vw, 3.5rem); }
+.cc-prog { display: flex; gap: 3px; flex: none; align-self: center; }
+.cc-prog i { width: 14px; height: 6px; border-radius: 3px; background: var(--fill); }
+.cc-prog i.is-done { background: var(--accent); }
+.cc-prog i.is-next, .cc-prog i.is-open { background: color-mix(in srgb, var(--accent) 40%, var(--fill)); }
+.cc-prog i.is-blocked { background: var(--warn); }
+@media (max-width: 420px) { .cc-prog { width: 100%; } .cc-prog i { flex: 1; } }
+.cc-stepper { max-width: 860px; }
+.cc-steps { list-style: none; margin: 0 -8px; padding: 0; }
+.cc-step { position: relative; }
+.cc-step:not(:last-child)::after { content: ""; position: absolute; left: 22px; top: 46px; bottom: -8px; width: 2px; border-radius: 1px; background: var(--separator); }
+.cc-step.is-done:not(:last-child)::after { background: var(--accent); }
+.cc-step-b { width: 100%; display: flex; align-items: flex-start; gap: 12px; padding: 12px 8px; border-radius: var(--r-sm); text-align: left; color: var(--ink);
+  -webkit-tap-highlight-color: transparent; transition: background-color 140ms ease, transform var(--t-press) var(--ease-out); }
+.cc-step-b:active { background: var(--fill-2); transform: scale(.99); }
+.cc-step-b > .chip { flex: none; margin-top: 4px; }
+.cc-step-b > .chev { margin-top: 9px; }
+.cc-step-b .grow { flex: 1; min-width: 0; }
+.cc-node { position: relative; z-index: 1; width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 50%;
+  background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--separator); color: var(--muted); font: 600 .8125rem/1 var(--font-num); }
+.cc-node svg { width: 16px; height: 16px; }
+.is-done .cc-node { background: var(--accent); color: var(--accent-on); box-shadow: none; }
+.is-done .cc-node svg { stroke-width: 2.6; }
+.is-next .cc-node { color: var(--accent-ink); box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 4px var(--accent-soft); }
+.is-open .cc-node { background: var(--accent-soft); color: var(--accent-ink); box-shadow: none; }
+.is-blocked .cc-node { background: color-mix(in srgb, var(--warn) 18%, var(--surface)); color: var(--warn-ink); box-shadow: none; }
+.cc-step-t { display: block; font: 760 1.125rem/1.15 var(--font-brand); font-stretch: 75%; font-variation-settings: "wdth" 75; letter-spacing: .02em; text-transform: uppercase; }
+.cc-step-d { display: block; margin-top: 3px; font: 400 .8125rem/1.4 var(--font); color: var(--muted); }
+.cc-gate { display: inline-flex; align-items: center; gap: 5px; margin-top: 6px; font: 500 .75rem/1.2 var(--font); color: var(--ink-2); }
+.cc-gate .cc-ic { width: 14px; height: 14px; }
+.is-blocked .cc-gate { color: var(--warn-ink); }
+@media (max-width: 420px) { .cc-step-b > .chev { display: none; } }
+
+/* sheet contents (the sheet itself is the kit's) */
+.cc-sh-state { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; margin: 0 0 14px; }
+.cc-sh-acts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.cc-sh-acts.cc-center { justify-content: center; margin-top: 0; }
+.cc-sh-p { margin: 0 0 14px; }
+.cc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cc-chips .chip { min-height: 30px; padding: 0 11px; font-weight: 500; }
+.cc-chips .chip .t-foot { font-size: .75rem; }
+.cc-conf { display: grid; gap: 8px; justify-items: start; padding: 14px; margin: 14px 0; border-radius: var(--r-md); background: var(--fill-2); }
+.cc-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+.cc-pair > div { display: grid; gap: 2px; padding: 12px 14px; border-radius: var(--r-sm); background: var(--fill-2); }
+.cc-callout-s { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0; padding: 12px 14px; border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--ink); font: 400 .875rem/1.45 var(--font); }
+.cc-callout-s .cc-ic { color: var(--warn-ink); margin-top: 1px; }
+.cc-hol { touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }   /* the whole row toggles */
+.cc-hol:active { background: var(--fill-2); }
+.cc-flabel { font: 500 .8125rem/1 var(--font); color: var(--muted); }   /* .field label, for a group label that is not a <label> */
+.cc-divs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.cc-crests { display: flex; flex-wrap: wrap; gap: 10px 12px; margin-top: 8px; }
+.cc-cr { display: grid; justify-items: center; gap: 4px; color: var(--ink); }
+.cc-cr .crest { width: 40px; height: 40px; }
+/* the clubs tab: one division per row, four crests across, so a division always reads as a set */
+.cc-divs-lg { grid-template-columns: minmax(0, 1fr); gap: 22px; margin: 0; }
+.cc-divs-lg .cc-crests { display: grid; grid-template-columns: repeat(4, minmax(0, 72px)); gap: 14px 16px; margin-top: 10px; }
+.cc-divs-lg .cc-cr .crest { width: 52px; height: 52px; }
+a.cc-cr { border-radius: var(--r-xs); -webkit-tap-highlight-color: transparent; transition: transform var(--t-press) var(--ease-out); }
+a.cc-cr:active { transform: scale(.96); }
+.cc-pick .tick { display: flex; color: var(--accent-ink); }
+.cc-pick .tick svg { width: 20px; height: 20px; }
+
+/* ---- season setup: the Season 2 survey (js/survey.js answers, anonymous) ----------------------------------------- */
+/* commissioner, 2026-10-20: "I do not need to see names but I would like to see answer statistics in the control center
+   somewhere." One section on the canvas band: a headline count, the votes as the page's own bars, the X-Factor list one
+   tier at a time (two columns when there is room, read down then across, most votes first), the written answers as
+   plain hairline lists */
+.cc-sv-k { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.cc-sv-sw { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+/* the three choice questions: one column in the survey's order; on a wide pane nights a week moves under position locks,
+   beside the taller nights list (the second row takes the spare height, so it sits right under the locks) */
+.cc-sv-top { display: grid; gap: clamp(44px, 6vw, 56px) clamp(32px, 4.5vw, 64px); }
+.cc-sv-top > * { min-width: 0; }
+@container ccpane (min-width: 860px) {
+  .cc-sv-top { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: auto 1fr; }
+  .cc-sv-b { grid-column: 2; grid-row: 1 / span 2; }
+  .cc-sv-c { grid-column: 1; grid-row: 2; align-self: start; }
+}
+.cc-sv-xf { columns: 2 300px; column-gap: clamp(32px, 4.5vw, 64px); }
+.cc-sv-xf .cc-hb { break-inside: avoid; margin-bottom: 14px; }
+.cc-sv-said { display: grid; gap: 40px clamp(32px, 4vw, 48px); }
+/* three columns: two heading lines reserved, so the lists' hairlines line up when one question wraps (review 2026-10-20) */
+@container ccpane (min-width: 860px) { .cc-sv-said { grid-template-columns: repeat(3, minmax(0, 1fr)); } .cc-sv-said-c .cc-col-h { display: block; min-height: 2.8em; } }
+.cc-sv-said-c { min-width: 0; }
+.cc-sv-said-c .cc-col-h { line-height: 1.4; }
+.cc-sv-q { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--separator); }
+/* typed text keeps its line breaks and never pushes the page sideways (a long unbroken word wraps anywhere) */
+.cc-sv-q li { padding: 14px 0; border-bottom: 1px solid var(--separator); font: 400 .9375rem/1.5 var(--font); color: var(--ink); white-space: pre-line; overflow-wrap: anywhere; max-width: 60ch; }
+.cc-sv .cc-sv-more { margin-top: 10px; padding-left: 0; padding-right: 0; }
+.cc-sv-none { margin: 0; padding-top: 14px; border-top: 1px solid var(--separator); }
+/* the schedule, when one is generated, follows the survey on the same band */
+.cc-sv + .cc-sched { margin-top: clamp(48px, 7vw, 80px); padding-top: clamp(36px, 5vw, 56px); border-top: 1px solid var(--separator); }
+
+/* ---- clubs ------------------------------------------------------------------------------------------------------ */
+.cc-ring { width: 42px; height: 42px; flex: none; display: grid; place-items: center; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--c), 0 0 0 1px var(--hairline); }
+.cc-ring .crest { width: 28px; height: 28px; }
+.cc-ring.lg { width: 76px; height: 76px; box-shadow: inset 0 0 0 3px var(--c), 0 0 0 1px var(--hairline); }   /* no transition: it tracks the color picker */
+.cc-ring.lg .crest { width: 52px; height: 52px; }
+.cc-sw { display: inline-block; width: 16px; height: 16px; border-radius: 50%; background: var(--c); box-shadow: inset 0 0 0 1px var(--hairline), 0 0 0 1px var(--hairline); flex: none; }
+/* dark: navy and black club colors vanish on the near-black surface behind a 10% hairline, so the edge is lifted */
+:root[data-theme="dark"] .cc-sw { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .28); }
+:root[data-theme="dark"] .cc-ring { box-shadow: inset 0 0 0 2px var(--c), 0 0 0 1px rgba(255, 255, 255, .24); }
+:root[data-theme="dark"] .cc-ring.lg { box-shadow: inset 0 0 0 3px var(--c), 0 0 0 1px rgba(255, 255, 255, .24); }
+/* qa (function 22): a failed read of the clubs' links says so above the table, with Try again */
+.cc-tx-err { margin-bottom: 12px; }
+.cc-club-head { display: none; }
+.cc-club { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 10px; align-items: center; padding: 12px 16px; -webkit-tap-highlight-color: transparent; }
+.cc-club.row + .cc-club.row::before { left: 70px; }
+.cc-club-n { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.cc-club-n .title { display: block; font: 760 1.125rem/1.15 var(--font-brand); font-stretch: 75%; font-variation-settings: "wdth" 75; letter-spacing: .02em; text-transform: uppercase; }
+.cc-club-n .sub { display: block; margin-top: 2px; }
+.cc-club-meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 14px; padding-left: 54px; font: 400 .8125rem/1.3 var(--font); color: var(--ink-2); }
+.cc-club-c { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.cc-club-c .mono { display: none; }
+.cc-ml { color: var(--muted); }
+.cc-club > .chev { grid-row: 1; grid-column: 2; }
+/* a narrow pane shows only what differs: colors, the last box score and any check that is not fine (an empty seat, a
+   missing link); the headline already says all clubs are linked, and the wide table keeps every column */
+@container ccpane (max-width: 859px) { .cc-club-c.is-ok { display: none; } }
+@container ccpane (min-width: 860px) {
+  .cc-club-head, .cc-club { grid-template-columns: minmax(240px, 1.6fr) 1.1fr .8fr 1fr .9fr 1fr 12px; }
+  .cc-club-head { display: grid; gap: 10px; padding: 0 16px 10px; font: 600 .6875rem/1.3 var(--font); color: var(--muted); letter-spacing: .02em; text-transform: uppercase; }   /* a table head: the .t-cap voice */
+  .cc-club-meta { display: contents; }
+  .cc-club > .chev { grid-row: auto; grid-column: auto; }
+  .cc-club-c .mono { display: inline; }
+  .cc-ml { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }   /* .sr: the header row is aria-hidden, so each cell keeps its label for a reader */
+}
+.cc-ed-top { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.cc-ed-top .t-foot { margin: 2px 0 0; }
+.cc-form { display: grid; gap: 12px; }
+@media (min-width: 600px) { .cc-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.cc-color { cursor: pointer; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 5px 12px 5px 6px; border-radius: 12px; border: 1px solid var(--hairline); background: var(--surface); }
+.cc-color input[type="color"] { width: 34px; height: 34px; padding: 0; border: 0; border-radius: 9px; background: none; cursor: pointer; }
+.cc-color input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.cc-color input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--hairline); }
+.cc-color input[type="color"]::-moz-color-swatch { border: 0; border-radius: 9px; }
+
+/* ---- staff: one group, committee managers, the open questions ---------------------------------------------------- */
+.cc-av { width: 36px; height: 36px; font-size: .875rem; background: var(--accent-soft); color: var(--accent-ink); }
+.cc-av.empty { background: none; box-shadow: inset 0 0 0 1.5px var(--faint); }
+.cc-cmts { list-style: none; margin: 0; padding: 0; background: var(--surface); border-radius: var(--r-sm); }
+.cc-cmt { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px 24px; align-items: center; padding: 18px; }
+.cc-cmt + .cc-cmt { border-top: 1px solid var(--separator); }
+@container ccpane (min-width: 640px) {
+  .cc-cmt { grid-template-columns: minmax(0, 1fr) 230px; }
+  .cc-cmt-q { grid-column: 1; grid-row: 2; }
+  .cc-mgr { grid-column: 2; grid-row: 1 / span 2; }
+}
+@container ccpane (min-width: 980px) {
+  .cc-cmt { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) 240px; }
+  .cc-cmt-q { grid-column: 2; grid-row: 1; }
+  .cc-mgr { grid-column: 3; grid-row: 1; }
+}
+.cc-cmt-t { display: grid; gap: 5px; min-width: 0; }
+.cc-cmt-n { margin: 0; font: 760 1.25rem/1.05 var(--font-brand); font-stretch: 75%; font-variation-settings: "wdth" 75; letter-spacing: .01em; text-transform: uppercase; }
+.cc-cmt-t p { margin: 0; font: 400 .875rem/1.4 var(--font); color: var(--muted); }
+.cc-cmt-q { margin: 0; display: grid; gap: 5px; min-width: 0; font: 400 .875rem/1.4 var(--font); color: var(--ink-2); }
+.cc-calm { color: var(--muted); }
+.cc-mgr { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 56px; padding: 8px 14px 8px 8px; border-radius: var(--r-sm); background: var(--fill-2); text-align: left; color: var(--ink);
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none;
+  transition: transform var(--t-press) var(--ease-out), background-color 160ms ease; }
+/* the seat holder is read-only since 2026-11-23 (no appointing), so it has no press state */
+.cc-mgr .grow { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.cc-mgr .title { font: 600 .9375rem/1.2 var(--font); }
+.cc-mgr .sub { font: 400 .75rem/1.2 var(--font); color: var(--muted); }
+.cc-change { flex: none; font: 600 .8125rem/1 var(--font); color: var(--accent-ink); }
+.cc-adds, .cc-staff { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--separator); }
+.cc-adds li { display: grid; gap: 4px; padding: 14px 0; border-bottom: 1px solid var(--separator); }
+.cc-adds b { font: 600 .9375rem/1.3 var(--font); }
+.cc-adds span { font: 400 .875rem/1.45 var(--font); color: var(--ink-2); }
+.cc-staff li { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 10px 0; border-bottom: 1px solid var(--separator); }
+.cc-staff .grow { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.cc-staff .title { font: 600 .9375rem/1.25 var(--font); }
+.cc-staff .sub { font: 400 .8125rem/1.35 var(--font); color: var(--muted); }
+.cc-decs { list-style: none; margin: 0; padding: 0; display: grid; border-top: 2px solid var(--ink); }
+.cc-decs li { display: grid; gap: 10px; align-content: start; padding: 18px 0 22px; border-bottom: 1px solid var(--separator); }
+.cc-decs .d-3 { text-wrap: balance; }
+.cc-decs p { margin: 0; font: 400 .9375rem/1.55 var(--font); color: var(--ink-2); max-width: 62ch; }
+@container ccpane (min-width: 860px) {
+  .cc-decs { grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 36px; }
+  .cc-decs li { border-bottom: 0; padding-bottom: 4px; }
+}
+
+/* ---- system ----------------------------------------------------------------------------------------------------- */
+.cc-auto { flex-wrap: wrap; row-gap: 8px; }
+.cc-auto .title { display: block; font-size: .9375rem; }
+.cc-auto .sub { display: block; }
+.cc-auto-m { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+@media (max-width: 560px) { .cc-auto-m { order: 3; width: 100%; padding-left: 15px; } .cc-auto .btn { order: 2; } }
+.cc-tbl td .cc-dot { vertical-align: 1px; }
+.cc-tbl .mono { font-size: .8125rem; overflow-wrap: anywhere; }
+.cc-tbl td:first-child { white-space: normal; }
+.cc-w .tbl-wrap { border-radius: 0; border-top: 1px solid var(--separator); border-bottom: 1px solid var(--separator); }
+/* sortable headers: the whole cell is the button (44px tall), not just its text */
+.cc-sort th, .cc-sort th:first-child { padding: 0; }
+.cc-sort th button { width: 100%; min-height: 44px; padding: 0 10px; justify-content: flex-end; }
+.cc-sort th:first-child button { justify-content: flex-start; padding-left: 16px; }
+/* a table on the canvas band is a white panel, as a list is */
+.cc-a .tbl-wrap { background: var(--surface); border-radius: var(--r-sm); }
+/* narrow pane: the wide columns fold under the first cell (.cc-meta-s); wide pane: the first column sticks while the rest scroll */
+@container ccpane (max-width: 599px) { .cc-tbl .cc-wide { display: none; } }
+@container ccpane (min-width: 600px) {
+  .cc-tbl td:first-child { white-space: nowrap; }
+  .cc-tbl th:first-child, .cc-tbl td:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+  .cc-tbl th:first-child { z-index: 2; }
+}
+/* the opaque sticky first cell takes the row's hover band too, or the band starts at the second column */
+@media (hover: hover) and (pointer: fine) { .cc-tbl tbody tr:hover td:first-child { background-image: linear-gradient(var(--fill-2), var(--fill-2)); } }
+/* text columns read from the left; the kit right-aligns every column after the first, which suits numbers only */
+.cc-audit .tbl :is(th, td):is(:nth-child(2), :nth-child(3)), .cc-cron :is(th, td):nth-child(2) { text-align: left; }
+.cc-cron th:nth-child(2) button { justify-content: flex-start; }
+/* heartbeats: the headline and any worker that needs a look lead; all of them wait behind Show all (review 2026-10-19:
+   nineteen identical green bars were a wall of tiles) */
+.cc-all { margin-top: 6px; }
+/* the same plus that turns to a minus as core's About disclosure (S2.about), in the action voice */
+.cc-all > summary { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; list-style: none; color: var(--accent-ink); font: 600 .9375rem/1.2 var(--font);
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+.cc-all > summary::-webkit-details-marker { display: none; }
+.cc-all[open] .about-x::after { transform: rotate(0deg); }
+.cc-all[open] summary { margin-bottom: 4px; }
+.cc-list + .cc-all { margin-top: 14px; }
+.cc-all:not([open]) .cc-hide, .cc-all[open] .cc-show { display: none; }
+.cc-more { margin-top: 14px; }
+.cc-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.cc-filters .seg { flex: none; }
+.cc-sel { width: auto; flex: 1 1 150px; }
+.cc-q { flex: 2 1 180px; width: auto; -webkit-appearance: none; appearance: none; }
+.cc-count-l { margin: 0 0 8px; }
+.cc-audit .tbl td:first-child { white-space: normal; min-width: 0; }
+.cc-meta-s { display: block; margin-top: 2px; font: 400 .75rem/1.3 var(--font); color: var(--muted); }
+@container ccpane (min-width: 600px) { .cc-meta-s { display: none; } .cc-audit .tbl td:first-child { min-width: 200px; } }
+.cc-audit .tbl .chip { min-height: 22px; font-weight: 500; }
+
+.cc-ed-err { margin: 14px 0 0; }
+.cc-kv + .field { margin-top: 14px; }   /* an empty seat's picker opens below the Front office list, not glued to it */
+.cc-kv ~ .field + .field { margin-top: 12px; }
+/* Transactions on the Overview: the public line of every move this session, Reverse beside a completed trade */
+/* the generated schedule: the week picker, then one column per night (stacked on a phone), each slot a short list */
+.cc-sched { margin-bottom: clamp(28px, 4vw, 40px); }
+.cc-sched-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 0 0 16px; }
+.cc-sched-bar .seg { max-width: 100%; }
+.cc-sched-bar .seg button { padding-inline: 12px; min-width: 40px; font-variant-numeric: tabular-nums; }
+.cc-sched-bar .t-foot { margin: 0; }
+.cc-sched-wk { display: grid; gap: 12px; }
+@container ccpane (min-width: 760px) { .cc-sched-wk { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.cc-sn { display: grid; gap: 14px; align-content: start; padding: 16px 18px; border-radius: var(--r-sm); background: var(--surface); min-width: 0; }
+.cc-sn-h { margin: 0; font: 760 1.0625rem/1.1 var(--font-brand); font-stretch: 75%; font-variation-settings: "wdth" 75; letter-spacing: .04em; text-transform: uppercase; color: var(--ink); }
+.cc-ss { display: grid; gap: 8px; }
+.cc-sg { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.cc-sg li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cc-sg .cc-team { gap: 6px; }
+.cc-sg .cc-team .crest { width: 22px; height: 22px; }
+.cc-sg .cc-code { font-size: .9375rem; }
+/* the drawn draft order */
+.cc-board { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.cc-board li { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 0; border-bottom: 1px solid var(--separator); font: 500 .9375rem/1.3 var(--font); }
+.cc-board li:last-child { border-bottom: 0; }
+.cc-board .crest { width: 26px; height: 26px; flex: none; }
+.cc-board .grow { flex: 1; min-width: 0; }
+.cc-pk { width: 22px; flex: none; text-align: right; color: var(--muted); font: 600 .8125rem/1 var(--font); }
+.cc-auto-m .chip { min-height: 22px; }
+
+/* ---- touch: controls answer at once, never flash, never select their own label on a long press ------------------ */
+.cc-tabs a, .cc-arow, .cc-fx, .cc-step-b, .cc-club, .cc-filters .seg button, .cc-seg button, #ccEdDiv button, .cc-sort th button, .cc-pick .row {
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+
+/* fingers get the 44px floor on every control here (a mouse keeps the kit's compact 32px segments) */
+@media (pointer: coarse) {
+  .cc-seg button, .cc-filters .seg button, #ccEdDiv button, .cc-auto .btn.sm, .cc-txr .btn.sm, .cc-sec .btn.sm, .cc-more .btn.sm, .cc-sv-more { min-height: 44px; }
+}
+
+/* ---- fine pointers only ----------------------------------------------------------------------------------------- */
+@media (hover: hover) and (pointer: fine) {
+  .cc-fx:hover { box-shadow: var(--shadow-2); }
+  .cc-step-b:hover, .cc-arow:hover, .cc-club:hover, .cc-hol:hover { background: var(--fill-2); }
+  .cc-mgr:hover { background: var(--fill); }
+  .cc-tabs a:hover { color: var(--ink); }
+  .cc-svg { cursor: crosshair; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-fx:active, .cc-step-b:active, .cc-mgr:active, a.cc-cr:active { transform: none; }
+  .cc-dot.live { animation: none; }
+  .cc-tabs a::after { transition: none; }
+}
+
+/* ---------- Season setup, step 9: the bracket draws itself (live v4.42). The switch row is the holidays row's pattern;
+   each drawn round is a small caption over a flat list of its series, crests first ---------- */
+.cc-po { display: grid; gap: 4px; }
+.cc-po > .t-sub { margin: 10px 0 0; }
+.cc-po-rounds { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 14px; }
+.cc-po-rh { margin: 0 0 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cc-po-m { min-height: 56px; gap: 12px; }
+.cc-po-cr { display: inline-flex; flex: none; }
+.cc-po-cr .crest { width: 28px; height: 28px; }
+.cc-po-cr .crest + .crest { margin-left: -6px; }
+.cc-po .cc-sh-acts { margin-top: 12px; }
+/* ---------- the club sheet: Find the EA club (live v4.34 to v4.37). One row: the field and Search; the status line under
+   it comes from desk.css (.ea-status), shared with the Game desk ---------- */
+.cc-ea { display: grid; gap: 4px; }
+.cc-ea-row { display: flex; gap: 8px; align-items: center; }
+.cc-ea-row .input { flex: 1 1 0; min-width: 0; }
+.cc-ea-row .btn { flex: none; min-height: 44px; }
+.cc-ea-wait { margin: 10px 0 0; }
+.cc-ea .cc-sub-h { display: flex; align-items: center; gap: 6px; }
+.cc-ea .row { min-height: 56px; gap: 12px; }
+.cc-ea .row .title { overflow-wrap: anywhere; }
+#ccEaRow:focus { outline: none; }
+#ccEaRow:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cc-ea .cc-sub-h .chip, .cc-po-rh .chip { text-transform: none; letter-spacing: normal; }
+@media (pointer: coarse) { .cc-ea .btn.sm { min-height: 44px; } }   /* "This is us" reaches 44px under a finger, as the kit's other small buttons here */
+/* S2 swap (g3): the rows that carry their own controls (an award's vote, a member's role, a game's tools) wrap their
+   controls under the name on a narrow pane instead of squeezing it; the schedule preview sits below the confirm's copy */
+.cc-award, #ccRoleOut .row { flex-wrap: wrap; gap: 8px; }
+.cc-award .cc-sel, #ccRoleOut .cc-sel { flex: 0 1 220px; }
+@media (max-width: 560px) { .cc-award .cc-sel, #ccRoleOut .cc-sel { flex: 1 1 100%; } }
+@media (pointer: coarse) { .cc-award .btn.sm { min-height: 44px; } }
+.cc-gen-prev { margin-top: 12px; }
+.cc-gen-prev .cc-sched-wk { grid-template-columns: 1fr; }
+#ccNews textarea.input { min-height: 96px; resize: vertical; }

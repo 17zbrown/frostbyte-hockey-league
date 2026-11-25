@@ -1,0 +1,759 @@
+/* audit 2026-11-09: one label voice. Labels speak in sentence case like .kicker; table heads and data keys keep the
+   small capitals of .t-cap at .02em; the tracked capitals (.1em to .2em) the commissioner called AI slop are gone */
+/* #/you and #/hq (builder: hq). Namespace .hqx. Tokens only, so dark mode and all three finishes come free.
+   League website v2 (commissioner, 2026-10-19: "too much like a dashboard and not a League Website"): the workspaces
+   keep the gray app canvas but wear the site's type. Titles and big numbers are Archivo condensed uppercase (.d-*),
+   panes are runs of sections (kicker, headline with the number, one sentence) instead of card walls, Team HQ opens on a
+   band in the club's own color, the next night is an ink match-center panel, chips give way to quiet text tags, and
+   white surfaces remain only for lists and tables a hand works on. The guest You page is a public join page.
+   Phone first: a website-style section menu that drills in with a back chevron; from 900px a split view.
+   Motion: presses show on pointer-down (120ms) and commit on release, anything a finger moves rides S2.spring,
+   transitions name their properties, hovers live under (hover: hover) and (pointer: fine), reduced motion leaves
+   cross-fades only. Touch: every control is 44px tall under a coarse pointer. */
+
+.hqx-ink { color: var(--ink); }
+.hqx-b { font-weight: 600; color: var(--ink); }
+.hqx-bad { color: var(--loss-ink) !important; }
+.hqx-stack { display: grid; gap: clamp(40px, 6vw, 64px); min-width: 0; align-content: start; }
+.hqx-stack > *, .hqx-block { min-width: 0; }
+.hqx-stack.hqx-tight { gap: 28px; }
+/* core's About disclosure at a pane's foot (QA visual 32): the stack's gap already sets it apart, so not its page margin
+   too; a widget with nothing to say yet (data-w="ready" before a night exists) takes no gap */
+.hqx-stack > .about { margin-top: 0; }
+.hqx-stack > [data-w]:empty { display: none; }
+.hqx-tight > .hqx-hd { margin-bottom: 4px; }
+.hqx-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 16px; }
+.hqx-tools:first-child { margin-bottom: 24px; }
+.hqx-tools .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+@media (pointer: coarse) {
+  .hqx .seg button, .hqx .btn.sm { min-height: 44px; }
+}
+/* the condensed brand cut, for small labels that sit beside the display type */
+.hqx-nav-t, .hqx-mark5, .hqx-date, .hqx-time small { font-family: var(--font-brand); font-stretch: 75%; font-variation-settings: "wdth" 75; text-transform: uppercase; }
+
+/* ---- controls feel native: no tap flash, no long-press text selection on controls, no 300ms wait ---- */
+.hqx button, .hqx a, .sheet.hqx-sheet button, .hqx-guest button, .hqx-guest a {
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+.hqx-av-b, .hqx-chip, .hqx-slot, .hqx-theme, .hqx-nav-row, .hqx-plan-r, .hqx-led, .hqx-link, .hqx-lu, .hqx-medal, .hqx-clubbar a, .hqx-step-b, .hqx-ib, .hqx-pr, .hqx-ff { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+
+/* ---- section heads inside a pane: the kit's .sec-head with tighter spacing; the sentence keeps the kit's 1rem, as on
+   Control Center and the public pages (review 2026-10-19) ---- */
+.hqx-hd { margin-bottom: 20px; gap: 14px 28px; }
+.hqx-hd .copy { gap: 10px; }
+.kicker .chip { min-height: 20px; font-size: .6875rem; }
+/* review 2026-10-20: at 390 a long kicker label wraps whole */
+.hqx-hd .kicker { flex-wrap: wrap; row-gap: 6px; }
+.hqx-kt { min-width: 0; }
+.hqx-group-h { margin: 0 0 10px; font: 600 .8125rem/1.3 var(--font); letter-spacing: -0.006em; color: var(--muted); }
+.hqx-group-f { margin-top: 8px; }
+.hqx-fine { margin: 14px 0 0; font: 400 .8125rem/1.5 var(--font); color: var(--muted); max-width: 68ch; }
+
+/* quiet state: a dot and a short word (Filed, Draft 4/6, Late, Linked) */
+.hqx-tag { display: inline-flex; align-items: center; gap: 6px; flex: none; font: 600 .75rem/1 var(--font); letter-spacing: 0; color: var(--ink-2); white-space: nowrap; }
+.hqx-tag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
+.hqx-tag.win { color: var(--win-ink); } .hqx-tag.win::before { background: var(--win); }
+.hqx-tag.warn { color: var(--warn-ink); } .hqx-tag.warn::before { background: var(--warn); }
+.hqx-tag.loss { color: var(--loss-ink); } .hqx-tag.loss::before { background: var(--loss); }
+.hqx-tag.accent { color: var(--accent-ink); } .hqx-tag.accent::before { background: var(--accent); }
+
+/* lists a hand works on stay white, with the site's small radius */
+.hqx-list { border-radius: var(--r-sm); }
+.hqx-surface { background: var(--surface); border-radius: var(--r-sm); box-shadow: var(--shadow-1); overflow: hidden; }
+.hqx .row .grow, .hqx-sheet .row .grow { display: grid; gap: 1px; min-width: 0; }
+
+.hqx-err { margin: 6px 0 0; min-height: 1.2em; font: 500 .875rem/1.4 var(--font); color: var(--loss-ink); }
+.hqx-err:empty { min-height: 0; margin: 0; }
+.hqx-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.hqx-actions + [data-w="inbox"] { margin-top: 16px; }   /* the Inbox's two doors sat flush on its list (review 2026-10-20) */
+.hqx-meter { height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; }
+.hqx-meter i { display: block; height: 100%; border-radius: 3px; background: var(--accent); transition: width 420ms var(--ease-out); }
+.hqx-meter.bad i { background: var(--loss); }
+
+/* ---- the head: kicker, condensed title, one sentence. Team HQ's is a band in the club's own color ---- */
+.hqx-head { padding-top: clamp(18px, 4vw, 44px); padding-bottom: clamp(12px, 2vw, 20px); }
+.hqx-head.hqx-band { padding-top: clamp(28px, 5vw, 56px); padding-bottom: clamp(28px, 5vw, 56px); }
+.hqx-head-in { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.hqx-head-copy { display: grid; gap: 14px; min-width: 0; justify-items: start; }
+.hqx-head .d-1 { display: flex; flex-wrap: wrap; gap: 0 .22em; overflow-wrap: anywhere; }
+.hqx-lede { margin: 0; font: 400 clamp(1rem, 1.6vw, 1.1875rem)/1.5 var(--font); color: var(--ink-2); max-width: 60ch; letter-spacing: -0.01em; }
+.hqx-rec { display: block; margin-top: 8px; font: 600 .8125rem/1.3 var(--font); letter-spacing: -0.006em; }
+.hqx-sec { display: none; }
+.hqx-back { display: none; align-items: center; gap: 2px; min-height: 44px; margin: 0 0 2px -10px; padding: 0 10px 0 4px; border-radius: 12px;
+  font: 400 1.0625rem/1 var(--font); color: var(--accent-ink); transition: opacity 120ms ease; }
+.hqx-back svg { width: 24px; height: 24px; }
+.hqx-back:active { opacity: .55; }
+.hqx-band { color: var(--club-ink); }
+.hqx-band .kicker, .hqx-band .hqx-lede, .hqx-band .hqx-rec { color: inherit; }
+.hqx-band .hqx-lede { opacity: .88; }
+/* the crest on a white medallion: on its own club color a mark like Detroit's wheel would disappear */
+.hqx-medal { flex: none; display: grid; place-items: center; width: clamp(92px, 13vw, 150px); aspect-ratio: 1; border-radius: 50%; background: #fff;
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--club-ink) 16%, transparent); transition: transform var(--t-press) var(--ease-out); }
+.hqx-medal .crest { width: 70%; height: 70%; }
+.hqx-medal:active { transform: scale(.97); }
+.hqx-banner { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; font: 500 .875rem/1.35 var(--font); }
+.hqx-banner > svg { width: 18px; height: 18px; flex: none; }
+.hqx-banner .grow { flex: 1 1 180px; min-width: 0; }
+.hqx-ghostbtn { background: none; color: inherit; box-shadow: inset 0 0 0 1.5px currentColor; }
+@media (max-width: 559px) { .hqx-medal { width: 76px; } .hqx-head-in { align-items: flex-start; } }
+
+/* ---- split view: phone drills in from the section menu; desktop keeps both ---- */
+.hqx-split { display: grid; gap: 18px; margin-top: clamp(10px, 2vw, 20px); }
+.hqx-split > * { min-width: 0; }
+.hqx-side { display: grid; gap: 28px; align-content: start; }
+.hqx-pane { container: pane / inline-size; }
+@media (max-width: 899px) {
+  .hqx[data-root="true"] .hqx-pane { display: none; }
+  .hqx[data-root="false"] .hqx-side { display: none; }
+  .hqx[data-root="false"] .hqx-ws, .hqx[data-root="false"] .hqx-kick, .hqx[data-root="false"] .hqx-lede,
+  .hqx[data-root="false"] .hqx-medal, .hqx[data-root="false"] .hqx-banner { display: none; }
+  .hqx[data-root="false"] .hqx-sec { display: inline; }
+  .hqx[data-root="false"] .hqx-back { display: inline-flex; }
+  .hqx[data-root="false"] .hqx-head { padding: 6px 0 14px; }
+  .hqx[data-root="false"] .hqx-head.hqx-band { padding: 6px 0 14px; }
+  .hqx[data-root="false"] .hqx-head-copy { gap: 0; }
+  /* inside a section the club band gives way to a plain head, so the back chevron and the section name lead */
+  .hqx[data-root="false"] .hqx-band { width: auto; margin-left: 0; background: none; color: var(--ink); }
+}
+@media (min-width: 900px) {
+  .hqx-split { grid-template-columns: 210px minmax(0, 1fr); gap: clamp(32px, 4vw, 64px); align-items: start; margin-top: clamp(28px, 4vw, 48px); }
+  .hqx-side { position: sticky; top: calc(var(--nav-h) + 20px); }
+}
+
+/* the section menu: on a phone, big condensed labels with a line of status (a website menu, not a settings list) */
+.hqx-nav { display: grid; border-top: 1px solid var(--separator); }
+.hqx-nav-row { position: relative; display: flex; align-items: center; gap: 12px; min-height: 68px; padding: 14px 4px; color: var(--ink); border-bottom: 1px solid var(--separator);
+  transition: background-color 160ms ease, color 160ms ease; }
+.hqx-nav-row:active { background: var(--fill-2); }
+.hqx-nav-row .grow { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.hqx-nav-t { font-weight: 800; font-size: 1.625rem; line-height: 1; letter-spacing: 0; }
+.hqx-nav-s { font: 400 .875rem/1.35 var(--font); color: var(--muted); }
+.hqx-badge { min-width: 24px; height: 24px; padding: 0 7px; border-radius: 12px; display: inline-grid; place-items: center; flex: none;
+  background: var(--accent-fill); color: var(--accent-on); font: 700 .75rem/1 var(--font-num); }
+.hqx-more-h { margin-top: 4px; }
+@media (min-width: 900px) {
+  /* desktop: a quiet source list; the current section carries an accent bar, not a filled pill */
+  .hqx-nav { border-top: 0; gap: 2px; }
+  .hqx-nav-row { min-height: 44px; padding: 8px 0 8px 16px; border-bottom: 0; color: var(--ink-2); }
+  .hqx-nav-row::before { content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px; border-radius: 2px; background: var(--accent); transform: scaleY(0);
+    transition: transform 200ms var(--ease-out); }
+  .hqx-nav-row[aria-current="page"] { color: var(--ink); }
+  .hqx-nav-row[aria-current="page"]::before { transform: none; }
+  .hqx-nav-row:active { background: none; opacity: .6; }
+  .hqx-nav-t { font-size: 1.1875rem; letter-spacing: .02em; }
+  .hqx-nav-s, .hqx-nav-row .chev { display: none; }
+}
+@media (hover: hover) and (pointer: fine) {
+  .hqx-nav-row:hover { color: var(--ink); }
+  .hqx-plan-r:hover, .hqx-led:hover, .hqx-msg:hover, .hqx-lg:hover { background: var(--fill-2); }
+  .hqx-chip:not(:disabled):hover .hqx-chip-in { border-color: color-mix(in srgb, var(--accent) 45%, var(--hairline)); }
+  .hqx-slot.is-full:not(:disabled):hover .hqx-slot-card { box-shadow: var(--shadow-2); }
+  .hqx-link:hover > svg { transform: translateX(4px); }
+}
+
+/* ---- shared marks: the big countdown, the date block, the game time, standings marks ---- */
+.hqx-cd { display: grid; justify-items: start; gap: 6px; }
+.hqx-cd .d-num { font-size: clamp(2.25rem, 5vw, 3.5rem); color: var(--ink); }
+.hqx-cd > span:last-child { font: 600 .75rem/1.25 var(--font); letter-spacing: 0; color: var(--muted); }
+/* big numerals, small muted units: Today's countdown (.td-cd-u), so the same idea looks the same in both areas */
+.hqx-cd-u { font: 700 1rem/1 var(--font); font-variation-settings: normal; letter-spacing: .02em; color: var(--muted); margin: 0 10px 0 3px; }
+.hqx-cd-u:last-child { margin-right: 0; }
+@container pane (min-width: 620px) { .hqx-hd .hqx-cd { justify-items: end; text-align: right; } }
+.hqx-date { display: inline-grid; justify-items: center; align-content: start; gap: 3px; font-weight: 700; font-size: .8125rem; line-height: 1; letter-spacing: .04em; color: var(--muted); }
+.hqx-date b { font-size: 2.75rem; color: var(--ink); letter-spacing: -0.01em; }
+.hqx-time { display: grid; justify-items: start; gap: 3px; line-height: 1; color: var(--ink); }
+.hqx-time b { font-size: 1.375rem; }
+.hqx-time small { font-weight: 700; font-size: .6875rem; letter-spacing: .02em; color: var(--muted); }
+.hqx-mark5 { width: 32px; height: 32px; display: inline-grid; place-items: center; flex: none; border-radius: 4px; font-weight: 800; font-size: 1.0625rem; line-height: 1;
+  background: var(--fill); color: var(--ink-2); }
+.hqx-mark5.w { background: color-mix(in srgb, var(--win) 18%, transparent); color: var(--win-ink); }
+.hqx-mark5.l { background: color-mix(in srgb, var(--loss) 14%, transparent); color: var(--loss-ink); }
+.hqx-two { display: grid; gap: clamp(40px, 6vw, 64px); }
+@container pane (min-width: 720px) { .hqx-two { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px; } }
+/* two side-by-side sections whose cards must start on one line (commissioner, 2026-11-10: "these boxes are misaligned.
+   Can you make sure they are even?"). Each section's head and card sit on the pair's two shared rows (subgrid), so a head
+   with a sentence ("You are signed up") and one without ("Last three games") still start their cards level */
+@container pane (min-width: 720px) {
+  .hqx-pair { row-gap: 0; }
+  .hqx-pair > .hqx-block { display: grid; grid-row: span 2; grid-template-rows: subgrid; align-content: start; }
+  /* each part keeps its own height at the top of its row: the kickers and titles share a line, the cards start level,
+     and a three-row card never stretches into blank space to match a five-row one */
+  .hqx-pair > .hqx-block > * { align-self: start; }
+}
+.hqx-spec4 { margin-top: 20px; }
+@container pane (min-width: 620px) { .hqx-spec4 { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+/* =========================================== YOU =========================================== */
+/* the availability window: count in the headline, the countdown as the big number, progress under it */
+.hqx-due-r { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; }
+.hqx-due-r .hqx-meter { flex: 1 1 200px; max-width: 360px; }
+
+/* a night: the date block beside its games */
+.hqx-night { display: grid; gap: 10px; }
+@container pane (min-width: 520px) { .hqx-night { grid-template-columns: 64px minmax(0, 1fr); gap: 22px; align-items: start; } .hqx-night .hqx-date { padding-top: 10px; } }
+@container pane (max-width: 519px) { .hqx-night .hqx-date { display: flex; align-items: baseline; gap: 8px; } .hqx-night .hqx-date b { font-size: 1.75rem; order: -1; } }
+/* time columns are 52px: "10:10" is 49px and spilled into the gap of a 42 or 46px column (review 2026-10-20) */
+.hqx-g { display: grid; grid-template-columns: 52px 28px minmax(0, 1fr); gap: 10px 12px; align-items: center; }
+.hqx-g .grow { min-width: 0; }
+.hqx-g .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hqx-g .sub .hqx-tag { vertical-align: 1px; margin-left: 4px; }
+.hqx-g .hqx-av { grid-column: 1 / -1; }
+@container pane (min-width: 700px) { .hqx-g { grid-template-columns: 52px 28px minmax(0, 1fr) minmax(250px, auto); } .hqx-g .hqx-av { grid-column: auto; } }
+
+/* the answer: two halves of one control; the chosen half fills with its meaning */
+.hqx-av { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; border-radius: 13px; background: var(--fill-2); }
+.hqx-av-b { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 12px; border-radius: 10px;
+  font: 600 .875rem/1 var(--font); color: var(--ink-2); letter-spacing: -0.01em;
+  transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform var(--t-press) var(--ease-out); }
+.hqx-av-b svg { width: 16px; height: 16px; opacity: .5; transition: opacity 160ms ease; }
+@media (max-width: 359px) { .hqx-av-b { padding: 0 8px; gap: 4px; white-space: nowrap; } }   /* "Not available" wrapped at 320 */
+.hqx-av-b:active, .hqx-av-b.is-pressing { transform: scale(.96); }
+.hqx-av-b[aria-pressed="true"] svg { opacity: 1; }
+.hqx-av-b.yes[aria-pressed="true"] { background: var(--surface); color: var(--win-ink); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--win) 60%, transparent), var(--shadow-1); }
+.hqx-av-b.no[aria-pressed="true"] { background: var(--surface); color: var(--loss-ink); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--loss) 55%, transparent), var(--shadow-1); }
+
+
+/* season: who, the floor ring, the line as a scoreboard strip */
+.hqx-who { display: flex; align-items: center; gap: 14px; padding-bottom: 18px; margin-bottom: -16px; border-bottom: 1px solid var(--separator); color: var(--ink); min-width: 0; }
+.hqx-who-n { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+.hqx-who .grow { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.hqx-who-t { font-size: clamp(1.5rem, 3vw, 2rem); overflow-wrap: anywhere; }
+.hqx-ovr { display: grid; justify-items: end; flex: none; }
+.hqx-ovr b { font-size: clamp(2.5rem, 5vw, 3.5rem); }
+.hqx-ovr small { font: 700 .6875rem/1.4 var(--font); color: var(--muted); letter-spacing: .02em; }
+.hqx-floor-b { display: flex; align-items: center; gap: 24px 40px; flex-wrap: wrap; }
+.hqx-ring { position: relative; flex: none; width: 168px; height: 168px; }
+.hqx-ring-c { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 4px; }
+.hqx-ring-c b { font-size: 3.25rem; }
+.hqx-ring-c small { font: 600 .75rem/1.25 var(--font); letter-spacing: 0; color: var(--muted); }
+.hqx-floor-spec { flex: 1 1 260px; max-width: 420px; }
+.hqx-line-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; border-top: 2px solid var(--ink); }
+.hqx-line-strip > div { padding: 14px 12px 14px 0; border-bottom: 1px solid var(--separator); min-width: 0; }
+.hqx-line-strip dt { font: 700 .6875rem/1 var(--font); letter-spacing: .02em; color: var(--muted); }
+.hqx-line-strip abbr { text-decoration: none; }
+.hqx-line-strip dd { margin: 8px 0 0; font-size: clamp(2rem, 4vw, 2.75rem); overflow-wrap: anywhere; }
+@container pane (min-width: 620px) { .hqx-line-strip { grid-template-columns: repeat(6, minmax(0, 1fr)); } .hqx-line-strip > div { border-bottom: 0; } }
+.hqx-checklist .hqx-ck { align-items: flex-start; }
+.hqx-checklist .hqx-ck > .chev { align-self: center; }   /* chevrons centered, as in Last three games beside it */
+.hqx-ck-i { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; flex: none; margin-top: 1px;
+  background: color-mix(in srgb, var(--win) 16%, transparent); color: var(--win-ink); }   /* the -ink twin clears 3:1; white on --win did not */
+.hqx-ck-i svg { width: 14px; height: 14px; stroke-width: 2.6; }
+.hqx-ck-t { font: 500 .9375rem/1.35 var(--font); color: var(--ink); }
+.hqx-lg { display: grid; grid-template-columns: 32px 28px minmax(0, 1fr) 8px; gap: 10px 12px; align-items: center; }
+.hqx-lg .grow { display: grid; gap: 1px; min-width: 0; }
+.hqx-lg .title, .hqx-lg .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hqx-line { grid-column: 3; grid-row: 2; font-size: .8125rem; color: var(--ink-2); margin-top: -6px; }
+.hqx-lg .chev { grid-column: 4; grid-row: 1 / span 2; }
+
+/* inbox */
+.hqx-msg { align-items: flex-start; }
+.hqx-msg-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.hqx-from { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 .9375rem/1.3 var(--font); color: var(--ink-2); }
+.hqx-msg.is-unread .hqx-from { color: var(--ink); font-weight: 600; }
+.hqx-msg-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .9375rem; }
+.hqx-msg-tl { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.hqx-msg-tl .hqx-msg-t { flex: 0 1 auto; min-width: 0; }
+.hqx-dcrow .hqx-tag { justify-self: start; margin: 4px 0 3px; }
+.hqx-msg.is-unread .hqx-msg-t { font-weight: 600; }
+.hqx-msg .sub { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.hqx-when { flex: none; }
+.hqx-dot { width: 9px; height: 9px; margin-top: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+.hqx-dot.off { background: transparent; }
+.hqx-sheet-msg { display: grid; gap: 12px; justify-items: start; padding-bottom: 8px; }
+.hqx-sheet-msg p { margin: 0; }
+.hqx-sheet-msg .hqx-actions { margin-top: 4px; }
+
+/* applications */
+.hqx-form { display: grid; gap: 14px; padding-bottom: 6px; }
+.hqx-form textarea.input { resize: vertical; min-height: 96px; }
+.hqx-form .hqx-actions { margin-top: 4px; }   /* the grid's 14px gap plus 4px, not 32px under the last line */
+
+/* settings */
+.hqx-themes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.hqx-theme { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; min-height: 60px; padding: 12px 14px; border-radius: var(--r-sm);
+  background: var(--surface); box-shadow: var(--shadow-1); text-align: left; color: var(--ink);
+  transition: box-shadow 160ms ease, transform var(--t-press) var(--ease-out); }
+.hqx-theme:active { transform: scale(.97); }
+.hqx-theme > svg { width: 22px; height: 22px; color: var(--ink-2); }
+.hqx-theme[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--accent), var(--shadow-1); }
+.hqx-radio { width: 20px; height: 20px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--faint); transition: box-shadow 160ms ease; }
+.hqx-theme[aria-pressed="true"] .hqx-radio { box-shadow: inset 0 0 0 6px var(--accent); }
+.hqx-tick { color: var(--accent-ink); display: grid; }
+.hqx-tick svg { width: 20px; height: 20px; stroke-width: 2.4; }
+.hqx-signout { justify-content: center; color: var(--loss-ink); font-weight: 500; }
+.hqx-joinsteps { margin: 0 0 18px; padding-left: 20px; display: grid; gap: 10px; color: var(--ink-2); }
+.hqx-joinsteps b { color: var(--ink); font-weight: 600; }
+.hqx-join-b { width: 100%; }
+
+/* ===================================== GUEST: the join page ===================================== */
+.hqx-jhero { gap: 20px; padding-bottom: clamp(36px, 6vw, 64px); justify-items: start; }
+.hqx-jhero .lede-l b { font-weight: 600; }
+.hqx-jcta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+@media (max-width: 559px) { .hqx-jcta { width: 100%; } .hqx-jcta .btn { flex: 1 1 100%; } }   /* full-width doors under the thumb */
+.hqx-jhero .hqx-fine { margin-top: 0; }
+/* the clubs' crests are the imagery (ruling: type and crests only), set as a club bar between hairlines */
+.hqx-clubbar { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--separator); border-bottom: 1px solid var(--separator); }
+.hqx-clubbar a { display: grid; place-items: center; min-height: 88px; padding: 14px 0; transition: transform var(--t-press) var(--ease-out); }
+.hqx-clubbar a:active { transform: scale(.95); }
+@media (min-width: 760px) { .hqx-clubbar { grid-template-columns: repeat(8, minmax(0, 1fr)); } .hqx-clubbar a { min-height: 112px; } .hqx-clubbar .crest.lg { width: 64px; height: 64px; } }
+.hqx-jsec, .hqx-jcal { margin-top: clamp(56px, 9vw, 112px); }
+.hqx-jsec + .hqx-jcal { margin-top: clamp(56px, 9vw, 112px); }
+.hqx-jcal + .hqx-jsec { margin-top: clamp(56px, 9vw, 112px); }
+/* the three steps, as a Lift lineup: kicker, name, one sentence, a spec grid, an arrow that goes somewhere */
+.hqx-steps3 { grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); }
+/* review 2026-10-20: the specs sat at each card's foot (margin-top: auto), so their hairlines landed at three heights;
+   the cards now share five rows (kicker, name, sentence, spec, arrow) through subgrid */
+.lineup > .hqx-lu { display: grid; grid-row: span 5; grid-template-rows: subgrid; gap: 14px; padding: clamp(22px, 3vw, 30px); }
+/* inside a spec grid, each label and value pair shares its rows, so a label that wraps never drops its neighbor's value */
+.hqx-lu .spec > div, .hqx-floor-spec > div, .hqx-spec4 > div { display: grid; grid-row: span 2; grid-template-rows: subgrid; row-gap: 0; }
+.hqx-lu .spec, .hqx-floor-spec, .hqx-spec4 { align-content: start; }   /* a spec stretched by a taller neighbor keeps its rows tight */
+.hqx-lu-t { font-size: clamp(1.875rem, 3.4vw, 2.5rem); }
+.hqx-lu .t-sub { color: var(--ink-2); }
+.hqx-lu .arrow { align-self: start; justify-self: start; }
+/* the Season 2 dates on an ink band (Juventus' "next match"): big condensed dates over their meaning */
+.hqx-cal { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--separator); }
+.hqx-cal li { display: grid; gap: 8px; align-content: start; padding: 22px 16px 22px 0; border-bottom: 1px solid var(--separator); min-width: 0; }
+.hqx-cal b { font-size: clamp(2.5rem, 6vw, 4.5rem); color: var(--ink); }
+.hqx-cal-l { font: 600 1rem/1.3 var(--font); color: var(--ink); }
+@media (min-width: 900px) { .hqx-cal { grid-template-columns: repeat(4, minmax(0, 1fr)); } .hqx-cal li { border-bottom: 0; } .hqx-cal li + li { padding-left: 24px; border-left: 1px solid var(--separator); } }
+/* league office: editorial link rows; on a wide screen the head sits beside them (asymmetric, not one centered column) */
+@media (min-width: 1000px) { .hqx-office { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 56px; align-items: start; } .hqx-office .sec-head { position: sticky; top: calc(var(--nav-h) + 32px); } }
+.hqx-links { border-top: 2px solid var(--ink); }
+.hqx-link { display: flex; align-items: center; gap: 16px; min-height: 76px; padding: 18px 0; border-bottom: 1px solid var(--separator); color: var(--ink); transition: opacity 120ms ease; }
+.hqx-link:active { opacity: .6; }
+.hqx-link .grow { flex: 1; min-width: 0; display: grid; gap: 6px; }
+.hqx-link .d-3 { font-size: clamp(1.5rem, 3vw, 2.25rem); }
+.hqx-link > svg { width: 22px; height: 22px; flex: none; transition: transform 200ms var(--ease-out); }
+
+/* ========================================= TEAM HQ ========================================= */
+/* the next night on an ink match-center panel: date block, headline with the count, the countdown, the three sheets */
+.hqx-mc { display: grid; gap: 20px; padding: clamp(22px, 3.5vw, 36px); border-radius: var(--r-xs); background: var(--ink-band); color: var(--ink); box-shadow: inset 0 0 0 1px var(--hairline); }   /* the hairline keeps its edge on the black dark-mode canvas */
+@media (max-width: 899px) {   /* on a phone the panel runs edge to edge, as a band */
+  .hqx-mc { border-radius: 0; margin-left: calc(-1 * max(var(--gutter), env(safe-area-inset-left))); margin-right: calc(-1 * max(var(--gutter), env(safe-area-inset-right)));
+    padding-left: max(var(--gutter), env(safe-area-inset-left)); padding-right: max(var(--gutter), env(safe-area-inset-right)); }
+}
+.hqx-ink-h { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 16px 24px; }
+.hqx-ink-h .hqx-date b { font-size: 3.5rem; }
+.hqx-ink-copy { flex: 1 1 240px; display: grid; gap: 10px; min-width: 0; }
+.hqx-mc .hqx-plan-l { border-top: 1px solid var(--separator); }
+.hqx-mc .hqx-plan-r { padding-left: 0; padding-right: 0; }
+.hqx-mc .hqx-plan-r::before { left: 0; }
+/* opponents' crests on the white disc of the band's medallion: on near black, Detroit's wheel and Dallas's star went dim */
+.hqx-mc .hqx-plan-r > .crest { background: #fff; border-radius: 50%; padding: 3px; box-sizing: border-box; }
+.hqx-ink-f { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: -8px; }
+.hqx-plan-r { display: grid; grid-template-columns: 52px 28px minmax(0, 1fr) auto 8px; gap: 10px 12px; align-items: center; min-height: 68px; }
+.hqx-plan-r .grow { display: grid; gap: 2px; min-width: 0; }
+.hqx-plan-r .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* a phone lets the game wrap to a second line rather than cut the opponent ("vs New Y...", audit 2026-11-09) */
+@media (max-width: 559px) { .hqx-plan-r .title { white-space: normal; overflow: visible; text-wrap: balance; } }
+.hqx-plan-s { display: grid; justify-items: end; gap: 7px; }
+.hqx-dots { display: flex; gap: 3px; }
+.hqx-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--fill); transition: background-color 200ms ease; }
+.hqx-dots i.on { background: var(--ink-2); }   /* neutral in every finish: gold and ember accents read as Draft and Not filed (review 2026-10-20) */
+@media (max-width: 430px) { .hqx-plan-r { grid-template-columns: 52px minmax(0, 1fr) auto 8px; } .hqx-plan-r > .crest { display: none; } }
+
+.hqx-bars { display: grid; }
+.hqx-ready-r { display: grid; gap: 7px; padding: 14px 0; border-top: 1px solid var(--separator); }
+.hqx-ready-r:last-child { border-bottom: 1px solid var(--separator); }
+.hqx-ready-t { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.hqx-ready-t .hqx-b { flex: none; white-space: nowrap; }   /* "4 of 19" stays whole beside a long label */
+.hqx-ap { flex-wrap: wrap; gap: 10px 14px; }
+.hqx-ap .grow { flex: 1 1 220px; }
+.hqx-ap-b, .hqx-ap-done { display: flex; gap: 8px; align-items: center; flex: none; }
+/* form: the Standings marks (league.css .lg-form), 8px squares read oldest first, so a club's form looks the same on
+   every page */
+.hqx-last5 { display: flex; align-items: center; gap: 12px; }
+.hqx-last5-m { display: inline-flex; gap: 3px; }
+.hqx-last5-m i { width: 8px; height: 8px; border-radius: 2px; background: var(--faint); }
+.hqx-last5-m i.w { background: var(--win); }
+.hqx-last5-m i.l { background: var(--loss); }
+
+/* cap: the room in the headline, then one bar split active / camp / room */
+.hqx-capbar { display: flex; gap: 2px; height: 12px; margin: 0 0 12px; border-radius: 3px; background: var(--fill); overflow: hidden; }
+.hqx-capbar span { display: block; height: 100%; }
+.hqx-capbar .a { background: var(--accent); }
+/* --hqx-tint: lighter steps of the accent sink toward the gray canvas in light mode; on the black dark canvas they lift
+   toward white instead, or D and G went near black (review 2026-10-20) */
+:root { --hqx-tint: var(--canvas); }
+[data-theme="dark"] { --hqx-tint: #fff; }
+.hqx-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font: 400 .8125rem/1.3 var(--font); color: var(--muted); }
+.hqx-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.hqx-legend b { color: var(--ink); font-weight: 600; }
+.hqx-legend i { width: 10px; height: 10px; border-radius: 2px; }
+.hqx-legend i.a { background: var(--accent); }
+.hqx-legend i.c { background: var(--fill); box-shadow: inset 0 0 0 1px var(--hairline); }
+
+/* the Season 2 gauge: twelve places (more only for a club over the limit), the limit marker, three minimums (v4.52: one
+   limit all season, so the Before/After the draft switch and the marker's spring are gone) */
+.hqx-gauge { position: relative; padding-top: 24px; }
+.hqx-cells { display: grid; grid-template-columns: repeat(var(--n, 15), minmax(0, 1fr)); gap: 3px; }
+.hqx-cell { height: 34px; border-radius: 3px; background: var(--fill); transition: box-shadow 220ms ease, background-color 220ms ease; }
+.hqx-cell.F, .hqx-key.F { background: var(--accent); }
+.hqx-cell.D, .hqx-key.D { background: color-mix(in srgb, var(--accent) 58%, var(--hqx-tint)); }
+.hqx-cell.G, .hqx-key.G { background: color-mix(in srgb, var(--accent) 28%, var(--hqx-tint)); }
+.hqx-cell.over { box-shadow: inset 0 0 0 2.5px var(--loss); }
+.hqx-mark { position: absolute; left: 0; top: 0; bottom: -5px; width: 2px; margin-left: -2px; border-radius: 1px; background: var(--ink); will-change: transform; }
+.hqx-mark span { position: absolute; right: 6px; top: -1px; white-space: nowrap; color: var(--ink-2); font-weight: 600; }
+.hqx-gauge-t { margin: 18px 0 18px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.hqx-gauge-t .d-num { font-size: clamp(2.5rem, 5vw, 3.25rem); }
+.hqx-mins { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.hqx-min { position: relative; display: grid; gap: 4px; align-content: start; padding: 12px 0 0; border-top: 2px solid var(--ink); }
+.hqx-min-n { display: flex; align-items: center; gap: 8px; }
+.hqx-min-n .d-num { font-size: 2rem; }
+.hqx-min-l { display: grid; }
+.hqx-min-l > span { white-space: nowrap; }
+.hqx-key { width: 10px; height: 10px; border-radius: 2px; }
+.hqx-min-i { position: absolute; right: 0; top: 14px; display: grid; }
+.hqx-min-i svg { width: 18px; height: 18px; stroke-width: 2.4; }
+.hqx-min.ok .hqx-min-i { color: var(--win-ink); }
+.hqx-min.short { border-top-color: var(--loss); }
+.hqx-min.short .hqx-min-i { color: var(--loss-ink); }
+/* before the draft the minimums are not in force yet: a quiet rule, no verdict (QA visual 35, 2026-11-25) */
+.hqx-min.pre { border-top-color: var(--separator); }
+
+/* ledger: rink order; floor progress; salary */
+.hqx-led-sec { display: grid; gap: 0; }
+.hqx-led-sec + .hqx-led-sec { margin-top: 22px; }
+.hqx-led-none { margin: 0; }
+/* the Season 1 camp section says once that it stands in for the league pool (Season 2 has no club camps) */
+.hqx-led-note { margin: -4px 0 10px; max-width: 60ch; }
+.hqx-led-h { display: flex; align-items: baseline; }
+.hqx-led-h .hqx-group-h { flex: 1; min-width: 0; }
+.hqx-led-col { display: none; }
+.hqx-led { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto 8px; grid-template-areas: "num main sal chev" "num floor floor chev"; gap: 4px 10px; align-items: center; }
+.hqx-num { grid-area: num; font-size: 1.375rem; color: var(--ink-2); text-align: center; }
+.hqx-led-main { grid-area: main; display: grid; gap: 1px; min-width: 0; }
+/* the tag and its seat mark are siblings: a long tag ellipsizes and the Owner, GM or AGM mark stays in view */
+.hqx-led-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.hqx-led-tag { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hqx-led-floor { grid-area: floor; display: flex; align-items: center; gap: 8px; }
+.hqx-led-sal { grid-area: sal; font-size: .9375rem; color: var(--ink); text-align: right; }
+.hqx-led .chev { grid-area: chev; }
+.hqx-mini { flex: 1; max-width: 120px; height: 5px; border-radius: 3px; background: var(--fill); overflow: hidden; }
+.hqx-mini i { display: block; height: 100%; border-radius: 3px; background: color-mix(in srgb, var(--accent) 55%, var(--surface)); }
+.hqx-mini.done i { background: var(--accent); }
+@container pane (min-width: 640px) {
+  /* the column labels line up with the row's floor and salary columns, counted from the right edge (16px padding, the
+     8px chevron, 10px gaps) */
+  .hqx-led-h { display: grid; grid-template-columns: minmax(0, 1fr) 150px 84px 8px; gap: 10px; padding-right: 16px; margin-bottom: 10px; }
+  .hqx-led-h .hqx-group-h { margin: 0; }
+  .hqx-led-col { display: block; font: 600 .8125rem/1.3 var(--font); letter-spacing: -0.006em; color: var(--muted); }
+  .hqx-led-col:last-child { text-align: right; grid-column: 3; }
+  .hqx-led { grid-template-columns: 40px minmax(0, 1fr) 150px 84px 8px; grid-template-areas: "num main floor sal chev"; }
+}
+
+/* availability grid */
+.hqx-gridwrap { border-radius: var(--r-sm); }
+.hqx-grid th, .hqx-grid td { padding: 9px 8px; }
+.hqx-grid thead th { vertical-align: bottom; text-align: center; text-transform: none; letter-spacing: 0; }
+.hqx-grid thead th:first-child { text-align: left; text-transform: uppercase; letter-spacing: .02em; vertical-align: bottom; }
+.hqx-gh { display: inline-grid; justify-items: center; gap: 3px; font: 600 .75rem/1.2 var(--font); color: var(--ink-2); }
+.hqx-gh .num { font-weight: 500; color: var(--muted); }
+.hqx-grid tbody th, .hqx-grid tfoot th { position: sticky; left: 0; z-index: 1; top: auto; background: var(--surface); text-align: left; text-transform: none; letter-spacing: -0.01em;
+  font: 400 .875rem/1.3 var(--font); color: var(--ink); border-bottom: 1px solid var(--separator); max-width: 170px; }
+.hqx-grid tfoot th, .hqx-grid tfoot td { border-top: 1px solid var(--separator); border-bottom: 0; font-weight: 600; }
+.hqx-grid td { text-align: center; }
+/* 320: the table was 325px in a 288px wrapper and the third game was cut at the edge (review 2026-10-20) */
+@media (max-width: 359px) { .hqx-grid th, .hqx-grid td { padding: 9px 4px; } .hqx-grid tbody th, .hqx-grid tfoot th { max-width: 112px; } .hqx-gh .crest { width: 22px; height: 22px; } }
+.hqx-gname { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 6px; }
+.hqx-gnum { color: var(--muted); font-size: .8125rem; text-align: right; }
+.hqx-gtag { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* phone: the position goes under the tag, so the tag gets the whole column */
+@media (max-width: 559px) {
+  .hqx-gname { grid-template-columns: 24px minmax(0, 1fr); row-gap: 0; }
+  .hqx-gnum { grid-row: 1 / span 2; }
+  .hqx-gname > .t-foot { grid-column: 2; }
+}
+.hqx-grp th { background: var(--surface-2) !important; font: 600 .6875rem/1 var(--font) !important; color: var(--muted) !important; letter-spacing: .02em !important; text-transform: uppercase !important; padding-top: 10px; padding-bottom: 8px; }
+.hqx-a { width: 28px; height: 28px; border-radius: 50%; display: inline-grid; place-items: center; }
+.hqx-a svg { width: 15px; height: 15px; stroke-width: 2.4; }
+.hqx-a.yes { background: color-mix(in srgb, var(--win) 16%, transparent); color: var(--win-ink); }
+.hqx-a.no { background: color-mix(in srgb, var(--loss) 13%, transparent); color: var(--loss-ink); }
+.hqx-a.none { box-shadow: inset 0 0 0 1.5px var(--separator); }
+.hqx-ice { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+.hqx-ice svg { width: 14px; height: 14px; stroke-width: 2.6; }
+.hqx-ice.ok { background: color-mix(in srgb, var(--win) 16%, transparent); color: var(--win-ink); }
+.hqx-ice.short { background: color-mix(in srgb, var(--loss) 13%, transparent); color: var(--loss-ink); }
+.hqx-grid tfoot td .t-foot { display: block; margin-top: 3px; font-weight: 400; }
+
+
+/* ===================================== the lineup sheet ===================================== */
+.sheet.hqx-sheet .sheet-b { padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+.sheet.hqx-lineup .sheet-b, .sheet.hqx-footed .sheet-b { padding-bottom: 16px; }
+.hqx-sh-foot { flex: none; display: grid; gap: 8px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--separator); }
+.hqx-sh-foot .hqx-actions { margin-top: 0; }
+.hqx-sh-foot .hqx-err { margin: 0; }
+.hqx-sh-foot:not(:has(button)):not(:has(.hqx-err:not(:empty))) { display: none; }
+.hqx-sh { display: grid; gap: 14px; }
+.hqx-sh-st { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--hairline); }
+.hqx-sh-st > svg, .hqx-sh-st .hqx-tile { width: 20px; height: 20px; flex: none; margin-top: 1px; color: var(--muted); display: grid; place-items: center; }
+.hqx-sh-st .hqx-tile svg { width: 20px; height: 20px; }
+.hqx-sh-st.warn .hqx-tile { color: var(--warn-ink); }
+.hqx-sh-st .grow { display: grid; gap: 2px; min-width: 0; }
+.hqx-sh-st.warn { background: color-mix(in srgb, var(--warn) 10%, var(--surface)); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+/* the lineup-deadline forfeit, the club counter and the camp request door (2026-11-24) */
+.hqx-sh-st.bad .hqx-tile { color: var(--loss-ink); }
+.hqx-sh-st.bad { background: color-mix(in srgb, var(--loss) 10%, var(--surface)); border-color: color-mix(in srgb, var(--loss) 35%, transparent); }
+.hqx-own { margin: 10px 0 0; font: 600 .9375rem/1.3 var(--font); color: var(--ink-2); }
+.hqx-own b { color: var(--ink); }
+.hqx-own.is-short, .hqx-own.is-short b { color: var(--loss-ink); }
+.hqx-pooled { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 8px; }
+.hqx-pooled .t-foot { flex: 1 1 260px; margin: 0; }
+
+/* the rink: forwards, defense, goal; empty spots are dashed outlines of the position */
+.hqx-rink { position: relative; display: grid; gap: 10px; padding: 14px 10px 34px; border-radius: var(--r-lg); background: var(--surface-2); border: 1px solid var(--hairline); }
+.hqx-rink::after { content: ""; position: absolute; left: 50%; bottom: -1px; width: 38%; height: 26px; transform: translateX(-50%); border: 2px solid var(--separator); border-bottom: 0; border-radius: 60px 60px 0 0; }
+.hqx-rink-row { position: relative; z-index: 1; display: grid; gap: 8px; }
+.hqx-rink-row.f { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.hqx-rink-row.f::after { content: ""; position: absolute; left: 4px; right: 4px; bottom: -6px; border-top: 2px solid var(--separator); }   /* the blue line, under however tall the forwards grow */
+.hqx-rink-row.d { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 70%; margin: 0 auto; }
+.hqx-rink-row.g { grid-template-columns: minmax(0, 1fr); width: 36%; min-width: 120px; margin: 0 auto; }
+.hqx-slot { position: relative; min-height: 84px; display: grid; place-items: stretch; padding: 0; border-radius: 14px; border: 1.5px dashed var(--faint); background: transparent;
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease, transform var(--t-press) var(--ease-out); }
+.hqx-slot:active:not(:disabled) { transform: scale(.97); }
+.hqx-slot.is-full { border-color: transparent; touch-action: none; }
+.hqx-slot.is-over { border-color: var(--accent); border-style: solid; background: var(--accent-soft); }
+.hqx-slot.is-sel .hqx-slot-card { box-shadow: 0 0 0 2.5px var(--accent), var(--shadow-1); }
+.hqx-slot-pos { position: absolute; z-index: 2; left: 8px; top: 7px; font: 800 .875rem/1 var(--font-brand); font-stretch: 75%; font-variation-settings: "wdth" 75; letter-spacing: .04em; color: var(--muted); }
+.hqx-slot-empty { align-self: end; padding: 0 6px 10px; font: 500 .75rem/1.2 var(--font); color: var(--muted); text-align: center; }
+.hqx-slot-card { display: grid; align-content: center; justify-items: center; gap: 1px; padding: 18px 6px 8px; border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1);
+  min-width: 0; text-align: center; transition: box-shadow 160ms ease, opacity 160ms ease; }
+.hqx-slot-n { font-size: .75rem; color: var(--muted); }
+/* tags first wrapped to two lines instead of cutting at seven characters, so two tags with a shared prefix stayed
+   distinct; but the wrap broke them mid-word ("SadlyiClxm / p", "FigurItOwt / 25", review 2026-10-20). Now one line with
+   an ellipsis, as the grid and the ledger cut a tag, with the whole tag in the title and the aria-label; the number
+   beside it tells two shared prefixes apart */
+.hqx-slot-tag { max-width: 100%; display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font: 600 .875rem/1.25 var(--font); color: var(--ink); letter-spacing: -0.01em; }
+.hqx-slot-sub { font: 500 .6875rem/1.2 var(--font); color: var(--muted); }
+.hqx-flags { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; margin-top: 3px; }
+.hqx-flag { font: 600 .625rem/1 var(--font); padding: 3px 6px; border-radius: 999px; background: var(--fill); color: var(--ink-2); }
+.hqx-flag.warn { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--warn-ink); }
+.hqx-flag.loss { background: color-mix(in srgb, var(--loss) 16%, transparent); color: var(--loss-ink); }
+.hqx-sh-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin-top: -4px; }
+.hqx-hint { margin: 0; flex: 1 1 200px; }
+.hqx-sh-tb { display: flex; gap: 4px; flex: none; }
+
+.hqx-bench { display: grid; gap: 12px; border-radius: var(--r-md); transition: background-color 160ms ease, box-shadow 160ms ease; }
+.hqx-bench.is-target, .hqx-bench.is-over { background: var(--fill-2); box-shadow: 0 0 0 8px var(--fill-2); }
+.hqx-bench-g { display: grid; gap: 7px; }
+.hqx-bench-g h4 { margin: 0; }
+.hqx-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); gap: 6px; }
+.hqx-chip { display: grid; padding: 0; border-radius: 12px; text-align: left; transition: transform var(--t-press) var(--ease-out); }
+.hqx-chip:active:not(:disabled) { transform: scale(.97); }
+.hqx-chip-in, .hqx-ghost { display: grid; grid-template-columns: 22px 22px minmax(0, 1fr) auto; align-items: center; gap: 6px; min-height: 50px; padding: 6px 10px 6px 2px;
+  border-radius: 12px; background: var(--surface); border: 1px solid var(--hairline); min-width: 0; transition: border-color 160ms ease, background-color 160ms ease, opacity 160ms ease; }
+.hqx-chip.is-sel .hqx-chip-in { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); }
+.hqx-chip.is-no .hqx-chip-t { color: var(--ink-2); }
+.hqx-grip { position: relative; display: grid; place-items: center; align-self: stretch; color: var(--faint); cursor: grab; touch-action: none; margin: -6px 0; }
+.hqx-grip::before { content: ""; position: absolute; top: 0; bottom: 0; left: -3px; width: 44px; }   /* a 44px finger target; the glyph stays 18px */
+.hqx-grip svg { width: 18px; height: 18px; }
+.hqx-chip-n { font-size: .8125rem; color: var(--muted); text-align: right; }
+.hqx-chip-m { display: grid; gap: 1px; min-width: 0; }
+.hqx-chip-t { font: 600 .875rem/1.2 var(--font); color: var(--ink); display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; letter-spacing: -0.01em; }
+.hqx-chip-s { font: 400 .75rem/1.2 var(--font); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hqx-chip-r { display: grid; justify-items: end; gap: 3px; }
+.hqx-adot { width: 9px; height: 9px; border-radius: 50%; }
+.hqx-adot.yes { background: var(--win); }
+.hqx-adot.no { background: var(--loss); }
+.hqx-adot.none { box-shadow: inset 0 0 0 1.5px var(--faint); }
+.hqx-hist { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--separator); }
+.hqx-hist h4 { margin: 0; }
+.hqx-hist ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.hqx-hist li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.hqx-hist li .t-foot { min-width: 104px; }
+
+/* drag: the lifted card leaves a faint place behind; the ghost follows the finger 1:1 */
+.is-lifted { opacity: .3; }
+.is-flying { position: relative; z-index: 2; will-change: transform; }
+/* QA motion 16 (2026-11-25): the ghost lifts once, from the pressed card's .97 to 1.04 with its shadow, instead of popping
+   7% larger in one frame; lineups.js moves it with the translate property, so this scale never touches the 1:1 tracking */
+.hqx-ghost { position: fixed; left: 0; top: 0; z-index: 200; margin: 0; pointer-events: none; box-shadow: var(--shadow-2); scale: 1.04; will-change: translate, scale; transform-origin: 30% 50%;
+  transition: scale 150ms var(--ease-out), box-shadow 150ms var(--ease-out); }
+@starting-style { .hqx-ghost { scale: .97; box-shadow: var(--shadow-1); } }
+.hqx-ghost.hqx-slot-card { display: grid; grid-template-columns: none; padding: 18px 6px 8px; border: 0; }
+.hqx-ghost .hqx-grip { cursor: grabbing; }
+
+/* ---- Trades (2026-10-19): offers, requests and the block are lists with their answers beside them, like Approvals ---- */
+.hqx-tgrp + .hqx-tgrp { margin-top: 22px; }
+.hqx-off .sub b { font-weight: 600; }
+.hqx-bl-main { min-width: 0; color: inherit; text-decoration: none; }
+.hqx-bl > .crest { flex: none; }
+.hqx-req .sub { white-space: normal; overflow-wrap: anywhere; }
+.hqx-reply { color: var(--ink-2); }
+/* List a player: the row's action reads as a control, not a muted label (review 2026-10-20) */
+.hqx-add { display: inline-flex; align-items: center; gap: 4px; flex: none; font: 600 .8125rem/1 var(--font); color: var(--accent-ink); }
+.hqx-add svg { width: 14px; height: 14px; }
+.hqx-num-s { width: 26px; flex: none; text-align: center; color: var(--muted); }
+@media (hover: hover) and (pointer: fine) { .hqx-bl-main:hover .title { color: var(--accent-ink); } }
+@media (max-width: 559px) { .hqx-ap-b { flex-wrap: wrap; } }
+.hqx-offer, .hqx-rev, .hqx-dc { display: grid; gap: 16px; padding-bottom: 8px; }
+.hqx-offer > p, .hqx-rev > p, .hqx-dc > p { margin: 0; }
+.hqx-offer .hqx-actions, .hqx-rev .hqx-actions, .hqx-dc .hqx-actions { margin-top: 0; }
+.hqx-quote { padding: 2px 0 2px 14px; border-left: 2px solid var(--separator); font: 400 .9375rem/1.45 var(--font); color: var(--ink-2); }
+/* the trade check is part of the trade reading (css/trade.css) */
+.hqx-callout { display: grid; gap: 10px; padding: 14px 16px; border-radius: var(--r-sm); background: var(--fill-2); box-shadow: inset 3px 0 0 var(--loss); }
+.hqx-callout p { margin: 0; }
+.hqx-callout .hqx-actions { margin-top: 0; }
+
+/* ---- Forfeits (Overview, 2026-11-02): the no-show list, then the season's forfeits as sixteen cells against Rule 3.2's
+   ten (review) and sixteen (management); warn and loss tint only the cells past each threshold ---- */
+.hqx-ff .chev, .hqx-rs .chev { grid-row: 1; }
+.hqx-lg .hqx-ff-s { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; white-space: normal; }
+.hqx-ffm { display: grid; gap: 12px; margin-top: 24px; }
+.hqx-ffm-t { margin: 0; display: flex; align-items: baseline; gap: 12px; }
+.hqx-ffm-t .d-num { font-size: clamp(2.5rem, 5vw, 3.25rem); flex: none; }
+.hqx-ffm-t .t-sub { max-width: 60ch; }
+.hqx-ffm-g { display: grid; grid-template-columns: repeat(var(--n, 16), minmax(0, 1fr)); gap: 3px; row-gap: 8px; }
+.hqx-ffm-c { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; }
+.hqx-ffm-c i { height: 22px; border-radius: 3px; background: var(--fill); }
+.hqx-ffm-c i.on { background: var(--ink-2); }
+.hqx-ffm-c i.rv { box-shadow: inset 0 -3px 0 color-mix(in srgb, var(--warn) 70%, transparent); }
+.hqx-ffm-c i.rm { box-shadow: inset 0 -3px 0 var(--loss); }
+.hqx-ffm-c i.on.rv { background: var(--warn); } .hqx-ffm-c i.on.rm { background: var(--loss); }
+.hqx-ffm-k { grid-row: 2; justify-self: end; white-space: nowrap; font: 600 .6875rem/1.2 var(--font); letter-spacing: .02em; text-transform: uppercase; color: var(--warn-ink); }
+.hqx-ffm-k.rm { color: var(--loss-ink); }
+/* a club past sixteen draws more cells, and on a phone the two labels met (break-ui, Dallas at 18 at 320): stacked there */
+@media (max-width: 559px) { .hqx-ffm-k.rm { grid-row: 3; } }
+
+/* ---- Bidding (Season 2 preview, 2026-11-02) ---- */
+.hqx-bwrap { display: grid; gap: 12px; min-width: 0; }
+.hqx-bwrap > * { min-width: 0; }   /* the clock bar's buttons must not widen the ink panel (break-ui, 200% text) */
+/* the next bid night on the ink panel: the sentence under the headline, the strip of Saturdays, the doors */
+.hqx-ink-p { margin: 0; font: 400 .9375rem/1.5 var(--font); color: var(--ink-2); max-width: 60ch; }
+.hqx-live { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; color: var(--live-ink, var(--live)); }
+.hqx-live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--live); }
+.hqx-bn { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(108px, 1fr)); border-top: 1px solid var(--separator); }
+.hqx-bn li { display: grid; gap: 4px; align-content: start; padding: 14px 12px 4px 0; min-width: 0; }
+.hqx-bn li b { font-size: 1.625rem; color: var(--ink); }
+.hqx-bn li span { font: 600 .6875rem/1.3 var(--font); letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
+.hqx-bn li.cur b { color: var(--accent); }
+.hqx-bn li.cur span { color: var(--ink); }
+.hqx-bn li.off b, .hqx-bn li.held b { color: var(--muted); }
+.hqx-bn li.off b { text-decoration: line-through; text-decoration-thickness: 2px; text-decoration-color: var(--faint); }
+.hqx-bn-off { font-size: .8125rem; margin-top: -8px; }
+.hqx-ink-go { display: flex; flex-wrap: wrap; gap: 4px 24px; }
+.hqx-bstand { margin-top: 4px; }
+/* break-ui (200% text at 390): the countdown and the headline widened the panel's grid track past the page */
+.hqx-bh > *, .hqx-bh .hqx-ink-h > * { min-width: 0; }
+.hqx-bh .d-2 { overflow-wrap: anywhere; }
+/* the waiver list: crest, the player, the answer; on a phone the answer drops under the player instead of the player
+   dropping under the crest (break-ui, 320) */
+.hqx-wr { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 6px 12px; align-items: center; }
+.hqx-wr .grow { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 430px) { .hqx-wr { grid-template-columns: 28px minmax(0, 1fr); } .hqx-wr .hqx-ap-b { grid-column: 2; } }
+.hqx-bstand dd span + span { margin-left: 0; }
+
+/* the board: rank and grip at the left (the drag handle), the player, the ceiling stepper; the note and the moves under */
+.hqx-board { position: relative; }
+.hqx-bd { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; grid-template-areas: "h main step" "h foot foot"; gap: 10px 12px; align-items: center; background: var(--surface);
+  transition: box-shadow 200ms var(--ease-out), opacity 200ms ease; }
+.hqx-bd-h { grid-area: h; align-self: stretch; display: grid; grid-template-columns: 16px 1fr; align-items: center; gap: 2px; margin: -12px 0 -12px -12px; padding-left: 4px;
+  cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; }
+.hqx-bd-h .hqx-grip { margin: 0; }
+.hqx-bd-h .hqx-grip::before { display: none; }
+.hqx-bd-rank { font-size: 1.875rem; color: var(--ink); text-align: center; }
+.hqx-bd-main { grid-area: main; display: grid; gap: 3px; min-width: 0; }
+.hqx-bd-tag { font: 600 1rem/1.25 var(--font); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; justify-self: start; max-width: 100%; }
+.hqx-bd-main .sub { overflow-wrap: anywhere; }
+.hqx-bd-st { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+/* the Claim button keeps the kit's 34px .btn.sm: with its 5px ::after reach under a coarse pointer that is a 44px target
+   (review 2026-11-02: a 30px override left it at 40px, and a claim is a real action) */
+.hqx-bd.is-out .hqx-bd-rank, .hqx-bd.is-out .hqx-bd-tag { color: var(--muted); }
+/* the ceiling: minus, the amount, plus; exact $250K steps, no amount box (Rule S2.6) */
+.hqx-step { grid-area: step; display: inline-grid; grid-template-columns: 36px minmax(78px, auto) 36px; align-items: center; justify-self: end; padding: 3px; border-radius: 12px; background: var(--fill-2); }
+.hqx-step-b { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; font: 500 1.25rem/1 var(--font); color: var(--ink); background: var(--surface); box-shadow: var(--shadow-1);
+  transition: transform var(--t-press) var(--ease-out), opacity 160ms ease; }
+.hqx-step-b:active:not(:disabled) { transform: scale(.94); }
+.hqx-step-b:disabled { opacity: .35; box-shadow: none; background: transparent; }
+.hqx-step-v { display: grid; justify-items: center; gap: 1px; padding: 0 6px; }
+.hqx-step-v b { font-size: .9375rem; font-weight: 700; color: var(--ink); white-space: nowrap; }
+.hqx-step-v small { font: 600 .625rem/1 var(--font); letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
+.hqx-bd-foot { grid-area: foot; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.hqx-bd-note { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 10px; border-radius: 10px; background: var(--fill-2); cursor: text; }
+.hqx-bd-note > svg { width: 16px; height: 16px; flex: none; color: var(--faint); }
+.hqx-bd-note input { flex: 1; min-width: 0; border: 0; background: none; outline: none; padding: 0; color: var(--ink); font: 400 .875rem/1.3 var(--font); }
+.hqx-bd-note input::placeholder { color: var(--muted); }
+/* QA visual 21 (2026-11-25): the focused note was marked only by a 10% accent ring on its fill (about 1.1:1); it now takes
+   the site's own input focus, the accent edge with the soft halo (ui.css .input:focus) */
+.hqx-bd-note:focus-within { box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 0 4px var(--accent-soft); }
+.hqx-bd-acts { display: flex; gap: 2px; flex: none; }
+.hqx-ib { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; color: var(--ink-2); transition: transform var(--t-press) var(--ease-out), background-color 160ms ease, opacity 160ms ease; }
+.hqx-ib svg { width: 18px; height: 18px; }
+.hqx-ib:active:not(:disabled) { transform: scale(.94); background: var(--fill-2); }
+.hqx-ib:disabled { opacity: .3; }
+@media (pointer: coarse) { .hqx-step { grid-template-columns: 44px minmax(78px, auto) 44px; } .hqx-step-b, .hqx-ib { width: 44px; height: 44px; } .hqx-bd-note { min-height: 44px; } .hqx-bd-note input { font-size: 1rem; } }
+/* a phone: the stepper sits under the player, the note and the moves under that */
+@media (max-width: 559px) {
+  .hqx-bd { grid-template-columns: 44px minmax(0, 1fr); grid-template-areas: "h main" "h step" "foot foot"; }
+  .hqx-step { justify-self: start; }
+}
+/* the drag: the lifted row rides above the rest with the one soft shadow; the rows it passes spring aside */
+.hqx-bd.is-lifted-row { position: relative; z-index: 3; box-shadow: var(--shadow-2); transition: none; }
+.hqx-bd.is-lifted-row .hqx-bd-h { cursor: grabbing; }
+.hqx-bd.is-flying { position: relative; z-index: 2; will-change: transform; }
+.hqx-bd.is-thrown { z-index: 3; box-shadow: var(--shadow-2); }
+@media (hover: hover) and (pointer: fine) { .hqx-bd-h:hover .hqx-grip { color: var(--ink-2); } .hqx-ib:not(:disabled):hover { background: var(--fill-2); color: var(--ink); } }
+.hqx-plan-line { display: flex; align-items: baseline; gap: 14px; margin: 18px 0 0; padding-top: 16px; border-top: 2px solid var(--ink); }
+.hqx-plan-line .d-num { flex: none; font-size: clamp(2rem, 4vw, 2.75rem); color: var(--ink); }
+.hqx-plan-line span { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; font: 400 .9375rem/1.5 var(--font); color: var(--ink-2); max-width: 62ch; }
+.hqx-plan-line { flex-wrap: wrap; }   /* break-ui, 200% text: a long gamertag in the sentence pushed it off the page */
+.hqx-bd-none .t-sub { margin: 0; max-width: 60ch; }
+.hqx-res-t { margin: -4px 0 10px; }
+
+/* Add players: the pool as a list of toggles */
+.hqx-pool { display: grid; gap: 14px; }
+.hqx-pool > p { margin: 0; }
+.hqx-pool .hqx-tools { margin: 0; justify-content: flex-start; }
+.hqx-pool-h2 { margin-top: 18px; }
+.hqx-pr { gap: 12px; }
+.hqx-pr > .crest { flex: none; }
+.hqx-pr .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hqx-pr-on { display: inline-flex; align-items: center; gap: 4px; flex: none; font: 600 .8125rem/1 var(--font); color: var(--win-ink); }
+.hqx-pr-on svg, .hqx-pr .hqx-add svg { width: 14px; height: 14px; }
+.hqx-pr[aria-pressed="true"] { background: color-mix(in srgb, var(--win) 6%, var(--surface)); }
+
+.hqx-po-note { margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hqx-bd, .hqx-step-b, .hqx-ib { transition: opacity 160ms ease; }
+  .hqx-step-b:active, .hqx-ib:active { transform: none; }
+  .hqx-meter i, .hqx-cell, .hqx-dots i { transition: none; }
+  .hqx-av-b:active, .hqx-av-b.is-pressing, .hqx-slot:active, .hqx-chip:active, .hqx-theme:active, .hqx-medal:active, .hqx-clubbar a:active { transform: none; }
+  .hqx-nav-row::before, .hqx-link > svg { transition: none; }
+  .hqx-ghost { scale: 1; transition: none; }   /* lifted by its shadow alone */
+}
+/* the night's two lineup actions sit together and wrap as one group (File all lineups, audit 2026-11-09) */
+.hqx-plan-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+/* a game row's opponent: the full club name, or the city on a phone (hq.js vsHtml) */
+.hqx-vs-s { display: none; }
+@media (max-width: 559px) {
+  .hqx-vs-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+  .hqx-vs-s { display: inline; }
+}
+
+/* ---- Front office (Rule 2.6) and the night's server picks (Rule 4.2), 2026-11-23 ---- */
+.hqx-seats .row, .hqx-srv .row { flex-wrap: wrap; }
+.hqx-nom { display: grid; gap: 14px; }
+.hqx-nom .lg-search { max-width: none; }
+.hqx-srv-r { gap: 10px 16px; }
+.hqx-srv-g { display: flex; align-items: center; gap: 10px; min-width: 180px; flex: 1 1 180px; }
+.hqx-srv-g .t-foot { margin-left: auto; }
+.hqx-srv-c { display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); gap: 8px 10px; flex: 2 1 320px; }
+.hqx-srv-f { display: grid; gap: 4px; }
+.hqx-srv-f .input { min-height: 44px; font-size: 1rem; }   /* 16px: iOS does not zoom the page on focus */
+/* beats the kit's .row .grow (flex: 1 1 0%), so the frozen row wraps instead of squeezing the settled server to 30 px
+   (review 2026-11-23) */
+.hqx-srv .row .hqx-srv-s { flex: 2 1 260px; }
+@media (max-width: 559px) { .hqx-srv-c { grid-template-columns: 1fr; } }
+/* the live front office (e1, 2026-11-24): the Owner's permissions table. Row headers read as a page name over its one
+   line of scope, not as the table's small caps column labels; each cell is a segmented control that scrolls inside the
+   table's own wrap on a phone, never the page */
+.hqx-perm tbody th { position: static; text-align: left; text-transform: none; letter-spacing: 0; padding: 11px 10px 11px 16px;
+  border-bottom: 1px solid var(--separator); background: none; vertical-align: middle; min-width: 180px; white-space: normal; }
+.hqx-perm tbody tr:last-child th { border-bottom: 0; }
+.hqx-perm tbody th .title { display: block; font: 600 .875rem/1.3 var(--font); color: var(--ink); }
+.hqx-perm .t-foot { display: block; font-weight: 400; text-transform: none; letter-spacing: 0; white-space: normal; margin-top: 2px; }
+.hqx-perm td { text-align: left; vertical-align: middle; }
+.hqx-perm-seg button { padding: 7px 10px; white-space: nowrap; }
+.hqx-perm-a { align-items: center; }
+.hqx-apnote { box-shadow: inset 3px 0 0 var(--warn); margin-bottom: 18px; }   /* a GM's or AGM's page the Owner approves */

@@ -1,0 +1,18 @@
+/* Team HQ's lineup sheet (js/pages/lineups.js, v5.00 swap stream e2, 2026-11-24). Only the rules the sheet adds; every
+   rule it shares with the rest of Team HQ stays in hq.css (e1's). Loaded after hq.css. */
+
+/* the pane while the club's sheets are read, and the way back when they could not be */
+.hqx-lu-wait { margin: 12px 0 0; color: var(--ink-2); }
+.hqx-lu-retry { display: flex; justify-content: center; margin-top: 8px; }
+
+/* work not yet on file, and a filing waiting for the Owner: said under the status line, in the sheet's quiet voice */
+.hqx-lu-note { margin: 8px 0 0; color: var(--warn-ink, var(--ink-2)); }
+
+/* Save as a line: the slot and the name stack, with room for a thumb */
+.hqx-lusave { display: grid; gap: 12px; }
+.hqx-lusave .t-sub { margin: 0; }
+.hqx-lusave .hqx-actions { display: flex; justify-content: flex-end; }
+
+/* the night's line picker under the saved lines */
+.hqx-lu-night { margin-top: 12px; max-width: 320px; }
+@media (max-width: 560px) { .hqx-lu-night { max-width: none; } }

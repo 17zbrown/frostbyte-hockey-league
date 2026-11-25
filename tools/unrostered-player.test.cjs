@@ -130,7 +130,7 @@ function finish() {
   A("...playoff box scores are not reviewed, suspensions are checked everywhere", /Playoff box scores come from the same automatic record and are not put through this review/.test(body) && /Every game, playoffs included, is checked for a suspended player/.test(body));
   A("...covering the player the club does not hold", /neither its active roster nor its training camp/.test(body));
   A("...and the player who cannot be identified at all", /cannot be identified as a member at all/.test(body));
-  A("...and that it is referred, not ruled automatically", /referred to the department that owns it/.test(body));
+  A("...and that it is referred, not ruled automatically", /the league office is notified and the matter is referred to the league staff\./.test(body));
   A("...and points at Chapter 7 for the consequence", /Chapter 7/.test(body));
   /* v3.53 (audit F-4-5): the position check applies only where the lock is in force (lifted v3.40) */
   A("4.2 says positions are checked where the position lock is in force", /Where the position lock is in force \(Rule 2\.1\), a player on a club's active roster who appears in a box score at a position outside their position group/.test(body));

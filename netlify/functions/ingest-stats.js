@@ -21,7 +21,6 @@ export { normalizeMatch, mergeSegments, segElapsed, ingestOne };
 
 import { timingSafeEqual } from "node:crypto";
 import { matchInWindow, fixtureForMatch, describeWindow, FULL_GAME_CLOCK_S, GAME_WINDOW_BEFORE_MS, GAME_WINDOW_AFTER_MS } from "../../shared/game-window.cjs";
-import { noLinkPreviews } from "../../shared/discord-links.cjs";
 import { eaRelay } from "../../shared/ea-relay.cjs";
 
 const SB_URL = process.env.SUPABASE_URL;
@@ -1422,18 +1421,25 @@ async function isCommissioner(jwt) {
   } catch { return false; }
 }
 
-// Statistics staff (or a commissioner) — the same set the Stats Manager page is gated to.
+/* Statistics staff (or a commissioner): the same set the Stats Manager page is gated to. v463: one definition, staffActor
+   (it also refuses a banned member, which this used not to). */
 async function isStatsStaff(jwt) {
+  return (await staffActor(jwt)).ok;
+}
+
+/* v463 (Season 2 flip, commissioner 2026-10-19 and 2026-11-23: no departments, every staffer does any staff work): the
+   database answers whether this member holds the statistics key, under their own JWT (rpc/is_stats_staff asks
+   has_department, which the staff powers record points at profile_has_department). Before that record applies it
+   answers by the departments column, after it every staff member who is not banned or suspended from staff duties,
+   and back again if it is reversed: the importer desk and the Stats manager RPCs never disagree. Fails closed, loudly. */
+async function dbSaysStatsStaff(jwt) {
   try {
-    const r = await fetch(`${SB_URL}/auth/v1/user`, { headers: { apikey: SB_KEY, Authorization: `Bearer ${jwt}` } });
-    if (!r.ok) return false;
-    const u = await r.json();
-    if (!u || !u.id) return false;
-    const prof = await sbGet(`profiles?id=eq.${u.id}&select=role,departments&limit=1`);
-    if (!prof[0]) return false;
-    if (prof[0].role === "commissioner") return true;
-    return prof[0].role === "staff" && (prof[0].departments || []).indexOf("statistics") >= 0;
-  } catch { return false; }
+    const r = await fetch(`${SB_URL}/rest/v1/rpc/is_stats_staff`, {
+      method: "POST", headers: { apikey: SB_KEY, Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" }, body: "{}",
+    });
+    if (!r.ok) { console.error(`is_stats_staff -> ${r.status} ${await r.text()}`); return false; }
+    return (await r.json()) === true;
+  } catch (e) { console.error("is_stats_staff failed: " + ((e && e.message) || e)); return false; }
 }
 
 /* v4.36: the staff half of authForGame, shared with leagueSessions (club-wide: no management seat applies). One
@@ -1453,12 +1459,13 @@ async function staffActor(jwt) {
   } catch { return deny; }
   if (!uid) return deny;
   let prof;
-  try { prof = (await sbGet(`profiles?id=eq.${uid}&select=role,departments,gamertag,banned&limit=1`))[0]; }
+  try { prof = (await sbGet(`profiles?id=eq.${uid}&select=role,gamertag,banned&limit=1`))[0]; }
   catch { return deny; }
   if (!prof || prof.banned) return deny;
   const who = prof.gamertag || uid;
   if (prof.role === "commissioner") return { ok: true, uid, who, via: "staff", commish: true };
-  if (prof.role === "staff" && (prof.departments || []).indexOf("statistics") >= 0) return { ok: true, uid, who, via: "staff" };
+  /* v463: the department test is the database's, never a second list here (dbSaysStatsStaff) */
+  if (await dbSaysStatsStaff(jwt)) return { ok: true, uid, who, via: "staff" };
   return { ok: false, uid, who };
 }
 
@@ -1477,19 +1484,18 @@ async function authForGame(jwt, game) {
   return { ok: false, uid: a.uid, who: a.who, reason: STAFF_ONLY };
 }
 
-/* A club rebuilding its own box score is a normal, expected repair — but staff should never
-   learn about it only by noticing the number changed. Fire-and-forget: a dead webhook must
-   never fail the merge that already succeeded. */
+/* A club rebuilding its own box score is a normal, expected repair, but staff should never
+   learn about it only by noticing the number changed. Fire-and-forget: a failed post must
+   never fail the merge that already succeeded (it is logged instead).
+   v463 (commissioner, 2026-11-23: "There should be a staff notifications channel in the discord which is where all the
+   automated notifications should go"): the note goes through public.notify_staff_ch, the database's one door for
+   automated staff posts (no pings, no link previews, club names and gamertags shown as pills, the staff webhook resolved
+   inside the database). It posts to the
+   general staff channel today and to the one staff notifications channel once the staff powers record applies, with no
+   change here. It also ends the fallback to the changelog webhook: a staff note never lands in a public channel. */
 async function tellStaff(text) {
-  try {
-    const rows = await sbGet("app_config?key=in.(discord_staff_webhook,discord_updates_webhook)&select=key,value");
-    const byKey = Object.fromEntries((rows || []).map((r) => [r.key, r.value]));
-    const hook = byKey.discord_staff_webhook || byKey.discord_updates_webhook;
-    if (!hook) return;
-    /* no link previews in anything the league posts (commissioner, 2026-10-01) */
-    await fetch(hook, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(noLinkPreviews({ content: text.slice(0, 1800), allowed_mentions: { parse: [] } })) });
-  } catch { /* never breaks the merge */ }
+  try { await sbRpc("notify_staff_ch", { p_channel: null, p_content: String(text).slice(0, 1800), p_ping: false }); }
+  catch (e) { console.error("staff note not sent: " + ((e && e.message) || e)); /* never breaks the merge */ }
 }
 
 /* THE box-score row builder — a fresh filing, a Rule 4.3 resume and a manual merge all build

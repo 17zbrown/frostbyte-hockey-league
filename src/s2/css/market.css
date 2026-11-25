@@ -1,0 +1,11 @@
+/* CGHL Season 2: the shared market components (js/market.js). Tokens only, so dark mode follows; no glass.
+   v5.00 swap (i3e, 2026-11-25): the sample clock bar and the Discord preview card went with the market's demo. */
+
+/* v5.00 swap (b4, 2026-11-24): the waiver door's confirm popup (S2.market.waiveDoor): the not-inactive confirmation and
+   the database's own refusal, said in the popup with the box kept as the member left it */
+.mk-confirm { display: flex; gap: 10px; align-items: flex-start; margin: 14px 0 0; min-height: 44px; font: 500 .9375rem/1.4 var(--font); color: var(--ink); cursor: pointer; }
+.mk-confirm input { flex: none; width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--accent); }
+.mk-err { margin: 8px 0 0; font: 500 .875rem/1.4 var(--font); color: var(--loss-ink); }
+.mk-err:empty { margin: 0; }
+/* a door that waits on the database keeps its place and says it is busy */
+[aria-busy="true"] { cursor: progress; }

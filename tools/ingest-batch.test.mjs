@@ -123,7 +123,7 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("/rest/v1/season_registrations?")) return J([]);
   if (u.includes("/rest/v1/notifications") && (m === "DELETE" || m === "POST")) return NIL();
   if (u.includes("/rest/v1/app_config")) return J(world.cfg || []);
-  if (u.includes("discord.com/api/webhooks")) { world.toStaff.push(JSON.parse(opts.body).content); return NIL(); }
+  if (u.includes("/rest/v1/rpc/notify_staff_ch")) { world.toStaff.push(JSON.parse(opts.body).p_content); return NIL(); }
   throw new Error("unexpected fetch " + m + " " + u);
 };
 const reset = () => {
@@ -197,6 +197,14 @@ console.log("\n— a Rule 4.3 resume: the replay's payload is archived before th
     final && final.body.status === "merged" && final.body.game_id === "g900" && !("payload" in final.body), JSON.stringify(final && final.body));
   /* moved here in v4.50 from the retired published-before-v3.53 case: a reload that ran a whole game is combined and named */
   A("...and staff are told the reload ran a whole game", world.toStaff.some((t) => /A reload ran a whole game/.test(t) && /Stats manager/.test(t)), JSON.stringify(world.toStaff).slice(0, 220));
+  /* v463 (commissioner, 2026-11-23: one staff notifications channel): the note leaves through the database's staff door,
+     which picks the channel; the importer reads no webhook and posts to Discord itself never (the public changelog
+     webhook used to be its fallback) */
+  const notes = calls.filter((c) => c.u.includes("/rest/v1/rpc/notify_staff_ch"));
+  A("...through public.notify_staff_ch, unpinged and to no named channel, with no webhook read or posted here",
+    notes.length > 0 && notes.every((c) => c.m === "POST" && c.body.p_channel === null && c.body.p_ping === false && typeof c.body.p_content === "string")
+      && !calls.some((c) => /discord\.com|_webhook/.test(c.u)),
+    JSON.stringify(notes.map((c) => c.body)).slice(0, 220));
 
   /* v4.50: the same sittings on a game already FINAL. A final short of sixty minutes was filed by hand on the Stats
      manager (Rule 4.3.3: a filing by hand is a ruling), so the importer never merges into it on its own: the later

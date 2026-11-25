@@ -53,3 +53,16 @@ docs/guides/pages/_report.json
 
 # graphify knowledge graph output (local only)
 graphify-out/
+# v5.00 swap: the S2 concept's real-data snapshot, logos copy, deploy state and share copies never enter git
+src/s2/data/
+# no trailing slash: run.cjs makes src/s2/assets a symlink, and "dir/" patterns never match a link
+src/s2/assets
+snapshot.js
+src/s2/site/
+src/s2/share.html
+src/s2/share-files.json
+src/s2/.site-id
+src/s2/.deployed
+src/s2/.published
+src/s2/.edge-hash
+_site/

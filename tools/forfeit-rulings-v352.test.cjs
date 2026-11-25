@@ -58,7 +58,7 @@ rb.chapters.forEach((ch) => ch.sections.forEach((s) => { secs[s.id] = s; }));
 const e352 = rb.changelog.find((c) => c.version === "3.52");
 A("changelog records 3.52", !!e352);
 A("3.2.4: only a commissioner reverses; staff report", /Once a forfeit has been recorded, only a commissioner may reverse it or change its score\./.test(secs["3.2"].paragraphs[3]));
-A("3.2.5: officiating or a commissioner voids; only a commissioner lifts", /the officiating department or a commissioner voids it, and a voided game is kept out of the standings\. Only a commissioner lifts a void\./.test(secs["3.2"].paragraphs[4]));
+A("3.2.5: league staff or a commissioner void; only a commissioner lifts", /league staff or a commissioner void it, and a voided game is kept out of the standings\. Only a commissioner lifts a void\./.test(secs["3.2"].paragraphs[4]));
 A("7.1.2: involvement, case by case", /any matter that involves them or a club they play for or manage/.test(secs["7.1"].paragraphs[1]) && /the league's tools do not stop an official mechanically/.test(secs["7.1"].paragraphs[1]));
 A("8.3.2: playoff forfeits count in the series", /a forfeit counts in the series as a win for the club that did not forfeit/.test(secs["8.3"].paragraphs[1]));
 const e = JSON.stringify(e352);
