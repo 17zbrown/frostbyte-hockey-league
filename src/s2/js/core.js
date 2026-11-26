@@ -131,6 +131,8 @@
   };
   S2.chev = function () { return '<svg class="chev" viewBox="0 0 8 13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 1.5l5 5-5 5"/></svg>'; };
   /* the league's C/G power-mark (light C, accent crossbar) drawn inline so it follows the finish */
+  /* v4.67: /favicon.svg is this mark in its light colors (ink tile, white C, Glacier crossbar) and the three app
+     icons are it on a full-bleed tile; change the paths or colors here and redraw them too (tools/favicon-glacier-v467.test.cjs) */
   S2.mark = function (size) {
     return '<svg viewBox="0 0 32 32" width="' + (size || 26) + '" height="' + (size || 26) + '" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--ink)"/>' +
       '<path d="M22.5 10.2A8.4 8.4 0 1016 24.4a8.4 8.4 0 006.5-3.1" fill="none" stroke="var(--canvas)" stroke-width="3.2" stroke-linecap="round"/>' +

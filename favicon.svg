@@ -1,5 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
-  <rect width="48" height="48" rx="11" fill="#0a0a0a"/>
-  <path d="M35.5 17.4 A13 13 0 1 0 35.5 30.6" fill="none" stroke="#f4f4f0" stroke-width="3.4" stroke-linecap="round"/>
-  <path d="M35 24 H28" fill="none" stroke="#ffe500" stroke-width="3.4" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- v4.67: the Season 2 header mark (S2.mark in src/s2/js/core.js) in its light Glacier colors, ink tile, white C,
+       the Glacier crossbar (--accent-2). Commissioner, 2026-11-26: "change the logo that appears in the search engine
+       tab to be the correct glacier colors". The Season 1 yellow crossbar is retired. apple-touch-icon.png, icon-192.png
+       and icon-512.png are this mark on a full-bleed tile; redraw them whenever this file changes. -->
+  <rect width="32" height="32" rx="8" fill="#1d1d1f"/>
+  <path d="M22.5 10.2A8.4 8.4 0 1016 24.4a8.4 8.4 0 006.5-3.1" fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round"/>
+  <path d="M15.5 16.2h8" stroke="#5ac8fa" stroke-width="3.2" stroke-linecap="round"/>
 </svg>
