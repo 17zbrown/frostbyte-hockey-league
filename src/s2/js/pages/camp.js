@@ -248,7 +248,7 @@
   }
   /* the pool player's answers (their own door): the camp page, the Inbox and the You page show it to the member in the
      pool (S2.market.poolMe). Each request is one club's game */
-  function asksCard() {
+  function asksCard(gameId) {
     /* the inbox shows this card too (js/inbox.js), often before any page has read the real market: a member asks for it
        here, and until it answers the card is an empty host that the market's "load" fills in place (the handler at the
        foot of this file swaps #cpAsk wherever it is), never a card that silently stays away */
@@ -261,10 +261,18 @@
     var me0 = S2.session && S2.session.profileId, pl = me0 ? M.player(me0) : null;
     if (!me0 || S2.session.seat || (pl && pl.rostered)) return "";
     K.ensure();
-    if (!K.tonight() || !K.poolMe()) return '<div id="cpAsk" hidden></div>';
+    /* gameId: the card cut to one game, for the Game Center (health links 5, 2026-11-25: a request's notification opens
+       #/game/<id>, which had no Accept or Decline). The host carries it, so the market's "load" (the handler at the foot of
+       this file) repaints the same cut wherever the card is; with no request for that game the host stays empty */
+    var only = gameId ? ' data-game-id="' + esc(gameId) + '"' : "", none = '<div id="cpAsk"' + only + " hidden></div>";
+    if (!K.tonight() || !K.poolMe()) return none;
     var me = K.poolMe(), tn = K.tonight();
-    var head0 = '<div class="cp-ask" id="cpAsk" aria-labelledby="cpAskH"><h3 class="cp-ask-h" id="cpAskH">Requests for you</h3>';
-    var mine = K.asksFor(me), open = mine.filter(function (a) { return a.state === "pending"; });
+    /* on the Game Center the card is a section under the match room's h1, beside S2.secHead's h2s; in the Inbox and on the
+       camp page it sits under an h2 (the review of links 5, 2026-11-25: h1, h3, h2 on the game page) */
+    var hl = gameId ? "h2" : "h3";
+    var head0 = '<div class="cp-ask" id="cpAsk"' + only + ' aria-labelledby="cpAskH"><' + hl + ' class="cp-ask-h" id="cpAskH">Requests for you</' + hl + ">";
+    var mine = K.asksFor(me).filter(function (a) { return !gameId || a.gameId === gameId; }), open = mine.filter(function (a) { return a.state === "pending"; });
+    if (gameId && !mine.length) return none;
     return head0 + '<p class="t-foot">' + (open.length ? "Answer by " + esc(lockTime(tn)) + ", when lineups lock; an unanswered request lapses." : "Nothing waits for an answer.") + "</p>" +
       '<div class="list cp-ask-l">' + mine.map(function (a) {
         var ids = ' data-pid="' + esc(a.pid) + '" data-club="' + esc(a.club) + '" data-game="' + a.game + '"' + (a.id ? ' data-id="' + esc(a.id) + '"' : "");
@@ -552,7 +560,7 @@
   /* registered once, at load: it looks for the page and does nothing when another page is showing, except the pool
      player's answers card, which repaints wherever it is (the Inbox, the You page) */
   if (K) K.on(function (e) {
-    if (e.type !== "tick" && !document.getElementById("cpRoot")) { var ask = S2.$("#cpAsk"); if (ask) { ask.outerHTML = asksCard(); S2.poolAsks.bind(document); } }
+    if (e.type !== "tick" && !document.getElementById("cpRoot")) { var ask = S2.$("#cpAsk"); if (ask) { ask.outerHTML = asksCard(ask.getAttribute("data-game-id")); S2.poolAsks.bind(document); } }
     if (!document.getElementById("cpRoot")) return;
     if (e.type === "tick") return tick();
     later();

@@ -47,7 +47,37 @@
       return { id: "n-" + n.id, kind: cat, kicker: cat, title: n.title || "Untitled story", at: n.published_at, date: M.etLong(n.published_at) || "", line: body.split(/\n\s*\n/)[0], body: body }; });
   }
   function stories() { return liveStories(); }
-  function storyById(id) { return stories().filter(function (s) { return s.id === id; })[0] || null; }
+  /* a story's address is "n-" + its news id; an address without the prefix (#/news/<id>) is the same story (health links 2,
+     2026-11-25: the classic site's #/article/<id> landed on #/news/<id>, which matched no story) */
+  function storyKey(id) { id = String(id == null ? "" : id); return /^n-/.test(id) ? id : "n-" + id; }
+  function storyById(id) { var k = storyKey(id); return stories().filter(function (s) { return s.id === k; })[0] || null; }
+  /* a story of another season: the league read holds the season on screen's stories only, and every classic story link
+     is a Season 1 story, so a link opened on Season 2 said "Story not found". The page asks which season holds the story
+     (news is publicly readable; S2.seasonOf, the Game Center's lookup) and opens it there (?season=<n>, a fresh league
+     read); only an id no season holds is not found, and a failed lookup is said with Try again. One lookup per id per
+     visit, as the Game Center's findGame */
+  var SFIND = {};
+  function findStory(r, paint) {
+    var raw = storyKey(r.arg).slice(2);
+    if (SFIND[raw] || !S2.isUuid(raw)) return;
+    SFIND[raw] = { state: "looking" };
+    var done = function () { var at = S2.parse(); if (at.name === "news" && at.arg === r.arg) paint(); };   /* the reader may have moved on */
+    Promise.resolve().then(function () {
+      if (!S2.seasonOf) throw new Error("the season lookup (js/pages/today.js S2.seasonOf) is not on the page");
+      return S2.seasonOf("news", raw);
+    }).then(function (n) {
+      if (n == null || n === M.view.season) { SFIND[raw] = { state: "none" }; done(); return; }
+      location.replace(S2.seasonHref(n, "#/news/n-" + raw));
+    }).catch(function (e) { console.error("News: the season of story " + raw + " could not be looked up:", e); SFIND[raw] = { state: "err", err: e }; done(); });
+  }
+  function storyMissing(id) {
+    var raw = storyKey(id).slice(2), f = SFIND[raw] || { state: S2.isUuid(raw) ? "looking" : "none" };
+    if (f.state === "looking") return '<section class="hero reveal" role="status"><span class="kicker">News</span><h1 class="d-1">Opening the story</h1><p class="lede-l">Finding the season this story belongs to.</p></section>';
+    if (f.state === "err") return '<section class="hero reveal"><span class="kicker">News</span><h1 class="d-1">The story could not be opened</h1><p class="lede-l">' + readFailed(f.err, "the story could not be found") + "</p>" +
+      /* the Game Center's row of website buttons (today.css .td-btns), as its own missing-game state draws it */
+      '<div class="td-btns"><button type="button" class="btn site" data-news="find">Try again</button><a class="btn site outline" href="#/news">All news</a></div></section>';
+    return '<section class="hero reveal"><span class="kicker">News</span><h1 class="d-1">Story not found</h1><p class="lede-l">That address does not match a story. It may have been taken down.</p><p><a class="btn site" href="#/news">All news</a></p></section>';
+  }
   function newsList() {
     var all = stories(); if (!all.length) return S2.empty("none", "No stories yet", "Night recaps appear here after each game night's last final, and the staff's stories when they publish them.");
     var lead = all[0], rest = all.slice(1);
@@ -68,7 +98,7 @@
   function newsPage(r) {
     if (r.arg) {
       var s = storyById(r.arg);
-      return s ? article(s) : '<section class="hero reveal"><span class="kicker">News</span><h1 class="d-1">Story not found</h1><p class="lede-l">That address does not match a story. It may have been taken down.</p><p><a class="btn site" href="#/news">All news</a></p></section>';
+      return s ? article(s) : storyMissing(r.arg);
     }
     return hero("News", "League news", "Every game night gets a recap the moment its last final is in, and the staff write the rest.") + newsList() +
       S2.about(["These are the league's own stories for " + esc(M.view.name) + ", newest first, with any filed for no season. Each also posts to the Discord news channel."]);
@@ -82,8 +112,8 @@
      kept after them, marked as its own (a member can repeat them to staff; the console has the whole error). It printed
      the raw message as the sentence ("The league's data service did not answer. canceling statement due to ...").
      QA round 2 review: "reported a problem", since its words follow (it said "did not answer" and then quoted it) */
-  function readFailed(e) {
-    return "The league's data service reported a problem, so the stories could not be shown. Try again in a moment." +
+  function readFailed(e, what) {
+    return "The league's data service reported a problem, so " + (what || "the stories could not be shown") + ". Try again in a moment." +
       (e && e.message ? '<span class="of-why">The league said: “' + esc(e.message) + "”</span>" : "");
   }
   function newsBody(r) {
@@ -111,6 +141,8 @@
           if (h) { h.innerHTML = newsBody(r); S2.reveal(root); }
           read.then(paint);
         });
+        var find = S2.$('[data-news="find"]', root);
+        if (find) find.addEventListener("click", function () { delete SFIND[storyKey(r.arg).slice(2)]; paint(); });
       };
       var paint = function () {
         var host = S2.$("#ofNews", root); if (!host || S2.parse().name !== "news") return;   /* the reader has moved on */
@@ -120,10 +152,12 @@
            S2.setTitle (QA round 2: this wrote document.title and the bar by hand, a third copy of the suffix) */
         S2.setTitle(S2.pages.news.title(r));
         S2.reveal(root);
-        bind();
+        bind(); look();
       };
+      /* a story the season on screen does not hold: ask which season does (findStory), then repaint in place */
+      var look = function () { if (r.arg && NEWS.rows && !storyById(r.arg)) findStory(r, paint); };
       if (NEWS.err) { bind(); if (!NEWS.rows) return; }   /* the render drew the failure; its Try again reads again */
-      if (NEWS.rows && !NEWS.stale) return;
+      if (NEWS.rows && !NEWS.stale) { look(); return; }
       readNews().then(paint);
     }
   });

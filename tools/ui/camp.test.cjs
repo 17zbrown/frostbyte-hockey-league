@@ -111,6 +111,37 @@ const A = (name, cond, more) => { console.log((cond ? "PASS " : "FAIL ") + name 
   r = await p.evaluate(() => S2.$$("#cpAsk .cp-ask-r .sub").map((x) => x.textContent));
   A("Decline answers the other club's game", r.indexOf("You declined") >= 0 && calls(ctx, "market_pool_answer")[1].args.p_accept === false, r);
   await ctx.close();
+  /* health links 5 (2026-11-25): the request's notification ("asked you to play", link_view game) opens the Game Center,
+     which had no Accept or Decline. The game page draws the same card (S2.poolAsks) cut to that game, under the match room,
+     and the market's read repaints it in place with the same cut (camp.js's load handler reads the host's game) */
+  W = X.reset(); W.reqs.push(X.req(408, 1, CB, MEMBER, "pending", Date.now() - 200e3));
+  /* wait: false, then the card: the game page asks for the market only through the card, so a page without it never reads it */
+  ({ ctx, p } = await open("member", { hash: "#/game/" + X.G.g1, wait: false }));
+  await p.waitForSelector("#cpAsk:not([hidden])", { timeout: 10000 }).catch(() => {});
+  const askRead = () => p.evaluate(() => { const c = document.getElementById("cpAsk");
+    return c ? { hidden: c.hidden, game: c.getAttribute("data-game-id"), h: (c.querySelector(".cp-ask-h") || {}).tagName || null, rows: [...c.querySelectorAll(".cp-ask-r")].map((x) => x.querySelector(".title").textContent.replace(/ /g, " ") + " | " + x.querySelector(".sub").textContent),
+      acc: c.querySelectorAll('[data-cp="accept"]').length, after: !!(c.previousElementSibling && c.previousElementSibling.classList.contains("td-room")),
+      box: c.hidden ? null : [Math.round(c.getBoundingClientRect().left), Math.round(c.getBoundingClientRect().width)], next: c.nextElementSibling ? Math.round(c.nextElementSibling.getBoundingClientRect().left) : null } : null; });
+  r = await askRead();
+  A("links 5: the pool player's game page carries the answer card for that game only, under the match room, with Accept and Decline",
+    r && !r.hidden && r.game === X.G.g1 && r.rows.length === 1 && r.rows[0].indexOf(fullMine + " · game 1, 9:00 PM | Waiting for your answer") === 0 && r.acc === 1 && r.after, r);
+  /* the review of links 5 (2026-11-25): the match room's h1, then the card, then the page's h2 sections */
+  A("links 5: on the game page the card's heading is an h2, a section under the match room's h1", r && r.h === "H2", r);
+  /* the review of links 5 (2026-11-25): centered, the card was the one block off the content column's left edge */
+  A("links 5: the card holds the content column's left edge with the section below it, at a reading measure (40rem)", r && r.box && r.next != null && Math.abs(r.box[0] - r.next) <= 1 && r.box[1] <= 640, r);
+  /* a missing Accept is the next check's FAIL, not a crash that stops the suite (the review of links 5, 2026-11-25) */
+  const accepted = await p.click('#cpAsk [data-cp="accept"]', { timeout: 5000 }).then(() => true, () => false); await settled(p);
+  r = await askRead();
+  c = calls(ctx, "market_pool_answer");
+  A("links 5: Accept on the game page answers that request (market_pool_answer), and the repaint keeps the card on this game",
+    accepted && c.length === 1 && c[0].args.p_request === uuid(401) && c[0].args.p_accept === true && r && r.game === X.G.g1 && r.rows.length === 1 && / \| Accepted: the lobby code reaches you by bot DM for this game$/.test(r.rows[0]), [accepted, c.length, r]);
+  await p.evaluate((g) => { location.hash = "#/game/" + g; }, X.G.g4); await p.waitForTimeout(400);
+  r = await askRead();
+  A("links 5: a game with no request for the player shows no card", !r || (r.hidden && r.rows.length === 0), r);
+  await ctx.close();
+  ({ ctx, p } = await open("anon", { hash: "#/game/" + X.G.g1, wait: false }));
+  A("links 5: a visitor's game page has no answer card", !(await p.$("#cpAsk")));
+  await ctx.close();
 
   console.log("## who sees which club: the club and the staff until the lineup lock, everyone after (2026-11-23)");
   W = X.reset();

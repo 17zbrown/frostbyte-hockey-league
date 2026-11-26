@@ -508,7 +508,7 @@
   /* under six games at the position a line has no rank (M.rank few), so its row keeps the number and the median, no bar */
   function pbar(x) {
     var tone = WORKLOAD[x.stat] ? "" : x.tone;
-    var poss = x.stat === "poss_s_pg", val = poss ? M.toi(Math.round(x.value)) : x.display, med = poss ? M.toi(Math.round(x.median)) : x.medianDisplay;   /* possession as minutes:seconds, not raw seconds */
+    var poss = x.stat === "poss_s_pg", val = poss ? M.toi(x.value) : x.display, med = poss ? M.toi(x.median) : x.medianDisplay;   /* possession as minutes:seconds, not raw seconds */
     return '<div class="pf-pb"><div class="pf-pb-h"><span class="pf-pb-l">' + esc(statLabel(x.label)) + '</span><span class="pf-pb-v"><b class="num">' + esc(val) +
       "</b>" + (x.few ? "" : '<span class="pf-pb-p ' + tone + '">' + esc(x.text) + "</span>") + "</span></div>" +
       (x.few ? "" : '<div class="pf-pb-t" role="img" aria-label="' + esc(statLabel(x.label) + ": " + val + ", " + x.text + " " + (x.groupMany || MANY[x.group]) + ", median " + med) + '"><i data-grow style="transform:scaleX(' + (x.score / 100).toFixed(3) + ')"></i><span class="pf-pb-m"></span></div>') +

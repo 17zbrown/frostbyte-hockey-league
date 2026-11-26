@@ -609,8 +609,7 @@
   T.COLS = "id,season_id,from_team_id,to_team_id,from_profile_id,offered_profile_ids,requested_profile_ids,note,status,created_at,updated_at";
   /* trade_status (proposed, accepted, declined, cancelled, reversed) in the pages' words; a withdrawal is "cancelled" */
   T.STATUS = { proposed: "pending", accepted: "accepted", declined: "declined", cancelled: "withdrawn", reversed: "reversed" };
-  var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  T.isId = function (id) { return UUID.test(String(id || "")); };
+  T.isId = function (id) { return S2.isUuid(id); };   /* core's one uuid test (health crawl 9) */
   function codeOfId(id) { var t = M().teams.filter(function (x) { return x.id === id; })[0]; return t ? t.code : null; }
   /* a club's teams.id, which every door names. A missing id is an error, never a guess */
   function teamId(code) {

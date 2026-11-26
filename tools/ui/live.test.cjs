@@ -172,18 +172,27 @@ function init(cfg) {
   console.log("## the Discord identity refresh, and a refused one never shakes the page");
   /* the account's Discord identity carries a new name; the profile on file still has the old one */
   const renamed = Object.assign({}, MEMBER.user, { identities: [{ provider: "discord", id: "i-1", identity_data: { provider_id: "d-1", full_name: "New Name", avatar_url: null }, last_sign_in_at: "2026-11-24T00:00:00Z" }] });
-  /* the league's people as the harness answers profiles (liveDefaults), this member's row carrying the old Discord name */
-  const PEOPLE = league.people.map((y) => ({ id: y.id, gamertag: y.gamertag, display_name: y.display_name, avatar_url: y.avatar_url, role: y.role, banned: !!y.banned, ban_reason: null,
-    discord_id: y.id === MEMBER.profileId ? "d-1" : null, discord_username: y.id === MEMBER.profileId ? "Old Name" : null, in_guild: true }));
+  /* the league's people as the harness answers profiles (liveDefaults), this member's row carrying the old Discord name.
+     Health fit 0 (2026-11-25): this pinned the sign-in patching a member IN the server (in_guild true), which is the
+     ping-pong with discord-sync's steps 1b and 1c that the edge logs showed. Rewritten to pin the right behavior: the
+     member here is outside the server (the job does not maintain them, so sign-in does), and one in the server is not
+     patched at all (the job is the one owner) */
+  const PEOPLE = (inGuild) => league.people.map((y) => ({ id: y.id, gamertag: y.gamertag, display_name: y.display_name, avatar_url: y.avatar_url, role: y.role, banned: !!y.banned, ban_reason: null,
+    discord_id: y.id === MEMBER.profileId ? "d-1" : null, discord_username: y.id === MEMBER.profileId ? "Old Name" : null, in_guild: y.id === MEMBER.profileId ? inGuild : true }));
   let patches = [];
   const patchProfiles = (answer) => ({ "PATCH /rest/v1/profiles": (url, body) => { patches.push({ url, body }); return answer(url); } });
-  x = await page("#/today", { persona: "member", user: renamed, tables: { profiles: PEOPLE }, routes: patchProfiles((url) => ({ status: 200, json: [{ id: url.searchParams.get("id").replace(/^eq\./, "") }] })) });
+  x = await page("#/today", { persona: "member", user: renamed, tables: { profiles: PEOPLE(false) }, routes: patchProfiles((url) => ({ status: 200, json: [{ id: url.searchParams.get("id").replace(/^eq\./, "") }] })) });
   await signedIn(x, MEMBER.profileId); await wait(800);
   r = patches[patches.length - 1];
-  A("the profile follows the account's new Discord name, asking for its id back", !!r && r.body.discord_username === "New Name" && r.url.searchParams.get("select") === "id" && r.url.searchParams.get("id") === "eq." + MEMBER.profileId, r && { body: r.body, q: r.url.search });
+  A("outside the server, the profile follows the account's new Discord name, asking for its id back", !!r && r.body.discord_username === "New Name" && r.url.searchParams.get("select") === "id" && r.url.searchParams.get("id") === "eq." + MEMBER.profileId, r && { body: r.body, q: r.url.search });
   await done(x);
   patches = [];
-  x = await page("#/today", { persona: "member", user: renamed, tables: { profiles: PEOPLE }, routes: patchProfiles(() => ({ status: 200, json: [] })) }, { expectErrors: /Discord|profile|S2_NO_ROWS|Nothing was saved/ });
+  x = await page("#/today", { persona: "member", user: renamed, tables: { profiles: PEOPLE(true) }, routes: patchProfiles((url) => ({ status: 200, json: [{ id: url.searchParams.get("id").replace(/^eq\./, "") }] })) });
+  await signedIn(x, MEMBER.profileId); await wait(800);
+  A("in the server, sign-in writes nothing: discord-sync keeps the name and avatar (health fit 0)", patches.length === 0, patches.map((y) => y.body));
+  await done(x);
+  patches = [];
+  x = await page("#/today", { persona: "member", user: renamed, tables: { profiles: PEOPLE(false) }, routes: patchProfiles(() => ({ status: 200, json: [] })) }, { expectErrors: /Discord|profile|S2_NO_ROWS|Nothing was saved/ });
   await signedIn(x, MEMBER.profileId); await wait(800);
   A("the refused refresh was tried once, asking for its id back", patches.length === 1 && patches[0].url.searchParams.get("select") === "id", patches.length);
   await sb(x, () => { window.__nav = S2.$("#navbar"); });
@@ -236,7 +245,7 @@ function init(cfg) {
   await done(x);
 
   console.log("## a banned member keeps the session but not the league");
-  x = await page("#/today", { persona: "member", tables: { profiles: PEOPLE.map((y) => (y.id === MEMBER.profileId ? Object.assign({}, y, { banned: true, ban_reason: "Test ban" }) : y)) } });
+  x = await page("#/today", { persona: "member", tables: { profiles: PEOPLE(true).map((y) => (y.id === MEMBER.profileId ? Object.assign({}, y, { banned: true, ban_reason: "Test ban" }) : y)) } });
   await until(x.p, () => !!document.getElementById("banScreen"), null, 10000);
   r = await sb(x, () => (document.getElementById("banScreen") || {}).textContent);
   A("the revoked screen shows the reason and a way to sign out", /access has been revoked/.test(r) && /Test ban/.test(r) && /Sign out/.test(r), r);

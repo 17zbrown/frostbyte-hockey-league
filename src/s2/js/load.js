@@ -116,11 +116,26 @@
     return done.length ? Math.max.apply(null, done) : null;
   }
 
-  /* the page's scripts, in order, from <template id="s2-scripts"> (the one list; demo.html keeps it). Inserted at once and
-     run in order (async false), so the last one's load is the moment every script has run */
-  function run() {
+  /* the page's scripts, in order, from <template id="s2-scripts"> (the one list; demo.html keeps it) */
+  function scripts() {
     var tpl = document.getElementById("s2-scripts");
-    var list = tpl ? Array.prototype.map.call(tpl.content.querySelectorAll("script[src]"), function (s) { return s.getAttribute("src"); }) : [];
+    return tpl ? Array.prototype.map.call(tpl.content.querySelectorAll("script[src]"), function (s) { return s.getAttribute("src"); }) : [];
+  }
+  /* each script downloads while the league is read (health crawl 11, 2026-11-25: run() inserts them only after both reads,
+     so on a slow phone the bundle, about 800 KB, waited for the reads). Neither these preloads nor run()'s scripts name
+     crossorigin, so each script's request matches its preload and the preloaded response is the one that runs. Started
+     here, once the page and the sign-in library have arrived, and not from the top of the head as first built: there it
+     shared a slow phone's connection with the page's own 540 KB, and measured at 390 px with the CPU at 4x and 1.6 Mbps the
+     wheel came up 3.5 s later and the read began 3.4 s later, for the same first content (review, 2026-11-25) */
+  function preload() {
+    scripts().forEach(function (src) {
+      var l = document.createElement("link"); l.rel = "preload"; l.as = "script"; l.href = src;
+      document.head.appendChild(l);
+    });
+  }
+  /* Inserted at once and run in order (async false), so the last one's load is the moment every script has run */
+  function run() {
+    var list = scripts();
     if (!list.length) return fail(new Error("demo.html has no <template id=\"s2-scripts\"> listing the page's scripts"));
     var broke = false;
     var onErr = function (ev) { if (broke) return; broke = true; fail(ev.error || new Error(ev.message || "a script failed")); };
@@ -157,7 +172,9 @@
        line of text in the corner. On a phone network it can stay up for seconds */
     var app = document.getElementById("app");
     if (app) app.innerHTML = '<main class="boot">' + S2.spinner("Loading the league") + "</main>";
-    read(asked, null).then(function (body) {
+    var first = read(asked, null);
+    preload();   /* after the read is asked for, so the read goes out first */
+    first.then(function (body) {
       var a = archiveSeason(body), as = S2.load.readAs;
       return (a ? read(a, ["games", "box", "tenures"]) : Promise.resolve(null)).then(function (archive) {
         S2.data = { source: "live", body: body, archive: archive, readAs: as };

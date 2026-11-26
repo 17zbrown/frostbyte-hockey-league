@@ -13,7 +13,11 @@
 
 /* ---- rhythm: sections and bands alternate; space separates them, not boxes. The kit's site rhythm (ui.css
    .page > .section), so Today and the Game Center read at the same pace as every page they link to (review 2026-10-19) ---- */
-.td-body > * + *, .td-gc > * + * { margin-top: clamp(48px, 7vw, 88px); }
+/* .td-gc > * + .cp-ask: camp.css, which loads later, sets the answer card's own margin (health links 5: the card sits in the
+   Game Center's rhythm like any section, at a reading measure). It holds the content column's left edge with every section
+   below it (the review of links 5, 2026-11-25: centered, it was the one block off that edge) */
+.td-body > * + *, .td-gc > * + *, .td-gc > * + .cp-ask { margin-top: clamp(48px, 7vw, 88px); }
+.td-gc > .cp-ask { max-width: 40rem; }
 .td-body > .band + .band, .td-gc > .band + .band { margin-top: 0; }
 .td-body > .td-hero + .band { margin-top: clamp(8px, 2vw, 24px); }
 .td-sec { min-width: 0; }

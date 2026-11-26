@@ -114,11 +114,18 @@
     if (!sb || !S2.session.user) return Promise.reject(fail("Sign in with Discord first.", "S2_SIGNED_OUT"));
     return sb.rpc("my_discord_accounts").then(function (r) { if (r.error) throw fromDb(r.error); return r.data || {}; });
   };
-  /* What the profile's Discord NAME and AVATAR should be, or null: a pure port of CG.discordIdentityPatch. WHICH account the
+  /* What the profile's Discord NAME and AVATAR should be, or null: a port of CG.discordIdentityPatch. WHICH account the
      league follows changes only through switch_discord_account (Settings); this never proposes discord_id. A discord_id
-     that belongs to none of this login's identities was pinned by the league office and is left alone */
+     that belongs to none of this login's identities was pinned by the league office and is left alone.
+     ONE owner per member (health fit 0, 2026-11-25: the site and discord-sync rewrote each other's values on the same
+     profiles minutes apart, the site from the last sign-in, the job from Discord now): for a member in the server
+     (in_guild) jobs/discord-sync.js steps 1b and 1c keep both current every 2-minute sweep, and switch_discord_account
+     writes them at a switch, so the site writes nothing. For anyone else it writes the job's meaning: the @handle (the
+     identity's full_name; its name is "<handle>#0"), never the display name (custom_claims.global_name), and an avatar
+     compared without the job's ?size=128. Test: tools/discord-identity-owner-v466.test.cjs */
   S2.discordIdentityPatch = function (user, profile) {
     if (!user || !profile) return null;
+    if (profile.in_guild) return null;
     var ids = (user.identities || []).filter(function (i) { return i.provider === "discord"; });
     if (!ids.length) return null;
     var idOf = function (i) { var dd = i.identity_data || {}; return String(dd.provider_id || dd.sub || i.id || ""); };
@@ -126,11 +133,11 @@
     if (profile.discord_id && !chosen) return null;
     var cur = chosen || ids.slice().sort(function (a, b) { return Date.parse(b.last_sign_in_at || 0) - Date.parse(a.last_sign_in_at || 0); })[0];
     var d = cur.identity_data || {}, patch = {};
-    var name = d.custom_claims && d.custom_claims.global_name || d.full_name || d.name || d.user_name || d.preferred_username || null;
+    var name = d.full_name || String(d.name || "").replace(/#0$/, "") || null;
     if (name && profile.discord_username !== name) patch.discord_username = name;
     /* the avatar follows the account too, but a custom (Supabase-hosted) picture is never replaced */
     var av = d.avatar_url || null, replaceable = !profile.avatar_url || /^https:\/\/(cdn|media)\.discordapp\./.test(String(profile.avatar_url));
-    if (av && replaceable && profile.avatar_url !== av) patch.avatar_url = av;
+    if (av && replaceable && String(profile.avatar_url || "").split("?")[0] !== av.split("?")[0]) patch.avatar_url = av;
     return Object.keys(patch).length ? patch : null;
   };
 

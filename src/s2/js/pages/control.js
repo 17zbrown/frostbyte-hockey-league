@@ -495,7 +495,9 @@
       : "<b>Reading the league's figures.</b>") + "</p>";
     /* the members are s2_control()'s own count, read here and nowhere else (review 2026-11-25: through the model's kpis a
        refused ops_job_health left the model's 0 standing as the league's count); the sign-ups are the league read's */
-    return '<p class="cc-today" id="ccToday">' + "<b>" + fmt(st.live.ctl.members.present) + "&nbsp;members</b> on the Discord, <b>" + fmt(k.s2_signups.value) + "&nbsp;signed up</b> for Season 2, and " +   /* a number never wraps away from its noun */
+    return '<p class="cc-today" id="ccToday">' + "<b>" + fmt(st.live.ctl.members.present) + "&nbsp;members</b> on the Discord, " +
+      /* health crawl 1: with another season on screen the league read holds that season's sign-ups, not Season 2's (null) */
+      (k.s2_signups.value == null ? "" : "<b>" + fmt(k.s2_signups.value) + "&nbsp;signed up</b> for Season 2, ") + "and " +   /* a number never wraps away from its noun */
       (liveErr("jobs") ? "<b>the job health could not be read</b>: the league refused ops_job_health() (" + esc(liveErr("jobs")) + ")." : H.missing.length ? "<b>job health could not be read</b>." : H.healthy ? "<b>all&nbsp;" + H.all + "&nbsp;scheduled jobs are healthy</b>." : "<b>" + H.ok + "&nbsp;of&nbsp;" + H.all + "&nbsp;scheduled jobs are healthy</b>.") + "</p>";
   }
   /* ===================================================================================================== TONIGHT */
@@ -619,7 +621,7 @@
     settings: function (s2) { var x = s2.settings; return s2.name + ": " + x.weeks + " weeks, " + x.nights_per_week + " nights a week, " + x.roster_max + "-player roster all season, cap " + M().money(x.salary_cap); },
     owners: function () { var a = when(cal2("owner_app_deadline")), b = when(cal2("owners_decided_by")); return a && b && "Applications close " + a + "; owners decided by " + b; },
     clubs: function () { return "After owners are decided; a new franchise waits for your go-ahead"; },
-    signups: function () { var a = when(cal2("registration_deadline")); return a && ctl().seasonReturn.signedUp + " signed up so far; sign-ups close " + a; },
+    signups: function () { var a = when(cal2("registration_deadline")), n = ctl().seasonReturn.signedUp; return a && (n == null ? "Sign-ups close " : n + " signed up so far; sign-ups close ") + a; },
     draft: function () { var a = when(cal2("draft_at")); return a && a + ", " + M().RULES.s2.draftRounds + " rounds"; },
     /* the pool, waivers and bid nights are live since v4.59 (#/camp, #/bidding, Team HQ's bid board) */
     /* gaps (2026-11-25): the pool forms at the draft and is requested one game at a time (Rule S2.5), as model.js says it */
@@ -674,7 +676,7 @@
     var long = function (c) { return c ? esc(Mm.etLong(c.at)) : ""; };
     var key = [["owner_app_deadline", "Owner applications close"], ["owners_decided_by", "Owners decided by"], ["draft_at", "Draft"], ["starts_at", "Puck drop"]].filter(function (x) { return cal[x[0]]; });
     var line = (cal.owner_app_deadline ? "Owner applications close " + long(cal.owner_app_deadline) + (cal.owners_decided_by ? " and you decide by " + long(cal.owners_decided_by) : "") + ". " : "") +
-      (cal.draft_at ? "The draft is " + long(cal.draft_at) + (cal.starts_at ? ", and the puck drops " + long(cal.starts_at) : "") + ". " : "") + ctl().seasonReturn.signedUp + " people have signed up so far.";
+      (cal.draft_at ? "The draft is " + long(cal.draft_at) + (cal.starts_at ? ", and the puck drops " + long(cal.starts_at) : "") + ". " : "") + (ctl().seasonReturn.signedUp == null ? "" : ctl().seasonReturn.signedUp + " people have signed up so far.");
     return '<h2 class="sr" id="ccPaneTitle">Season setup</h2>' +
       band("a", secHead("Season 2, " + esc(s2.format === "basic" ? "basic format" : s2.format), setupHead(), line, null, "ccSetupHead") +
         '<ol class="cc-dates">' + key.map(function (x) {
@@ -1093,7 +1095,7 @@
     }
     else if (s.key === "signups") {
       var sr = C.seasonReturn, s1s = C.signups.filter(function (x) { return x.season === 1; })[0];
-      h += '<div class="cc-pair"><div><span class="t-stat-sm num">' + sr.signedUp + '</span><span class="t-foot">signed up</span></div><div><span class="t-stat-sm num">' + sr.playedS1 + '</span><span class="t-foot">played in Season 1</span></div></div>' +
+      h += '<div class="cc-pair"><div><span class="t-stat-sm num">' + fmt(sr.signedUp) + '</span><span class="t-foot">signed up</span></div><div><span class="t-stat-sm num">' + fmt(sr.playedS1) + '</span><span class="t-foot">played in Season 1</span></div></div>' +
         kv([["Sign-ups close", when(cal.registration_deadline)], ["The rule gives", dl.wantLabel + ", 11:59\u00a0PM ET"]]) +
         (dl.off ? '<p class="cc-callout-s">' + WARN + "<span>The sign-up deadline is not 11:59 PM the day before the draft (Rule S2.1). Worth a look before sign-ups close.</span></p>"
           : '<p class="t-sub">' + S2.ic("check", "cc-ic") + " The deadline matches the rule: 11:59 PM the day before the draft (Rule S2.1).</p>") +
@@ -1386,7 +1388,7 @@
           (C.stay ? "Members in the server today have been there " + C.stay.median + " days at the median. " : "") + (churn[0] ? esc(churn[0].team ? churn[0].team.full : churn[0].code) + " lost the most members who left while on a club, " + churn[0].n + "." : "")) +
         '<div class="cc-funnel cc-churn">' + churn.map(function (c) { return hbar(Mm.crest(c.code) + "<span>" + esc(c.team ? c.team.full : c.code) + "</span>", c.n, cmax); }).join("") +
           (former.length ? hbar('<span class="cc-crest-ph" aria-hidden="true"></span><span>Clubs no longer in the league (' + former.map(function (c) { return esc(c.code); }).join(", ") + ")</span>", formerN, cmax, { cls: "is-former" }) : "") + "</div>", first) +
-      band("a", secHead("Season 2", sr.playedS1 + " of " + sr.signedUp + " sign-ups are returning players", fmt(C.regPresent) + " of the members in the server today have signed up.", arrowLink("#/control?tab=setup", "Season 2 setup", "setup")) +
+      band("a", secHead("Season 2", sr.signedUp == null ? "Returning players are counted with Season 2 on screen" : sr.playedS1 + " of " + sr.signedUp + " sign-ups are returning players", fmt(C.regPresent) + " of the members in the server today have signed up.", arrowLink("#/control?tab=setup", "Season 2 setup", "setup")) +
         about([["Source", "s2_control(), commissioners only, read " + esc(hm(st.live.at)) + " ET. Members, joins and departures come from guild_members and guild_departures (departures are logged from Aug 3), accounts from profiles, weekly players from game_stats."],
           ["Not in this read", "The Season 1 account-to-regular funnel, week-to-week retention, cohorts and how long leavers stayed: s2_control() does not return them, so they are not drawn."]]), first);
   }
@@ -1861,7 +1863,7 @@
      wrongly matched final (reopen_game_final: the result and box score are cleared, the archived payload stays) -- */
   function fixHtml() {
     var gs = M().games.filter(function (g) { return g.stage !== "preseason"; }).slice().sort(function (a, b) { return Date.parse(a.at) - Date.parse(b.at); });
-    var lab = function (g) { return (g.stage === "playoff" ? "Playoffs" : "Week " + g.week) + ", " + M().etFull(g.at).replace(/, \d{4}$/, "") + " " + M().etTime(g.at) + ": " + g.away + " at " + g.home + (g.isFinal ? " (final)" : ""); };
+    var lab = function (g) { return M().stageText(g) + ", " + M().etFull(g.at).replace(/, \d{4}$/, "") + " " + M().etTime(g.at) + ": " + g.away + " at " + g.home + (g.isFinal ? " (final)" : ""); };
     return '<div class="cc-block" id="ccFix">' + lead("Move or re-open a game", gs.length ? "A moved game is played on top of the week it lands in (Rule 3.3); a re-opened final loses its result and box score so the right import can land." : "This season has no games yet.") +
       (gs.length ? '<div class="cc-form"><div class="field"><label for="ccFixG">Game</label><select class="input" id="ccFixG"><option value="">Pick a game</option>' + gs.map(function (g) { return '<option value="' + esc(g.id) + '">' + esc(lab(g)) + "</option>"; }).join("") + "</select></div>" +
         '<div class="field"><label for="ccFixAt">New date and time (Eastern)</label><input class="input" type="datetime-local" id="ccFixAt"></div></div>' +

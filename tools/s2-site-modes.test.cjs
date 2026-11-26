@@ -65,6 +65,18 @@ const sbv = R("src/live/build.cjs").match(/const SUPABASE_JS = "([0-9.]+)";/)[1]
   A("the head is the league's (src/s2/head.html), not the concept's", /<title>Chel Gaming Hockey League<\/title>/.test(npage) && !/concept|Local demo/i.test((npage.match(/<title>[^<]*<\/title>\n<meta name="description" content="[^"]*">/) || ["concept"])[0]));
   const tpl = npage.match(/<template id="s2-scripts">([\s\S]*?)<\/template>/);
   A("the script list is the one bundle", !!tpl && tpl[1].trim() === `<script src="${bundlePath}"></script>`, tpl && tpl[1]);
+  /* health crawl 11 (2026-11-25): js/load.js inserts the bundle only after both league reads, so it preloads every script
+     the template lists as soon as it has asked for the read. Rewritten in the review's second pass: this check pinned a
+     preload at the top of the head, which shared a slow phone's connection with the page's own stylesheets and put the
+     wheel and the read about 3.5 s later (measured at 390 px, CPU 4x, 1.6 Mbps), so it now pins the loader's preload and
+     no head preload. Neither the preload nor the inserted script names crossorigin, so their requests match */
+  const loadJs = R("src/s2/js/load.js"), pre = [...npage.matchAll(/<link rel="preload"[^>]*>/g)].map((m) => m[0]);
+  const boot = loadJs.slice(loadJs.indexOf('if (source === "live") {'));
+  A("the page carries no preload of its own: the loader preloads the template's scripts once it has asked for the read, with no crossorigin anywhere",
+    pre.length === 0 && /function preload\(\) \{\n    scripts\(\)\.forEach\(function \(src\) \{\n      var l = document\.createElement\("link"\); l\.rel = "preload"; l\.as = "script"; l\.href = src;/.test(loadJs) &&
+    /var first = read\(asked, null\);\n    preload\(\);/.test(boot) && /function run\(\) \{\n    var list = scripts\(\);/.test(loadJs) &&
+    npage.indexOf("/* src/s2/js/load.js */") > 0 && npage.indexOf(loadJs.slice(loadJs.indexOf("function preload()"), loadJs.indexOf("function run()"))) > 0 &&
+    !/crossorigin/i.test(tpl ? tpl[1] : "x") && !/\.crossOrigin|setAttribute\("crossorigin"/i.test(loadJs), pre);   /* code, not the comment that says why */
   const listed = [...R("src/s2/demo.html").match(/<template id="s2-scripts">([\s\S]*?)<\/template>/)[1].matchAll(/<script src="([^"]+)"><\/script>/g)].map((m) => m[1]);
   const at = listed.map((rel) => bundle.indexOf(`/* ---- src/s2/${rel} ---- */\n` + R("src/s2/" + rel)));
   A("the bundle holds every script demo.html lists, whole and in order (" + listed.length + ")", at.every((x, i) => x >= 0 && (i === 0 || x > at[i - 1])), listed.filter((r, i) => at[i] < 0).join(" "));

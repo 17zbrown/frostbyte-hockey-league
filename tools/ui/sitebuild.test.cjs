@@ -135,8 +135,12 @@ function serve(dir) {
       const pg = await ctx.newPage(), errs = [];
       pg.on("console", (m) => { if (m.type() === "error") errs.push(m.text()); });
       pg.on("pageerror", (e) => errs.push("pageerror: " + e.message));
+      const hit0 = h.hits.length, bundleIn = () => h.hits.slice(hit0).filter((u) => /^\/s2\/app-[0-9a-f]{12}\.js$/.test(u)).length;
       await pg.goto(h.origin + "/#/today", { waitUntil: "domcontentloaded" });
       await pg.waitForSelector(".boot .spin", { state: "attached", timeout: 15000 });
+      /* health crawl 11: the loader's preload fetches the bundle while the read is still held */
+      for (let i = 0; i < 50 && !bundleIn(); i++) await wait(100);
+      const bundleHeld = bundleIn();
       const s = await pg.evaluate(() => {
         const spin = document.querySelector(".boot .spin"), wheel = spin.querySelector(".spin-w"), anims = document.getAnimations().filter((a) => a.effect && spin.contains(a.effect.target));
         const props = anims.map((a) => a.effect.getKeyframes().map((k) => Object.keys(k).filter((x) => ["offset", "computedOffset", "easing", "composite"].indexOf(x) < 0)).flat());
@@ -196,6 +200,7 @@ function serve(dir) {
       const up = await pg.waitForFunction(() => window.S2 && S2.M && document.querySelector("#app header") && document.querySelector("#page h1, #page section"), null, { timeout: 30000 }).then(() => true, () => false);
       s.after = await pg.evaluate(() => ({ boot: !!document.querySelector(".boot, .spin"), theme: document.documentElement.getAttribute("data-theme"), state: S2.state.theme, bg: getComputedStyle(document.body).backgroundColor }));
       s.up = up; s.errs = errs.filter((e) => !/^Failed to load resource/.test(e));
+      s.bundle = { held: bundleHeld, total: bundleIn() };
       await ctx.close();
       return s;
     }
@@ -222,6 +227,9 @@ function serve(dir) {
       A(scheme + ": it keeps moving while the main thread is busy (held 1.2 s; the compositor draws new frames of it inside the block)", s.probe && s.probe.distinct >= 3, s.probe);
       A(scheme + ": the wheel is centered in the viewport, on a whole pixel (the caption's line box is whole too)", Math.abs(s.cx - s.vw / 2) <= 1 && Math.abs(s.cy - s.vh / 2) <= 2 && Number.isInteger(s.top) && Number.isInteger(s.h), [s.cx, s.cy, s.vw, s.vh, s.top, s.h]);
       A(scheme + ": the page replaces it once the read lands, in the same look, with no console error", s.up && !s.after.boot && s.after.theme === scheme && s.after.state === scheme && s.errs.length === 0, [s.after, s.errs.slice(0, 3)]);
+      /* health crawl 11 (2026-11-25): js/load.js inserts the bundle only after the league reads, so it waited for them; the
+         loader preloads it once it has asked for the read, and the script it inserts uses that one response */
+      A(scheme + ": the bundle downloads while the league is still being read, and only once (the inserted script uses the preload)", s.bundle.held === 1 && s.bundle.total === 1, s.bundle);
     }
     /* dark stored on a light system (review 2026-11-25): the old loader painted light at boot whatever was stored, so only
        this direction fails on it; light stored on a dark system passed there too and pinned nothing */

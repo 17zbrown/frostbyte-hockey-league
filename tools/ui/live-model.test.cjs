@@ -232,6 +232,53 @@ console.log("## the trade reading lives with its renderer (js/trade.js), never i
   A("an empty trade reads as empty, never as even", T.evaluate({}).reading.state === "empty");
 }
 
+console.log("## live health findings (2026-11-25): the model's numbers");
+/* crawl 5: M.toi rounded the seconds part alone, so a fractional TOI/GP of 3599.6 s printed "59:60" */
+A("M.toi rounds the whole time once: 3599.6 s is 60:00 and 2999.7 s 50:00 (never 59:60 or 49:60)",
+  M1.toi(3599.6) === "60:00" && M1.toi(2999.7) === "50:00" && M1.toi(59.5) === "1:00" && M1.toi(61) === "1:01" && M1.toi(0) === "0:00" && M1.toi(null) === "–", [M1.toi(3599.6), M1.toi(2999.7), M1.toi(59.5)]);
+{
+  const sk = M1.lines({ role: "S" }).filter((l) => l.toi_pg != null), bad = sk.filter((l) => /:60$/.test(M1.toi(l.toi_pg)));
+  A("no Season 1 skater's TOI/GP prints 60 seconds (" + sk.length + " lines)", sk.length > 100 && bad.length === 0, bad.length);
+}
+/* crawl 6: the lines stored each rate at three places and M.display rounded it again to two, so 76 points in 22 games
+   read 3.46 (exact 3.4545) where the classic site read 3.45; 16 Season 1 values were off by 0.01 */
+{
+  const RK = { pts_pg: ["p", "gp"], g_pg: ["g", "gp"], a_pg: ["a", "gp"], sog_pg: ["sog", "gp"], hits_pg: ["hits", "gp"], blk_pg: ["blk", "gp"], tk_pg: ["tk", "gp"], gv_pg: ["gv", "gp"],
+    int_pg: ["int", "gp"], pm_pg: ["pm", "gp"], pim_pg: ["pim", "gp"], sv_pg: ["sv", "gp"], sa_pg: ["sa", "gp"], dsv_pg: ["dsv", "gp"], sop_pg: ["sop", "gp"], so_pg: ["so", "gp"] };
+  let seen = 0; const off = [];
+  M1.lines({}).forEach((l) => Object.keys(RK).forEach((k) => {
+    const [a, b] = RK[k]; if (l[k] == null || !l[b]) return; seen++;
+    if (l[k] !== l[a] / l[b] || M1.display(k, l[k]) !== M1.display(k, l[a] / l[b])) off.push([k, l[a], l[b], M1.display(k, l[k])]);
+  }));
+  A("every per-game rate on a Season 1 line is the exact ratio, so it is shown rounded once (" + seen + " values)", seen > 1000 && off.length === 0, off.slice(0, 4));
+  A("76 points in 22 games reads 3.45, as the classic site reads it", M1.display("pts_pg", 76 / 22) === "3.45");
+  const po = [];
+  M1.players.forEach((p) => M1.career(p.id).filter((c) => c.stage === "po" && c.role === "G").forEach((c) => po.push(c.line)));
+  A("a playoff goaltending line's GAA and save percentage are exact too (" + po.length + " lines)", po.length > 0 && po.every((l) => l.gaa === (l.gp ? l.ga / l.gp : null) && l.sv_pct === (l.sa ? l.sv / l.sa : null)),
+    po.filter((l) => l.gaa !== (l.gp ? l.ga / l.gp : null)).map((l) => [l.ga, l.gp, l.gaa]).slice(0, 3));
+}
+/* crawl 1: with Season 1 on screen the body holds Season 1's sign-ups, so Season 2's were never read; the model said 0 and
+   ?season=1#/season told visitors "0 members are in so far". Not read is null now (Season 2 on screen is pinned above) */
+{
+  const sr = M1.control.seasonReturn, kpi = M1.control.kpis.filter((k) => k.key === "s2_signups")[0], step = M1.control.setup.filter((s) => s.key === "signups")[0];
+  A("Season 1 on screen: Season 2's sign-ups are not read, so the count is null, never 0 (seasonReturn, the sign-ups kpi, the setup step)",
+    sr.signedUp === null && sr.playedS1 === null && sr.share === null && Array.isArray(sr.byDay) && kpi.value === null && kpi.display === "–" && kpi.note === null && /^Sign-ups close /.test(step.detail),
+    { sr: [sr.signedUp, sr.playedS1, sr.share], kpi, step: step.detail });
+  A("Season 2 on screen still counts its own sign-ups, returning players included", M3.control.seasonReturn.signedUp > 0 && M3.control.seasonReturn.playedS1 >= 0 && M3.control.seasonReturn.share != null);
+}
+/* crawl 3: the Game Center labeled a Cup Final game (stage playoff, week 3) "Week 3" and linked the regular season's week
+   3; the game desk and the Control Center each kept their own copy of the label. M.stageText and M.stageHref are the one */
+{
+  const po = M1.games.filter((g) => g.stage === "playoff"), reg = M1.games.filter((g) => g.stage === "regular"), has = typeof M1.stageText === "function" && typeof M1.stageHref === "function";
+  A("a playoff game reads Playoffs and links the Playoffs tab (" + po.length + " Season 1 games), whatever its week number",
+    has && po.length === 25 && po.every((g) => M1.stageText(g) === "Playoffs" && M1.stageHref(g) === "#/games?week=playoffs") && po.some((g) => g.week === 3), po.length);
+  A("a regular-season game reads Week N and links that week", has && reg.length === 216 && reg.every((g) => M1.stageText(g) === "Week " + g.week && M1.stageHref(g) === "#/games?week=" + g.week));
+  A("a pre-season game reads Pre-season and links the whole list (it sits in no numbered week)", has && M1.stageText({ stage: "preseason", week: 1 }) === "Pre-season" && M1.stageHref({ stage: "preseason", week: 1 }) === "#/games?week=all");
+  const GD = fs.readFileSync(path.join(JS, "pages/gamedesk.js"), "utf8"), CC = fs.readFileSync(path.join(JS, "pages/control.js"), "utf8");
+  A("the game desk and the Control Center keep no copy of the label (the desk's was unused; the Control Center's game picker reads M.stageText)",
+    !/"Playoffs" :/.test(GD) && !/"Playoffs" :/.test(CC) && /M\(\)\.stageText\(g\) \+ ", " \+ M\(\)\.etFull\(g\.at\)/.test(CC));
+}
+
 console.log("## refilled in place, and a missing section is an error");
 const before = L1.S2.M; L1.S2.buildModel(clone(CUR));
 A("S2.buildModel refills the same S2.M object (pages keep M = S2.M from load)", L1.S2.M === before && L1.S2.M.view.season === 2 && L1.S2.M.lines().length === 0);
@@ -265,20 +312,20 @@ A("the key is the publishable one, never a secret or a JWT", /sb_publishable_/.t
 /* the loader itself, run in a vm with a stand-in page: localStorage, fetch and the template. Each run is one visit */
 const UID = "00000000-0000-4000-8000-000000000001", TOKEN = "header.payload.sig";
 function visit(o) {
-  const calls = [], warns = [], errs = [], app = { innerHTML: "" }, store = Object.assign({}, o.store || {});
+  const calls = [], warns = [], errs = [], app = { innerHTML: "" }, store = Object.assign({}, o.store || {}), order = [];
   const ctx = { console: { log() {}, warn: (...a) => warns.push(a.join(" ")), error: (...a) => errs.push(a.join(" ")) }, JSON, Date, Math, Object, Array, String, Number, Promise, URLSearchParams, setTimeout, clearTimeout,
     location: { search: "?source=live", reload() {} },
     localStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } },
     document: { getElementById: (id) => (id === "app" ? app : id === "s2-scripts" ? { content: { querySelectorAll: () => [{ getAttribute: () => "js/core.js" }] } } : null),
-      createElement: () => ({}), body: { appendChild() {} } },
+      createElement: () => ({}), body: { appendChild() {} }, head: { appendChild: (el) => order.push(["head", el]) } },
     addEventListener() {}, removeEventListener() {},
-    fetch: (url, init) => { const auth = init.headers.Authorization || null, args = JSON.parse(init.body); calls.push({ url, auth, args });
+    fetch: (url, init) => { const auth = init.headers.Authorization || null, args = JSON.parse(init.body); calls.push({ url, auth, args }); order.push(["read"]);
       const status = o.answer ? o.answer(auth, args) : 200, body = status === 200 ? Object.assign({ season: 2, games: [], seasons: [], sections: ["games", "box"] }, o.body || {}) : { code: "PGRST301", message: "JWT expired" };
       return Promise.resolve({ ok: status === 200, status, text: () => Promise.resolve(JSON.stringify(body)) }); } };
   ctx.window = ctx; vm.createContext(ctx);
   if (o.session) ctx.S2 = { session: o.session };
   vm.runInContext(LOAD, ctx, { filename: "load.js" });
-  return { ctx, calls, warns, errs, app, store, S2: ctx.S2 };
+  return { ctx, calls, warns, errs, app, store, order, S2: ctx.S2 };
 }
 const settle = () => new Promise((r) => setTimeout(r, 20));
 const KEY = "sb-bzbuyclwdhmhdzujxeqd-auth-token", future = Math.floor(Date.now() / 1000) + 3600;
@@ -288,6 +335,11 @@ const stored = (exp) => ({ [KEY]: JSON.stringify({ access_token: TOKEN, refresh_
   console.log("## the loader: game ids, the stored sign-in, a refused one, and the read after sign-in");
   let v = visit({}); await settle();
   A("a visitor's first read goes out with the public key alone and is read as a visitor", v.calls.length === 1 && v.calls[0].auth === null && v.S2.data.readAs === null, v.calls);
+  /* health crawl 11, second pass (2026-11-25): the scripts download while the league is read, preloaded by the loader once
+     the read is asked for (a head preload shared a slow phone's connection with the page and held back the wheel and the read) */
+  const heads = v.order.filter((x) => x[0] === "head").map((x) => x[1]);
+  A("once the read is asked for, the loader preloads each script the template lists, as a script, with no crossorigin",
+    v.order[0][0] === "read" && heads.length === 1 && heads[0].rel === "preload" && heads[0].as === "script" && heads[0].href === "js/core.js" && !("crossOrigin" in heads[0]), v.order);
   const ids = ["11111111-1111-4111-8111-111111111111"];
   await v.S2.load.read(1, ["games", "box"], ids);
   A("S2.load.read passes its third argument as p_game_ids (s2_league(integer, text[], uuid[]) on production, read 2026-11-24)", JSON.stringify(v.calls[1].args) === JSON.stringify({ p_season: 1, p_sections: ["games", "box"], p_game_ids: ids }), v.calls[1].args);

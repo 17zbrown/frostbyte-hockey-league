@@ -145,7 +145,6 @@
       ot: !!g.ot, week: g.week, stage: g.stage || "regular", makeup: !!g.makeup, lines: +g.lines || (g.hasBox ? 1 : 0), kept: !!g.kept };
   }
   function game(id) { if (!id) return null; for (var i = 0; i < M.games.length; i++) if (M.games[i].id === id) return sched(M.games[i]); return null; }   /* CG._smGame */
-  function stageText(g) { return (g.stage === "playoff" ? "Playoffs" : g.stage === "preseason" ? "Pre-season" : "Week " + g.week) + (g.makeup ? " · Make-up" : ""); }   /* CG._smStage */
   /* the two forfeit kinds a game allows. forfeit_game refuses a no-show on a game that was played, and a kept result on a
      game with nothing filed; the desk says so before the click instead of after it. (CG._smKinds) */
   function kinds(g) {

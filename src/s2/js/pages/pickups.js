@@ -498,6 +498,10 @@
   };
   function loadGame() {
     var id = G.id, req = ++G.req;
+    /* a pickup game's address is its uuid: anything else is no game, said as not found without asking the league (health
+       crawl 9, 2026-11-25: #/pickup/abc read pickup_games and pickup_stats with "abc", logged two 400s and printed
+       Postgres's 22P02 to the visitor, and Try again repeated the same doomed reads). S2.isUuid is core's one test */
+    if (!S2.isUuid(id)) { G.err = null; G.g = null; G.rows = []; G.at = Date.now(); paint("puHead"); paint("puGame"); return Promise.resolve(); }
     return Promise.all([
       rd(function (c) { return c.from("pickup_games").select("*").eq("id", id).maybeSingle(); }),
       rd(function (c) { return c.from("pickup_stats").select("*, profiles(gamertag)").eq("pickup_game_id", id).order("team_side"); })

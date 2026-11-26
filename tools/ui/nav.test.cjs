@@ -443,6 +443,75 @@ const PERSONA = { guest: "anon", player: "member", office: "gm", staff: "staff",
   A("in a workspace the same action is the app's small gray pill", appActs.mode === "app" && appActs.b === "btn secondary sm" && appActs.a === "btn secondary sm", appActs);
   await p.context().close();
 
+  /* live health findings (2026-11-25), the shell's half */
+  console.log("## health: Enter in the header search, and the current season's doors on an archive");
+  /* crawl 4: opened with the header's button (not Command K), Enter went to the result, and the Enter's default then pressed
+     the button pick() had just handed focus back to, so an empty search opened again over the result */
+  p = await page({ role: "player" });
+  await p.go("#/today");
+  await p.click("#openSearch"); await wait(250);
+  await p.fill(".palette input", "bruins"); await wait(200);
+  const want = await p.evaluate(() => { const g = S2.search("bruins")[0]; return g && g.items[0] ? g.items[0].href : null; });
+  await p.keyboard.press("Enter"); await wait(700);
+  let hs = await p.evaluate(() => ({ hash: location.hash, pal: !!S2.$(".palette"), scrim: !!S2.$(".scrim.on"), layers: S2.layer.top() ? 1 : 0 }));
+  A("Enter in a search opened with the header's button goes to the result, and the search stays closed", !!want && hs.hash === want && !hs.pal && !hs.scrim && !hs.layers, [want, hs]);
+  await p.context().close();
+  /* crawl 1: a bare "#/season" keeps the ?season= the address names, so an archive's Register, Own a club, Join the staff
+     and Full calendar opened the archive's season page, which counted nobody signed up. Each resolves to the current
+     season now (S2.seasonHref(null, "#/season")), read at each draw */
+  const seasonDoors = () => p.evaluate(() => {
+    const cur = (a) => { const u = new URL(a.href); return u.hash === "#/season" ? [a.textContent.trim(), u.search] : null; };
+    const foot = S2.$$(".site-foot a[href]").map(cur).filter(Boolean);
+    S2.nav.open("season", "key"); const menu = S2.$$("#navP-season a[href]").map(cur).filter(Boolean); S2.nav.close(true);
+    const st = S2.$(".topstrip"), strip = st ? [st.textContent, new URL(st.href).search, new URL(st.href).hash] : null;
+    return { search: location.search, foot, menu, strip };
+  });
+  for (const role of ["guest", "player"]) {
+    p = await page({ role });
+    await p.go("#/standings", "?season=1");
+    const d = await seasonDoors();
+    const all = d.foot.concat(d.menu);
+    A(role + ": on the Season 1 archive every footer and Season menu door to the season page opens the current season (Register, Join the staff, Full calendar)",
+      d.search === "?season=1" && ["Register", "Join the staff"].every((t) => d.foot.some((x) => x[0] === t)) && ["Register", "Full calendar"].every((t) => d.menu.some((x) => x[0].indexOf(t) === 0)) &&
+      all.every((x) => x[1] === ""), d);
+    A(role + ": the announcement strip's season door does too", !d.strip || d.strip[2] !== "#/season" || d.strip[1] === "", d.strip);
+    await p.context().close();
+  }
+  /* a workspace's lock: its next step on an archive (Join the staff from the Staff Desk's) opens the current season */
+  p = await page({ role: "player" });
+  await p.go("#/desk", "?season=1");
+  hs = await p.evaluate(() => { const a = S2.$(".ws-lock-acts a.btn"); return a ? [a.textContent, new URL(a.href).search, new URL(a.href).hash] : null; });
+  A("on the archive the Staff Desk's lock offers Apply to join the staff for the current season", !!hs && hs[0] === "Apply to join the staff" && hs[1] === "" && hs[2] === "#/season", hs);
+  await p.context().close();
+  /* crawl 1, second pass: the router owns the rule, because pages still link "#/season" bare (the You page's doors, the bid
+     room's breadcrumb, Today, the search palette) and ?season=1#/season said "0 members are in so far" (and "null members"
+     once the model stopped inventing the zero). Typed, and from a bare link on the archive, the page opens on the current
+     season, with its real count, at the desk and the phone width */
+  const seasonLanded = async () => {
+    const moved = await p.waitForURL((u) => !u.searchParams.has("season") && u.hash === "#/season", { timeout: 15000 }).then(() => true, () => false);
+    await p.waitForFunction(() => window.S2 && S2.M && S2.$("#page .lg-h1-xl"), null, { timeout: 20000 }); await wait(200);
+    if (!moved) return p.evaluate(() => ({ stuck: location.search + location.hash, text: S2.$("#page .lede-l") ? S2.$("#page .lede-l").textContent : null }));
+    return p.evaluate(() => {
+      const text = S2.$("#page").innerText, m = text.match(/(\d+) members (?:are in so far|signed up)/);
+      return { search: location.search, hash: location.hash, view: S2.M.view.season, h1: S2.$("#page .lg-h1-xl").textContent, n: m ? +m[1] : null,
+        nul: /\bnull\b/.test(text), zero: /(^|\D)0 members/.test(text), sr: S2.M.control.seasonReturn.signedUp };
+    });
+  };
+  for (const vp of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    p = await page({ role: "guest", viewport: vp });
+    await p.goto(BASE + "?season=1#/season");
+    let sl = await seasonLanded();
+    A(vp.width + ": ?season=1#/season opens the current season's page, which counts its real sign-ups (never 0, never null)",
+      sl.view === 2 && sl.h1 === "Season 2" && sl.n > 0 && sl.n === sl.sr && !sl.nul && !sl.zero, sl);
+    /* a bare link on the archive, as the You page draws its guest doors: the in-page move goes the same way */
+    await p.go("#/you", "?season=1");
+    const bare = await p.evaluate(() => S2.$$('#page a[href="#/season"]').length);
+    await p.evaluate(() => { const a = S2.$('#page a[href="#/season"]'); if (a) a.click(); else location.hash = "#/season"; });
+    sl = await seasonLanded();
+    A(vp.width + ": a bare #/season link on the archive" + (bare ? " (the You page's own)" : "") + " opens the current season's page too", sl.view === 2 && sl.n > 0 && !sl.nul && !sl.zero, [bare, sl]);
+    await p.context().close();
+  }
+
   A("no console or page errors", errors.length === 0, errors);
   await browser.close();
   console.log(fails ? "\n" + fails + " of " + n + " FAILED" : "\n" + n + "/" + n + " passed");

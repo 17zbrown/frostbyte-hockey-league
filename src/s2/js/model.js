@@ -57,7 +57,15 @@ window.S2.fillModel = function (D) {
   M.ago = (minutes) => { const m = Math.round(num(minutes)); return m < 1 ? "just now" : m < 60 ? m + " min ago" : m < 2880 ? Math.round(m / 60) + " h ago" : Math.round(m / 1440) + " days ago"; };
   /* zero reads "$0" and a shortfall carries its sign (a club pushed over the cap reads as a negative room) */
   M.money = (n) => (n == null ? "–" : n === 0 ? "$0" : n < 0 ? "-" + M.money(-n) : "$" + (n >= 1e6 ? fmtN(n / 1e6, n % 1e6 ? 2 : 0) + "M" : fmtN(n / 1e3) + "K"));
-  M.toi = (s) => (s == null ? "–" : Math.floor(s / 60) + ":" + String(Math.round(s % 60)).padStart(2, "0"));
+  /* minutes:seconds from seconds, rounded once on the whole: rounding the seconds part alone printed 3599.6 s as "59:60" (health
+     crawl 5, 2026-11-25: TOI/GP is a fractional per-game rate) */
+  M.toi = (s) => { if (s == null) return "–"; const t = Math.round(s); return Math.floor(t / 60) + ":" + String(t % 60).padStart(2, "0"); };
+  /* a game's place in the season, the ONE label and its #/games link (health crawl 3, 2026-11-25: the Game Center called a
+     Cup Final game, stage playoff and week 3, "Week 3" and linked the regular season's week 3; the game desk and the
+     Control Center each wrote their own copy). games.stage is preseason, regular or playoff (games_stage_check); a
+     pre-season game sits in no numbered week of the Games page, so its link is the whole list */
+  M.stageText = (g) => (g.stage === "playoff" ? "Playoffs" : g.stage === "preseason" ? "Pre-season" : "Week " + g.week);
+  M.stageHref = (g) => "#/games?week=" + (g.stage === "playoff" ? "playoffs" : g.stage === "preseason" ? "all" : g.week);
 
   M.generated = D.generated || null;
   M.now = toDate(D.generated) || new Date();   /* the moment the league data was read */
@@ -226,7 +234,9 @@ window.S2.fillModel = function (D) {
     const l = Object.assign({}, raw, raw.role === "G" ? IN_GOAL[raw.pid] || { dsv: 0, sop: 0, psv: 0, psa: 0 } : AT_CENTER[raw.pid] || { fow: 0, fot: 0, fo_games: 0 });
     const x = Object.assign({}, l);
     x.id = l.pid; x.href = "#/player/" + l.pid;
-    Object.keys(RATE_KEYS).forEach((k) => { const [a, b] = RATE_KEYS[k]; x[k] = r3(div(num(l[a]), num(l[b]))); });
+    /* the exact ratio: M.display rounds once, to the stat's own places. Stored at three places and shown at two, 76 points in
+       22 games read 3.46 instead of 3.45 (health crawl 6, 2026-11-25); M.rank already ties on the shown value */
+    Object.keys(RATE_KEYS).forEach((k) => { const [a, b] = RATE_KEYS[k]; x[k] = div(num(l[a]), num(l[b])); });
     x.gaa = l.gaa != null ? l.gaa : x.gaa_calc; delete x.gaa_calc;
     /* EA can credit a shot on goal without an attempt, so the plain ratio can pass 100%. Asked whether to cap it at 100%, the commissioner, 2026-11-04: "Yes" */
     if (x.onnet_pct > 1) x.onnet_pct = 1;
@@ -592,7 +602,7 @@ window.S2.fillModel = function (D) {
       M.log(pid, r).forEach((g) => { if (g.club && clubs.indexOf(g.club) < 0) clubs.push(g.club); });
       return { season: LINE_SEASON, stage: "reg", role: r, clubs: clubs.length ? clubs : [L.club], line: L };
     }).concat(arr(D.playoffLines).filter((l) => l.pid === pid).map((l) => ({ season: LINE_SEASON, stage: "po", role: l.role, clubs: arr(l.clubs).length ? l.clubs : [l.club],
-      line: Object.assign({}, l, { sv_pct: r3(div(num(l.sv), num(l.sa))), gaa: r3(div(num(l.ga), num(l.gp))) }) })));
+      line: Object.assign({}, l, { sv_pct: div(num(l.sv), num(l.sa)), gaa: div(num(l.ga), num(l.gp)) }) })));   /* exact, as the season lines (crawl 6) */
   };
 
   /* ---------- ranks: where a line stands in its position group (players with 6+ games there) ----------
@@ -652,7 +662,7 @@ window.S2.fillModel = function (D) {
      every line at every position: they are the club's faceoffs, unlike a player's FO% (AT_CENTER). A rate is per game with a
      box score, because a forfeit with no ice time has none. Clubs level at the precision shown share a place, as players do. */
   const CLUB_STATS = {
-    toa_pg: { label: "Time on attack", show: (v) => M.toi(Math.round(v)), key: (v) => Math.round(v) },
+    toa_pg: { label: "Time on attack", show: (v) => M.toi(v), key: (v) => Math.round(v) },
     pass_pct: { label: "Passing", show: (v) => (v * 100).toFixed(1) + "%", key: (v) => Math.round(v * 1000) },
     fo_pct: { label: "Faceoffs won", show: (v) => (v * 100).toFixed(1) + "%", key: (v) => Math.round(v * 1000) },
     hits_pg: { label: "Hits" }, blk_pg: { label: "Blocks" }, tk_pg: { label: "Takeaways" }, int_pg: { label: "Interceptions" },
@@ -973,8 +983,10 @@ window.S2.fillModel = function (D) {
   const fun = obj(AN.funnel_s1);
   /* Season 2's sign-ups so far: the commissioner's read when this body has it; else, with Season 2 on screen, its own
      sign-ups (registration_pool), the returning ones being those with league games before it (career_games_played,
-     exact while Season 2 has no games, which is while sign-ups are open) */
-  const s2f = AN.funnel_s2_so_far ? obj(AN.funnel_s2_so_far) : VIEW_N === 2 ? { signed_up: M.signups.length, of_whom_played_s1: M.signups.filter((x) => num(M.careerGames[x.pid]) > 0).length } : {};
+     exact while Season 2 has no games, which is while sign-ups are open). With another season on screen the body holds
+     THAT season's sign-ups, so Season 2's were not read: null, never a zero (health crawl 1, 2026-11-25: ?season=1#/season
+     said "0 members are in so far"). Pages tell the two apart by M.control.seasonReturn.signedUp == null */
+  const s2f = AN.funnel_s2_so_far ? obj(AN.funnel_s2_so_far) : VIEW_N === 2 ? { signed_up: M.signups.length, of_whom_played_s1: M.signups.filter((x) => num(M.careerGames[x.pid]) > 0).length } : null;
   const jobsD = obj(D.jobs);
   const cadence = (sched) => { if (!sched) return null; if (/second/.test(sched)) return 1; const p = sched.split(" "); if (p.length !== 5) return null;
     if (/^\*\/(\d+)$/.test(p[0])) return +p[0].slice(2); if (p[0] === "*") return 1; if (p[1] === "*") return 60; if (p[4] !== "*") return 10080; return 1440; };
@@ -999,7 +1011,7 @@ window.S2.fillModel = function (D) {
   const s2 = seasons.filter((s) => s.number === 2)[0];
   M.control = {
     kpis: [
-      { key: "s2_signups", label: "Season 2 sign-ups", value: num(s2f.signed_up), display: String(num(s2f.signed_up)), note: num(s2f.of_whom_played_s1) + " played in Season 1" },
+      { key: "s2_signups", label: "Season 2 sign-ups", value: s2f ? num(s2f.signed_up) : null, display: s2f ? String(num(s2f.signed_up)) : "–", note: s2f ? num(s2f.of_whom_played_s1) + " played in Season 1" : null },
       { key: "open_cases", label: "Open cases", value: openN, display: String(openN) },
       { key: "members", label: "Discord members", value: num(MP.present), display: String(num(MP.present)), note: num(GU.linked_present) + " linked to a site account" },
       { key: "automations", label: "Scheduled jobs healthy", value: null,
@@ -1020,7 +1032,8 @@ window.S2.fillModel = function (D) {
       rows: cohorts.map((c) => ({ label: "Week " + c.cohort, size: c.size, cells: Array.from({ length: maxWk }, (_, i) => { const v = obj(c.still_playing)["wk" + (i + 1)]; return v == null ? null : r3(v / c.size); }),
         counts: Array.from({ length: maxWk }, (_, i) => { const v = obj(c.still_playing)["wk" + (i + 1)]; return v == null ? null : v; }) })) },
     tenure: Object.assign({}, obj(GU.departure_tenure_days), { hist: arr(GU.departure_tenure_hist).map((h) => ({ label: TEN_B[h.ord] || "?", n: h.n })) }),
-    seasonReturn: { signedUp: num(s2f.signed_up), playedS1: num(s2f.of_whom_played_s1), share: r3(div(num(s2f.of_whom_played_s1), num(s2f.signed_up))),
+    /* signedUp, playedS1 and share are null when Season 2's sign-ups were not read (s2f above) */
+    seasonReturn: { signedUp: s2f ? num(s2f.signed_up) : null, playedS1: s2f ? num(s2f.of_whom_played_s1) : null, share: s2f ? r3(div(num(s2f.of_whom_played_s1), num(s2f.signed_up))) : null,
       byDay: arr(AN.signups_by_day_s2).map((d) => ({ d: d.d, label: M.etMonthDay(d.d), n: d.n })) },
     churnByClub: Object.keys(obj(GU.departs_by_club)).map((c) => ({ code: c, n: GU.departs_by_club[c], inLeague: !!M.team(c), team: M.team(c) })).sort(by("n")),
     signups: arr(AN.signups_by_season),
@@ -1041,7 +1054,7 @@ window.S2.fillModel = function (D) {
       { step: 4, key: "clubs", label: "Clubs and divisions", state: "todo", detail: "After owners are decided; a new franchise waits for the commissioner's go-ahead (v4.19)" },
       /* QA functional 2026-11-25: Season 2 has no placement (ruling: no depth or automatic placement), and its rollover is
          its own, read from its row (the Season 1 row is complete) */
-      { step: 5, key: "signups", label: "Sign-ups", state: "open", detail: num(s2f.signed_up) + " signed up so far; sign-ups close " + ((s2 && s2.calendar.filter((c) => c.key === "registration_deadline")[0]) || {}).date + ", 11:59 PM ET, and later sign-ups join the training camp pool" },
+      { step: 5, key: "signups", label: "Sign-ups", state: "open", detail: (s2f ? num(s2f.signed_up) + " signed up so far; sign-ups close " : "Sign-ups close ") + ((s2 && s2.calendar.filter((c) => c.key === "registration_deadline")[0]) || {}).date + ", 11:59 PM ET, and later sign-ups join the training camp pool" },
       { step: 6, key: "draft", label: "Draft", state: "todo", detail: M.etDate(M.s2cal.draft) + ", 9 PM ET, " + M.RULES.s2.draftRounds + " rounds" },
       /* the pool and the bid nights run in the database since v4.59 (market_tick, market_pool_requests) */
       { step: 7, key: "pool", label: "Camp pool and bidding", state: "todo",

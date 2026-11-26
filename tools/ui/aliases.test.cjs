@@ -12,6 +12,7 @@ const S2_ROOT = process.env.S2_ROOT || (() => { throw new Error("S2_ROOT unset: 
 const PW = process.env.PLAYWRIGHT || "/Users/zackbrown/.npm-global/lib/node_modules/@playwright/cli/node_modules/playwright";
 const { chromium } = require(PW);
 const mock = require(process.env.S2_MOCK);
+const live = require("./desklive.cjs");   /* the Staff Desk's league office (placeholder names), for the case and application links */
 /* the role a link is opened as, signed in as the harness persona that holds it */
 const PERSONA = { guest: "anon", player: "member", office: "gm", staff: "staff", commish: "commissioner" };
 /* the league read, and its lazy news section (the recording lacks it) answered with no story: #/news is one of the links */
@@ -23,14 +24,21 @@ let fails = 0;
 const A = (name, cond, more) => { console.log((cond ? "PASS " : "FAIL ") + name + (cond || more == null ? "" : "  (" + (typeof more === "string" ? more : JSON.stringify(more)).slice(0, 600) + ")")); if (!cond) fails++; };
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 /* the twelve database functions' hard-coded routes (read from pg_proc 2026-11-23) and where each must land */
-const DB_LINKS = [["#/hub/staffdesk", "#/desk"], ["#/schedule", "#/games"], ["#/hub/complaint?id=6a1d0d6e-0000-4000-8000-000000000001", "#/desk?tab=cases", "staff"],
+/* health links 0 (2026-11-25): this pinned the staffer's case link landing on the bare Cases tab, which dropped the case
+   id, so the desk opened the first case in its list; rewritten to pin the case kept (#/desk?tab=cases&case=<id>) */
+const DB_LINKS = [["#/hub/staffdesk", "#/desk"], ["#/schedule", "#/games"], ["#/hub/complaint?id=6a1d0d6e-0000-4000-8000-000000000001", "#/desk?tab=cases&case=6a1d0d6e-0000-4000-8000-000000000001", "staff"],
   ["#/hub/complaint?id=6a1d0d6e-0000-4000-8000-000000000001", "#/you?tab=inbox&show=cases", "player"], ["#/hub/availability", "#/you?tab=week"], ["#/hub/tradehub", "#/hq?tab=trades"],
   ["#/news", "#/news"], ["#/hub/actions", "#/you?tab=inbox&show=cases"], ["#/pickup-import", "#/pickup-import"],
   /* v5.00 swap (i2): the department desks bot/staff-alerts.mjs links (they fell through to You) */
   ["#/hub/reviewboard", "#/desk?tab=applications", "staff"], ["#/hub/opsdesk", "#/desk?tab=games", "staff"], ["#/hub/draftroom", "#/draft", "staff"],
   ["#/hub/transdesk", "#/desk?tab=transactions", "staff"], ["#/hub/community", "#/desk?tab=cases", "staff"],
   /* the Newsroom stayed (2026-10-22): its old desk link opens the Staff Desk pane for staff, the news page for anyone else */
-  ["#/hub/newsroom", "#/desk?tab=newsroom", "staff"], ["#/hub/newsroom", "#/news", "player"]];
+  ["#/hub/newsroom", "#/desk?tab=newsroom", "staff"], ["#/hub/newsroom", "#/news", "player"],
+  /* health links 1 and 3 (2026-11-25): an application link opens that application for staff; a club room's lineup notice
+     opens Team HQ's Lineups for a front office and the player's own week for a player (Team HQ locked players out) */
+  ["#/hub/application?id=6a1d0d6e-0000-4000-8000-000000000001&type=owner", "#/desk/application/owner-6a1d0d6e-0000-4000-8000-000000000001", "staff"],
+  ["#/hub/application?id=6a1d0d6e-0000-4000-8000-000000000001&type=owner", "#/you?tab=applications", "player"],
+  ["#/hub/lineups", "#/hq?tab=lineups", "office"], ["#/hub/lineups", "#/you?tab=week", "player"], ["#/hub/lineup?game=6a1d0d6e-0000-4000-8000-000000000001", "#/you?tab=week", "player"]];
 
 (async () => {
   const b = await chromium.launch();
@@ -100,11 +108,14 @@ const DB_LINKS = [["#/hub/staffdesk", "#/desk"], ["#/schedule", "#/games"], ["#/
   /* g5's hand-over (owners.json), i3f: the classic #/pickup/<id> (a pickup game's box score, linked from profiles and the LFG
      bot's posts) opens that game on the pickups page; a bare #/pickup opens the list */
   A("an old pickup game link opens that game on the pickups page, a bare one the list", r.pickup === "#/pickups/6a1d0d6e-0000-4000-8000-000000000001" && r.pickups === "#/pickups", r);
-  A("a sheet link opens Lineups, and Management opens the Front office tab", r.lineup === "#/hq?tab=lineups" && r.mgmt === "#/hq?tab=office", r);
+  /* health links 3: this pinned a sheet link opening Team HQ's Lineups for everyone, a door that locks a player out (the
+     page here is a player's); rewritten: a player reads their own week, and a front office's is checked below */
+  A("a sheet link opens a player's own week, and Management opens the Front office tab", r.lineup === "#/you?tab=week" && r.mgmt === "#/hq?tab=office", r);
   A("an unknown hub page opens You, an unknown admin page the Control Center", r.unknownHub === "#/you" && r.unknownAdmin === "#/control", r);
   A("the old brand page opens Today, never the concept page (v5.00 swap)", r.brand === "#/today", r);
   A("a page the concept already has is left alone", r.page === null && r.nothing === null, r);
-  A("an article opens its story, the retired forums land on Today, the legal page on Terms", r.news === "#/news/7" && r.forum === "#/today" && r.legal === "#/terms", r);
+  /* health links 2: this pinned "#/news/7", an address no story has (a story's is n-<id>, js/pages/office.js); rewritten */
+  A("an article opens its story (n-<id>), the retired forums land on Today, the legal page on Terms", r.news === "#/news/n-7" && r.forum === "#/today" && r.legal === "#/terms", r);
   await done(p);
 
   console.log("## notifications: link_view and link_param, as the live CG.notifRoute reads them");
@@ -116,10 +127,73 @@ const DB_LINKS = [["#/hub/staffdesk", "#/desk"], ["#/schedule", "#/games"], ["#/
   }));
   A("every link_view the live site writes (" + r.length + ", teams included) opens a page here, or the server invite for discord", r.length === 26 && r.some((x) => x.v === "teams") && r.every((x) => x.ok), r.filter((x) => !x.ok));
   /* i3f: the league read carries the server invite, so discord opens it (You only when site_config has none) */
-  const want = { team: "#/club/BOS", game: "#/games", availability: "#/you?tab=week", lineups: "#/hq?tab=lineups", mgmtapprovals: "#/hq?tab=office", stafftasks: "#/desk", actions: "#/you?tab=inbox&show=cases",
-    rulebook: "#/rulebook", draft: "#/draft", forum: "#/today", ownerapp: "#/season", transactions: "#/today", discord: /^https:\/\//.test(INVITE || "") ? INVITE : "#/you", teams: "#/control?tab=clubs" };
+  /* health links 3 and 4: lineups pinned Team HQ for a player (locked to them) and transactions pinned Today (nothing about
+     the trade); rewritten to a player's week and the league's trades */
+  const want = { team: "#/club/BOS", game: "#/games", availability: "#/you?tab=week", lineups: "#/you?tab=week", mgmtapprovals: "#/hq?tab=office", stafftasks: "#/desk", actions: "#/you?tab=inbox&show=cases",
+    rulebook: "#/rulebook", draft: "#/draft", forum: "#/today", ownerapp: "#/season", transactions: "#/clubs?view=moves&kind=trade", discord: /^https:\/\//.test(INVITE || "") ? INVITE : "#/you", teams: "#/control?tab=clubs" };
   A("each lands where the live one would", Object.keys(want).every((k) => (r.filter((x) => x.v === k)[0] || {}).h === want[k]), r.filter((x) => want[x.v] && want[x.v] !== x.h));
+  /* health crawl 9 (2026-11-25): one uuid test, S2.isUuid in js/core.js, for every page that checks an id before it reads
+     (the copies in core.js and js/trade.js are gone; today.js's is its page owner's to drop) */
+  r = await p.evaluate(() => ({ fn: typeof S2.isUuid, yes: [S2.isUuid("6a1d0d6e-0000-4000-8000-000000000001"), S2.isUuid("6A1D0D6E-0000-4000-8000-00000000000A")],
+    no: [S2.isUuid("abc"), S2.isUuid(""), S2.isUuid(null), S2.isUuid(undefined), S2.isUuid("6a1d0d6e-0000-4000-8000-00000000001"), S2.isUuid(" 6a1d0d6e-0000-4000-8000-000000000001"), S2.isUuid("6a1d0d6e-0000-4000-8000-000000000001/x")],
+    trade: [S2.trade.isId("6a1d0d6e-0000-4000-8000-000000000001"), S2.trade.isId("x"), S2.trade.isId(null)], notif: [S2.notifRoute("actions", "abc"), S2.notifRoute("forum", "6a1d0d6e-0000-4000-8000-000000000001")] }));
+  const UUID_RX = /\[0-9a-f\]\{8\}-\[0-9a-f\]\{4\}/g, src = (f) => require("fs").readFileSync(require("path").join(S2_ROOT, f), "utf8");
+  A("S2.isUuid is the one uuid test: any case, and a short, padded, empty or missing id is not one", r.fn === "function" && r.yes.every(Boolean) && r.no.every((x) => x === false), r);
+  A("the trade door and the notification switch use it: a non-id opens no case and no thread", r.trade.join() === "true,false,false" && r.notif[0] === "#/you?tab=inbox&show=cases" && r.notif[1] === "#/today", r);
+  A("js/core.js holds the pattern once and js/trade.js not at all", (src("js/core.js").match(UUID_RX) || []).length === 1 && !(src("js/trade.js").match(UUID_RX) || []).length);
   await done(p);
+
+  /* health links 0, 1, 3 and 4 (2026-11-25): the alias helper took no route, so a case link and an application link lost
+     their ids; byHat passes the route through and keeps the role-guess hold (f.byRole, S2.route) */
+  const U = "6a1d0d6e-0000-4000-8000-000000000001";
+  p = await page("#/today", "staff");
+  r = await p.evaluate((u) => ({ complaints: S2.notifRoute("complaints", u), actions: S2.notifRoute("actions", u), admin: S2.notifRoute("admin", u), bare: S2.alias("#/hub/complaints"), archive: S2.alias("#/hub/archive"),
+    owner: S2.notifRoute("application", "id=" + u + "&type=owner"), mgmt: S2.notifRoute("application", "id=" + u + "&type=management"), staff: S2.notifRoute("staffdesk", "id=" + u + "&type=staff"),
+    committee: S2.notifRoute("users", "id=" + u + "&type=committee"), odd: S2.notifRoute("application", "id=" + u + "&type=bogus"), noId: S2.alias("#/hub/application?type=owner"),
+    trade: S2.notifRoute("transactions", ""), held: ["hub/complaint", "hub/complaints", "hub/application", "hub/lineups", "hub/lineup", "hub/lines", "hub/newsroom"].every((k) => typeof S2.ALIASES[k] === "function" && S2.ALIASES[k].byRole === true) }), U);
+  A("staff: a case notification (complaints, actions, admin) opens that case on the desk; the id-less old pages open the Cases tab",
+    [r.complaints, r.actions, r.admin].every((h) => h === "#/desk?tab=cases&case=" + U) && r.bare === "#/desk?tab=cases" && r.archive === "#/desk?tab=cases", r);
+  A("staff: an application notification opens that application's desk page for each of the four types; an unknown type or no id stays on the board",
+    r.owner === "#/desk/application/owner-" + U && r.mgmt === "#/desk/application/management-" + U && r.staff === "#/desk/application/staff-" + U && r.committee === "#/desk/application/committee-" + U &&
+    r.odd === "#/desk?tab=applications" && r.noId === "#/desk?tab=applications", r);
+  A("a trade notification opens the league's trades (public to every recipient)", r.trade === "#/clubs?view=moves&kind=trade", r.trade);
+  A("every alias that depends on the reader is held until the role is known (the router's role-guess hold)", r.held, r.held);
+  await done(p);
+  p = await page("#/today", "office");
+  r = await p.evaluate(() => ({ notif: S2.notifRoute("lineups", ""), lineup: S2.notifRoute("lineup", "6a1d0d6e-0000-4000-8000-000000000001"), lines: S2.alias("#/hub/lines"), mgr: S2.notifRoute("manager", "lineups"), roster: S2.alias("#/hub/roster") }));
+  A("a front office: lineup notices and the old sheet links open Team HQ's Lineups", r.notif === "#/hq?tab=lineups" && r.lineup === "#/hq?tab=lineups" && r.lines === "#/hq?tab=lineups" && r.mgr === "#/hq?tab=lineups" && r.roster === "#/hq?tab=roster", r);
+  await done(p);
+  p = await page("#/today", "guest");
+  r = await p.evaluate(() => ({ cases: S2.alias("#/hub/complaint?id=6a1d0d6e-0000-4000-8000-000000000001"), app: S2.alias("#/hub/application?id=6a1d0d6e-0000-4000-8000-000000000001&type=owner"), lineups: S2.alias("#/hub/lineups") }));
+  A("a guest: a case opens the inbox's cases, an application You's applications, a lineup notice their week (each with the Join door)",
+    r.cases === "#/you?tab=inbox&show=cases" && r.app === "#/you?tab=applications" && r.lineups === "#/you?tab=week", r);
+  await done(p);
+
+  console.log("## health: a case link and an application link open that case and that application on the Staff Desk");
+  /* the desk's league office (tools/ui/desklive.cjs, placeholder names): c-pos-1 is not the first case in its list */
+  const L = await live.open(b, BASE, { persona: "staff", hash: "#/hub/complaint?id=c-pos-1" });
+  const deskAt = () => L.p.evaluate(() => ({ hash: location.hash, sel: S2.$$('#dkCaseRows [aria-selected="true"]').map((x) => x.getAttribute("data-case")),
+    detail: (S2.$("#dkCaseDetail [data-lv-case]") || { getAttribute: () => null }).getAttribute("data-lv-case"), first: (S2.$("#dkCaseRows [data-case]") || { getAttribute: () => null }).getAttribute("data-case"),
+    text: (S2.$("#dkCaseDetail") || {}).textContent || "", h1: (S2.$("#page h1") || {}).textContent || "", page: (S2.$("#page") || {}).textContent || "" }));
+  r = await deskAt();
+  A("a staffer's case link opens that case, not the first in the list", r.hash === "#/desk?tab=cases&case=c-pos-1" && r.first !== "c-pos-1" && r.sel.join() === "c-pos-1" && r.detail === "c-pos-1", r.hash + " " + r.first + " " + r.sel + " " + r.detail);
+  await L.p.evaluate((u) => { location.hash = "#/hub/complaint?id=" + u; }, U); await wait(700);
+  r = await deskAt();
+  A("a link to a case the desk does not hold (deleted) opens none and says so, never another case", r.hash === "#/desk?tab=cases&case=" + U && r.sel.length === 0 && r.detail === null && /No case with that link/.test(r.text), r.sel.concat([r.detail, r.text.slice(0, 80)]));
+  await L.p.evaluate(() => { location.hash = "#/hub/application?id=oa-1&type=owner"; }); await wait(700);
+  r = await deskAt();
+  A("a staffer's application link opens that application's own page", r.hash === "#/desk/application/owner-oa-1" && !/No application with that link/.test(r.page), r.hash);
+  A("no console error on the desk", L.errors.length === 0, L.errors.slice(0, 3));
+  await L.close();
+  /* on a phone the list and a case are two screens: the not-found case shows on the case screen, with the way back */
+  const LP = await live.open(b, BASE, { persona: "staff", w: 390, hash: "#/hub/complaint?id=" + U });
+  r = await LP.p.evaluate(() => ({ detail: (S2.$("#dkMail") || { classList: { contains: () => false } }).classList.contains("show-detail"), text: (S2.$("#dkCaseDetail") || {}).textContent || "", back: !!S2.$("#dkCaseDetail .dk-back") }));
+  A("on a phone, the deleted case's link opens the case screen saying No case with that link, with the way back to Cases", r.detail && /No case with that link/.test(r.text) && r.back, r);
+  await LP.p.click("#dkCaseDetail .dk-back"); await wait(600);
+  r = await LP.p.evaluate(() => ({ hash: location.hash, detail: S2.$("#dkMail").classList.contains("show-detail"), rows: S2.$$("#dkCaseRows [data-case]").length }));
+  A("...and Cases returns to the list", r.hash === "#/desk?tab=cases" && !r.detail && r.rows > 0, r);
+  A("no console error on the phone desk", LP.errors.length === 0, LP.errors.slice(0, 3));
+  await LP.close();
 
   console.log("## a broken percent escape never stops the router (review 2026-11-23)");
   p = await page("#/hub/complaint?id=%E0%A4%A", "player");

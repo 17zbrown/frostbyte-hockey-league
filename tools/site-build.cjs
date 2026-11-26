@@ -198,6 +198,9 @@ function s2Page(root) {
   try { new vm.Script(bundle, { filename: "bundle" }); } catch (e) { throw new Error("site-build: the joined Season 2 bundle does not parse: " + e.message); }
   const bundlePath = BUNDLE_DIR + "app-" + sha(bundle) + ".js";
   html = html.replace("\u0000BUNDLE\u0000", `<template id="s2-scripts">\n<script src="${bundlePath}"></script>\n</template>`);
+  /* the bundle downloads while the league is read (health crawl 11, 2026-11-25): js/load.js preloads every script the
+     template lists as soon as it has asked for the read. Not a preload here at the top of the head: that shared a slow
+     phone's connection with the page's own stylesheets and put the wheel and the read 3.5 s later (review, 2026-11-25) */
   /* the generated rulebook (stream e6, one book): the flip needs it (flipGuard); before that a missing one is said, never skipped */
   if (!list.includes("js/rulebook.js")) {
     notes.push(fs.existsSync(path.join(S2_DIR, "js/rulebook.js"))

@@ -533,13 +533,15 @@ const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y
     ["guest", "#/club/BOS", "w", "#app main *", "GM", /^General Manager$/],
     ["guest", "#/player/" + top, "t", ".pfx-hon-n", "W1", /^Week 1$/],
     ["guest", "#/player/" + top, "w", "#app *", "22G", /^22 goals$/],
-    ["guest", "#/season", "w", "#app main *", "ET", /^Eastern Time$/],
     ["guest", "#/bidding", "t", ".bd-lot-meta abbr", "C", /^Center$/],
     ["guest", "#/bidding", "w", "#app main *", "OVR", /^Overall rating$/],
     ["guest", "#/camp", "t", "#app abbr", "LW", /^Left Wing$/],
     ["guest", "#/draft", "t", ".lg-dr-rr", "R1", /^Round 1$/],
     ["guest", "#/rulebook", "w", "#app main *", "NHL", /^National Hockey League$/],
     ["guest", "#/rulebook", "w", "#app main *", "HQ", /^Headquarters$/],
+    /* last of the guest's: this page opens on ?season=1, and the Season page is the current season's, so the router moves
+       it there with a reload (health crawl 1, second pass); every row after it would read the current season instead */
+    ["guest", "#/season", "w", "#app main *", "ET", /^Eastern Time$/],
     ["office", "#/hq?tab=lineups", "w", "p.hqx-lede", "AGM", /^Assistant General Manager$/],
     ["office", "#/hq?tab=roster", "w", "#app .sub", "OVR", /^Overall rating$/],
     ["office", "#/hq?tab=overview", "t", ".hqx-mark5 span", "W", /^Win$/],
@@ -570,7 +572,8 @@ const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y
     /* v5.00 swap (e6, one book): words, not abbreviations, that the published rulebook and its version history set in capitals
        (Appendix A's UNRESTRICTED and RESTRICTED free agents, v2.48's BASIC and FULL formats, v3.02's DELETE, v3.03's LIVE) */
     UNRESTRICTED: 1, RESTRICTED: 1, FOLLOWS: 1, LIVE: 1, DELETE: 1, ONE: 1, SUBMIT: 1, BASIC: 1, FULL: 1, NO: 1 };
-  const ROUTES = { guest: ["#/today", "#/today?state=tonight", "#/today?state=offseason", "#/games", "#/game/" + gid, "#/standings?view=division", "#/standings?view=league", "#/standings?view=race", "#/standings?view=playoffs", "#/standings?view=power", "#/stats?tab=leaders", "#/stats?tab=skaters", "#/stats?tab=goalies", "#/stats?tab=teams", "#/stats?tab=players", "#/stats?tab=awards", "#/clubs", "#/clubs?view=moves", "#/club/BOS", "#/season", "#/season?season=1", "#/rulebook", "#/draft", "#/bidding", "#/camp", "#/you"],
+  const ROUTES = { guest: ["#/today", "#/today?state=tonight", "#/today?state=offseason", "#/games", "#/game/" + gid, "#/standings?view=division", "#/standings?view=league", "#/standings?view=race", "#/standings?view=playoffs", "#/standings?view=power", "#/stats?tab=leaders", "#/stats?tab=skaters", "#/stats?tab=goalies", "#/stats?tab=teams", "#/stats?tab=players", "#/stats?tab=awards", "#/clubs", "#/clubs?view=moves", "#/club/BOS", "#/rulebook", "#/draft", "#/bidding", "#/camp", "#/you",
+      "#/season", "#/season?season=1"],   /* last: from ?season=1 the router moves the Season page to the current season (a reload), as above */
     player: ["#/you?tab=week", "#/you?tab=season", "#/you?tab=inbox", "#/you?tab=applications", "#/you?tab=settings"],
     office: ["#/hq?tab=overview", "#/hq?tab=roster", "#/hq?tab=trades", "#/hq?tab=bidding", "#/hq?tab=lineups", "#/hq?tab=nights", "#/trade?with=BOS", "#/trade", "#/bidding", "#/camp", "#/draft"],
     staff: ["#/desk", "#/desk?tab=cases", "#/desk?tab=games", "#/desk?tab=applications", "#/desk?tab=people", "#/desk?tab=transactions", "#/desk?tab=newsroom", "#/desk?tab=committees", "#/desk/game/" + gid],

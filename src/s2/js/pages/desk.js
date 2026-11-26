@@ -36,7 +36,7 @@
   function plural(n, one, many) { return n === 1 ? one : n + " " + many; }
   function ageShort(h) { if (h == null) return ""; if (h < 1) return Math.max(1, Math.round(h * 60)) + " min"; if (h < 24) return Math.round(h) + " h"; return Math.round(h / 24) + " d"; }
   function ageLong(h) { return h == null ? "" : h < 0.02 ? "just now" : M.ago(Math.round(h * 60)); }
-  function clock(s) { return M.toi(Math.round(s)); }
+  function clock(s) { return M.toi(s); }
   function narrow() { return window.innerWidth < 1000; }
   /* change the address in place, keeping the entry's state (the kit keys its scroll memory on history.state.k) */
   function setHash(h) { history.replaceState(history.state, "", h); }
@@ -356,7 +356,9 @@
     else body = list.map(function (c) { return caseRow(c, sel && c.id === sel.id, c.id === stop); }).join("");
     return '<div class="dk-crows" id="dkCaseRows" role="listbox" aria-label="Cases" data-kbd-list>' + body + "</div>";
   }
-  function caseDetail(c) {
+  function caseDetail(c, missing) {
+    /* a link that names a case the desk does not hold (deleted, or mistyped) says so instead of opening another one */
+    if (!c && missing) return '<div class="dk-mdetail-in"><button class="dk-back" data-act="case-back">' + S2.ic("back") + "Cases</button>" + stateBox("none", "No case with that link", "The case this link names is not on the desk. It may have been deleted. Choose a case from the list.") + "</div>";
     if (!c) return '<div class="dk-mdetail-in">' + stateBox("muted", "No case open", !caseScope(st.scope).length ? "There is no case in this view." : "Choose a case from the list. J and K move through it.") + "</div>";
     return lvCaseDetail(c);
   }
@@ -366,16 +368,19 @@
     var hs = history.state && history.state.dkCase;   /* a phone case entry reached again by Back or Forward from another page */
     var list = caseScope(st.scope), q = r.q["case"] ? caseById(r.q["case"]) : narrow() && hs ? caseById(hs) : null;
     st.pushed = !!(narrow() && hs && q);
-    var sel = q || (st.caseId && list.filter(function (c) { return c.id === st.caseId; })[0]) || list[0] || null;
+    /* health links 0 (2026-11-25): a ?case= the desk does not hold (32 old notifications name deleted cases) opened the
+       first case in the list, a different case under the link's address; it opens none and says so */
+    var missing = !!r.q["case"] && !q;
+    var sel = missing ? null : q || (st.caseId && list.filter(function (c) { return c.id === st.caseId; })[0]) || list[0] || null;
     st.caseId = sel ? sel.id : null;
     /* the desk's one view switcher (Games, Applications and People use it too): the underlined uppercase row */
     return '<div class="dk-views ' + R + '" role="group" aria-label="Which cases" id="dkScope">' +
       SCOPES.map(function (s) { return '<button class="dk-chip" data-scope="' + s[0] + '" aria-pressed="' + (st.scope === s[0]) + '">' + s[1] + "</button>"; }).join("") + "</div>" +
-      '<div class="dk-mail' + (narrow() && q ? " show-detail" : "") + '" id="dkMail">' +
+      '<div class="dk-mail' + (narrow() && (q || missing) ? " show-detail" : "") + '" id="dkMail">' +   /* a phone says it too, with the way back to the list */
       '<section class="card pad-0 dk-mlist ' + R + '" aria-label="Case list"><div class="dk-mlist-h">' +
       '<p class="t-foot dk-mlist-note" id="dkCaseNote">' + noteHtml(list) + "</p></div>" + caseRows(list, sel) + "</section>" +
       /* not a live region: J/K would read the whole case aloud; #dkCaseLive says only what changed */
-      '<section class="card dk-mdetail ' + R + '" id="dkCaseDetail" aria-label="Case detail">' + caseDetail(sel) + "</section></div>" +
+      '<section class="card dk-mdetail ' + R + '" id="dkCaseDetail" aria-label="Case detail">' + caseDetail(sel, missing) + "</section></div>" +
       '<p class="sr" id="dkCaseLive" role="status" aria-live="polite"></p>' +
       '<p class="t-foot dk-keys">Keyboard: <span class="dk-kbd">J</span> <span class="dk-kbd">K</span> or the arrow keys move, <span class="dk-kbd">C</span> claims, <span class="dk-kbd">E</span> resolves, ' +
       "a decision asks for its statement first.</p>";
@@ -391,7 +396,7 @@
     rows.outerHTML = caseRows(list, sel);
     rows = $("#dkCaseRows");
     if (ghost && idx >= 0) ghostOut(rows, ghost, rows.children[idx] || null);
-    var d = $("#dkCaseDetail"); if (d && !(info && info.gone && narrow())) { d.innerHTML = caseDetail(sel); lvOpenThread(sel); }   /* a phone detail that is backing out keeps its case */
+    var d = $("#dkCaseDetail"); if (d && !(info && info.gone && narrow())) { d.innerHTML = caseDetail(sel, !sel && !!S2.parse().q["case"]); lvOpenThread(sel); }   /* a phone detail that is backing out keeps its case */
     var note = $("#dkCaseNote"); if (note) note.innerHTML = noteHtml(list);
     var sub = $("#dkSub"); if (sub) sub.innerHTML = LEDE.cases();   /* the title's sentence carries the open count too */
     syncCounts();

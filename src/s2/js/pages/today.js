@@ -216,6 +216,17 @@
   function lastNight() { return M.nights({ when: "past" })[0] || null; }
   function lastFinal() { var f = M.games.filter(function (g) { return g.isFinal; }); return f[f.length - 1] || { at: M.generated }; }
   function maxWeek() { return M.games.reduce(function (a, g) { return g.stage === "regular" ? Math.max(a, g.week) : a; }, 0); }
+  /* a game's week, in words and as a link (health crawl 0 and 3, 2026-11-25): playoff games carry weeks too (Season 1's
+     are 1 to 3), and this page called the Cup Final "Week 3", linked the regular season's week 3, opened Games on that week
+     in the playoffs and tested a stage, "playoffs", that games.stage never holds (games_stage_check: preseason, regular,
+     playoff), so the Playoffs tab was always empty. The label and the address are the model's one definition (M.stageText,
+     M.stageHref). The Games tab a game files under is the week its address names, so a link and the tab it opens can never
+     disagree; two games share a week when they share its label (the same regular-season week, or both in the playoffs or
+     the pre-season); before a noun the playoffs are "playoff" ("Playoff schedule", "All playoff results") */
+  function tabOf(g) { return M.stageHref(g).split("week=")[1]; }
+  function sameWeek(a, b) { return M.stageText(a) === M.stageText(b); }
+  function weekWord(g) { return g.stage === "playoff" ? "playoff" : g.stage === "preseason" ? "pre-season" : M.stageText(g); }
+  function schedText(g) { return cap(weekWord(g)) + " schedule"; }
   /* v5.00 swap (e7, 2026-11-24): ONE lookup of a season's dates and name, from its seasons row (M.control.season(n)),
      for Today and the profiles (review 2026-11-24: profile.js kept a viewDate of another shape, a second calendar lookup
      and its own season-name fallback). seasonDate answers the calendar row ({key, label, at, date, time}) or null.
@@ -276,25 +287,27 @@
   function heroQuiet() {
     var nn = nextNight(), po = viewDate("playoffs_start_at"), h, lede, btns;
     if (nn) {
-      var at = nn.games[0].at, d = daysUntil(at), when = d === 1 ? "tomorrow" : weekday(at);
-      var started = M.games.some(function (g) { return g.week === nn.week && g.isFinal; });
-      h = d === 0 ? "Game night tonight" : "Week " + nn.week + (started ? " resumes " : " starts ") + when;
-      var wk = M.nights({ when: "upcoming" }).filter(function (n) { return n.week === nn.week; }).reverse();   /* oldest first */
+      var g0 = nn.games[0], at = g0.at, d = daysUntil(at), when = d === 1 ? "tomorrow" : weekday(at);
+      /* the playoffs resume once any playoff game is final; a regular-season week once one of its own games is (crawl 3) */
+      var verb = M.games.some(function (g) { return sameWeek(g, g0) && g.isFinal; }) ? "resume" : "start";
+      h = d === 0 ? "Game night tonight" : g0.stage === "playoff" ? "The playoffs " + verb + " " + when : cap(weekWord(g0)) + " " + verb + "s " + when;
+      var wk = M.nights({ when: "upcoming" }).filter(function (n) { return n.week === nn.week && sameWeek(n.games[0], g0); }).reverse();   /* oldest first */
       var n = wk.reduce(function (a, x) { return a + x.games.length; }, 0), days = wk.map(function (x) { return weekday(x.games[0].at); }), after = maxWeek() - nn.week;
-      lede = n + " games " + (days.length > 1 ? "across " + list(days) : "on " + days[0]) + " from " + nb(nn.games[0].time + " ET") +
-        (po ? (after > 0 ? ", then " + words(after) + " more " + (after === 1 ? "week" : "weeks") + " before the playoffs begin " : ". The playoffs begin ") + M.etLong(po.at) : "") + ".";
+      /* the weeks left before the playoffs are counted from a regular-season week only */
+      lede = n + " games " + (days.length > 1 ? "across " + list(days) : "on " + days[0]) + " from " + nb(g0.time + " ET") +
+        (po && g0.stage === "regular" ? (after > 0 ? ", then " + words(after) + " more " + (after === 1 ? "week" : "weeks") + " before the playoffs begin " : ". The playoffs begin ") + M.etLong(po.at) : "") + ".";
       /* commissioner, 2026-11-14: a shortcut to the reader's own Your week here, in place of the week's schedule (see YOUR
          WEEK below); then "The 'Your week' button on the front page should also show for managers, staff, and
          commissioners." So every signed-in role with a week to show gets it (hasWeek); a guest, or a member with no games
          (a waived demo persona; review 2026-11-14: the button opened an empty page), keeps the schedule */
-      btns = (hasWeek() ? '<a class="btn site" href="#/you?tab=week">Your week</a>' : '<a class="btn site" href="#/games?week=' + nn.week + '">Week ' + nn.week + " schedule</a>") +
+      btns = (hasWeek() ? '<a class="btn site" href="#/you?tab=week">Your week</a>' : '<a class="btn site" href="' + esc(M.stageHref(g0)) + '">' + esc(schedText(g0)) + "</a>") +
         '<a class="btn site outline" href="#/standings">Standings</a>';
     } else {
       h = po && Date.parse(po.at) > M.now.getTime() ? "The playoffs begin " + M.etMonthDay(po.at) : "The regular season is complete";
       lede = "Every regular season game is final. The top " + words(M.playoffFormat.perDiv) + " clubs in each division play for the title, best of " + words(M.playoffFormat.bestOf) + ".";
       btns = '<a class="btn site" href="#/standings?view=playoffs">Projected bracket</a><a class="btn site outline" href="#/standings">Standings</a>';
     }
-    return heroShell(esc((nn ? "Week " + nn.week + " · " : "") + M.etLong(M.generated)), h, lede, btns, { bare: !M.view.finals });   /* QA nits 8: no record on a pin before the first final */
+    return heroShell(esc((nn ? M.stageText(nn.games[0]) + " · " : "") + M.etLong(M.generated)), h, lede, btns, { bare: !M.view.finals });   /* QA nits 8: no record on a pin before the first final */
   }
   /* ONE hero for every scene: the statement, then the league map as its image (ruling 2026-10-16: Today is map first
      except while games are active, and no games are played in the off-season). kicker is HTML; a word of ten letters or
@@ -421,10 +434,10 @@
     return '<section class="td-next" aria-labelledby="tdNextH"><div class="td-next-h"><h3 class="kicker" id="tdNextH">Next match · Game of the night</h3></div>' +
       '<div class="td-next-grid">' + dateBlock(g.at) +
         '<a class="td-nx-mu" href="' + esc(g.href) + '" aria-label="' + esc(full(g.away) + " at " + full(g.home) + ", " + M.etDateTime(g.at)) + '">' + side(g.away) + '<span class="at" aria-hidden="true">at</span>' + side(g.home) + "</a>" +
-        '<div class="td-nx-info"><span class="td-nx-when">' + esc(nb(g.time + " ET") + " · " + nb("Week " + g.week)) + "</span>" +
+        '<div class="td-nx-info"><span class="td-nx-when">' + esc(nb(g.time + " ET") + " · " + nb(M.stageText(g))) + "</span>" +
           '<span class="td-cd" data-until="' + esc(g.at) + '" data-fmt="big" role="timer" aria-label="' + esc("Starts " + M.etDateTime(g.at)) + '">' + untilBig(Date.parse(g.at) - now()) + "</span>" +
           "<p>" + esc(seriesText(s) + " " + why) + "</p>" +
-          '<div class="td-btns"><a class="btn site" href="' + esc(g.href) + '">Match preview</a><a class="btn site outline" href="#/games?week=' + g.week + '">Week ' + g.week + " schedule</a></div></div>" +
+          '<div class="td-btns"><a class="btn site" href="' + esc(g.href) + '">Match preview</a><a class="btn site outline" href="' + esc(M.stageHref(g)) + '">' + esc(schedText(g)) + "</a></div></div>" +
       "</div></section>";
   }
   function matchCenter() {
@@ -432,11 +445,15 @@
     if (!ln && !nn) return "";
     var html = '<section class="band ink td-mc reveal"' + look() + ' aria-labelledby="tdMcH">';
     if (ln) {
-      var done = !M.games.some(function (g) { return g.week === ln.week && open(g); });
-      html += S2.secHead({ kicker: "Match center", id: "tdMcH", h: done ? "Week " + ln.week + " is in the books" : weekday(ln.games[0].at) + "'s results", p: esc(nightNews(ln)),
+      /* the playoffs are in the books only once the season is complete (trg_conclude_series sets seasons.status when the
+         final series is decided): between rounds no playoff game is open until the autopilot draws the next round, up to
+         five minutes and longer while a draw is paused or flagged, and "no open playoff game" read the playoffs as over
+         (health crawl 3 review, 2026-11-25) */
+      var l0 = ln.games[0], done = l0.stage === "playoff" ? M.view.status === "complete" : !M.games.some(function (g) { return sameWeek(g, l0) && open(g); });
+      html += S2.secHead({ kicker: "Match center", id: "tdMcH", h: done ? (l0.stage === "playoff" ? "The playoffs are in the books" : cap(weekWord(l0)) + " is in the books") : weekday(l0.at) + "'s results", p: esc(nightNews(ln)),
           aside: '<div class="td-rail-ctl">' + railBtn(-1) + railBtn(1) + "</div>" }) +
         '<div class="td-rail" id="tdRail" tabindex="0" role="region" aria-label="' + esc("Results, " + ln.label) + '">' + ln.games.map(function (g) { return tile(g); }).join("") + "</div>" +
-        '<div class="td-mc-more">' + arrow("#/games?week=" + ln.week, "All Week " + ln.week + " results") + "</div>";
+        '<div class="td-mc-more">' + arrow(M.stageHref(l0), "All " + weekWord(l0) + " results") + "</div>";
     } else html += '<h2 class="sr" id="tdMcH">Match center</h2>';
     return html + (nn ? nextMatch(nn) : "") + "</section>";
   }
@@ -449,7 +466,7 @@
     var key = M.etDay(M.now), games = M.games.filter(function (g) { return g.night === key; });
     if (!games.length) return null;
     var by = function (s) { return games.filter(function (g) { return g.state === s; }); };
-    return { gn: { week: games[0].week, label: M.etLong(key), now: M.now.toISOString(), nowLabel: M.etTime(M.now) + " ET" },
+    return { gn: { stage: M.stageText(games[0]), label: M.etLong(key), now: M.now.toISOString(), nowLabel: M.etTime(M.now) + " ET" },
       live: by("live"), next: by("upcoming"), earlier: by("final").concat(by("pending")), all: games };
   }
   function nightBand(nm) {
@@ -465,7 +482,7 @@
         games.map(function (g) { return tile(g); }).join("") + "</div></section>" : "";
     };
     return '<section class="band ink td-nb reveal"' + look() + ' aria-labelledby="tdNbH">' +
-      '<div class="td-nb-head"><div class="td-nb-copy"><span class="kicker">' + esc("Game night · Week " + gn.week + " · " + gn.label) + "</span>" +
+      '<div class="td-nb-head"><div class="td-nb-copy"><span class="kicker">' + esc("Game night · " + gn.stage + " · " + gn.label) + "</span>" +
         '<h1 class="d-1 td-nb-h" id="tdNbH">' + esc(h) + '</h1><p class="lede-l">' + esc(parts.length ? cap(list(parts)) + "." : "Every game tonight is under way.") + "</p></div>" +
         '<div class="td-nb-now"><span class="d-num">' + esc(gn.nowLabel.replace(/ ET$/, "")) + "</span><span>ET</span></div></div>" +
       grp("tdGLive", '<span><i class="dot-live" aria-hidden="true"></i>Live now</span>', "", nm.live) +
@@ -667,7 +684,7 @@
        neither door is theirs, as the menu's own links for them carry not: "staff" (core.js) */
     var staffer = S2.has("staff"), own = !staffer && isOpen(c.ownersClose);
     var door = function (iso, title, text, flow) {
-      return '<li><a href="#/season"' + (off ? ' data-flow="' + flow + '"' : "") + ">" + (iso ? doorDate(iso) : '<span class="td-door-d ic" aria-hidden="true">' + S2.ic("people") + "</span>") +
+      return '<li><a href="' + esc(S2.seasonHref(null, "#/season")) + '"' + (off ? ' data-flow="' + flow + '"' : "") + ">" + (iso ? doorDate(iso) : '<span class="td-door-d ic" aria-hidden="true">' + S2.ic("people") + "</span>") +
         '<span class="td-door-t"><b>' + esc(title) + "</b><span>" + esc(text) + "</span></span>" + S2.ic("chev") + "</a></li>";
     };
     return '<section class="band td-s2 reveal" aria-labelledby="tdS2H"><div class="td-s2-grid"><div class="td-s2-copy"><span class="kicker">Season 2</span>' +
@@ -739,9 +756,9 @@
     if (!rows.length) return "";
     return '<section class="td-sec td-cal reveal" aria-labelledby="tdCalH">' +
       S2.secHead({ kicker: "Season 2 calendar", id: "tdCalH", h: "Next: " + rows[0][1].replace(/^./, function (x) { return x.toLowerCase(); }) + ", " + M.etLong(rows[0][0]).split(", ")[1],
-        p: "Every date still ahead, in Eastern time.", href: "#/season", link: "The season" }) +
+        p: "Every date still ahead, in Eastern time.", href: S2.seasonHref(null, "#/season"), link: "The season" }) +
       '<ol class="td-doors">' + rows.map(function (r) {
-        return '<li><a href="#/season">' + doorDate(r[0]) + '<span class="td-door-t"><b>' + esc(r[1]) + (r[3] ? ' <span class="chip">projected</span>' : "") + "</b><span>" + esc(M.etLong(r[0]) + (r[2] ? ", " + r[2] : ".")) + "</span></span>" + S2.ic("chev") + "</a></li>";
+        return '<li><a href="' + esc(S2.seasonHref(null, "#/season")) + '">' + doorDate(r[0]) + '<span class="td-door-t"><b>' + esc(r[1]) + (r[3] ? ' <span class="chip">projected</span>' : "") + "</b><span>" + esc(M.etLong(r[0]) + (r[2] ? ", " + r[2] : ".")) + "</span></span>" + S2.ic("chev") + "</a></li>";
       }).join("") + "</ol></section>";
   }
 
@@ -855,7 +872,7 @@
      still lands on Playoffs. */
   function gamesFilter(q) {
     var nn = nextNight(), n = +q.week;
-    var wk = q.week === "playoffs" || q.stage === "playoffs" ? "playoffs" : q.week === "all" ? "all" : n >= 1 && n <= maxWeek() && n === Math.floor(n) ? String(n) : nn ? String(nn.week) : "all";
+    var wk = q.week === "playoffs" || q.stage === "playoffs" ? "playoffs" : q.week === "all" ? "all" : n >= 1 && n <= maxWeek() && n === Math.floor(n) ? String(n) : nn ? tabOf(nn.games[0]) : "all";
     /* a player lands on their own club's games (audit 2026-11-09: the schedule opened on every club for everyone);
        ?club=all keeps the whole league once they choose it */
     var mine = S2.mine && S2.mine();
@@ -864,8 +881,7 @@
   function gamesNights(f) {
     return M.nights().slice().reverse().map(function (n) {
       var games = n.games.filter(function (g) {
-        var inView = f.week === "all" || (f.week === "playoffs" ? g.stage === "playoffs" : g.stage === "regular" && String(g.week) === f.week);
-        return inView && (!f.club || g.home === f.club || g.away === f.club);
+        return (f.week === "all" || tabOf(g) === f.week) && (!f.club || g.home === f.club || g.away === f.club);
       });
       return { n: n, games: games };
     }).filter(function (x) { return x.games.length; });
@@ -898,7 +914,9 @@
   function gEmpty(title, text, actions) { return '<div class="td-gempty">' + S2.empty("none", title, text, actions) + "</div>"; }
   function gamesList(f) {
     var nn = nextNight(), nights = gamesNights(f);
-    if (f.week === "playoffs" && !nights.length) {
+    /* "no playoff games yet" only while the season has none: once the bracket is drawn, a club with no playoff game is a
+       filter that matched nothing (crawl 0: with the tab filled, this said "The playoffs begin" to a club knocked out) */
+    if (f.week === "playoffs" && !M.games.some(function (g) { return tabOf(g) === "playoffs"; })) {
       var po = viewDate("playoffs_start_at");
       return gEmpty("No playoff games yet", (po ? "The playoffs begin " + esc(M.etLong(po.at)) + " at " + esc(po.time) + " ET. " : "") + "The bracket and its games appear here once the regular season ends.",
         { t: "Projected bracket", href: "#/standings?view=playoffs" });   /* S2.empty draws the website button itself (QA round 2) */
@@ -907,7 +925,7 @@
     if (!nights.length) return gEmpty("No games match", "Nothing is scheduled for these filters.", { t: "Clear filters", data: { clear: "" } });
     return nights.map(function (x) {
         var n = x.n, isNext = nn && nn.date === n.date, lab = n.label.split(", "), md = (lab[1] || "").split(" "), meta = [];
-        meta.push(nb("Week " + n.week), nb(S2.plural(x.games.length, "game")));
+        meta.push(nb(M.stageText(n.games[0])), nb(S2.plural(x.games.length, "game")));
         if (n.forfeits && !f.club) meta.push(nb(S2.plural(n.forfeits, "forfeit")));
         if (f.club) { var w = x.games.filter(function (g) { return g.winner === f.club; }).length, fl = x.games.filter(function (g) { return g.isFinal; }).length; if (fl) meta.push(w + "-" + (fl - w) + " that night"); }
         return '<section class="td-gn' + (isNext ? " band ink" : "") + '"' + (isNext ? look() : "") + ' id="night-' + esc(n.date) + '" aria-labelledby="nh-' + esc(n.date) + '">' +
@@ -1222,6 +1240,12 @@
     if (!ps.length) return "";
     return S2.about(ps.map(esc));   /* core's one disclosure (audit 2026-11-09: three designs of About this data) */
   }
+  /* a training camp pool player's answer to a club's request for this game (Rule S2.5; health links 5, 2026-11-25): the
+     request's notification ("asked you to play", link_view game) opens this page, which had no Accept or Decline, so the
+     player had to find the card in the Inbox before the lineup lock. It is camp.js's one card (S2.poolAsks) cut to this
+     game, under the match room; anyone with no request for it gets an empty host, which the market's read fills in place
+     (camp.js's load handler) once the request is read */
+  function askCard(g) { return S2.poolAsks ? S2.poolAsks.html(g.id) : ""; }
   /* the way into a case about this game: the case form (js/flows.js) opens with the game already picked */
   function reportLine(g) {
     return '<div class="td-sec td-report"><a class="arrow" href="#/you" data-flow="case" data-type="complaint" data-game="' + esc(g.id) + '"><span>Report a problem with this game</span>' + S2.ic("chev") + "</a></div>";
@@ -1232,7 +1256,7 @@
     return '<section class="td-sec td-also reveal" aria-labelledby="tdAlsoH">' +
       S2.secHead({ kicker: "Also that night", id: "tdAlsoH", h: M.etLong(g.at), aside: '<div class="td-rail-ctl">' + railBtn(-1) + railBtn(1) + "</div>" }) +
       '<div class="td-rail" id="tdRail" tabindex="0" role="region" aria-label="' + esc("Other games, " + M.etLong(g.at)) + '">' + others.map(function (x) { return tile(x); }).join("") + "</div>" +
-      '<div class="td-mc-more">' + arrow("#/games?week=" + g.week, "Week " + g.week + " schedule") + "</div></section>";
+      '<div class="td-mc-more">' + arrow(M.stageHref(g), schedText(g)) + "</div></section>";
   }
   function room(g, v) {
     var st = v.state, fin = st === "final";
@@ -1269,9 +1293,9 @@
       return (i ? '<span aria-hidden="true"></span>' : "") + '<p class="td-room-goals"><span class="sr">' + esc(city(x.code) + " goals: ") + '</span><span class="cc" aria-hidden="true">' + esc(x.code) + "</span>" + (x.html || "No goals") + "</p>";
     }).join("") : "";
     return '<section class="band ink td-room reveal"' + look() + ' aria-labelledby="tdRoomH"><div class="td-room-top">' +
-        '<nav class="td-crumbs" aria-label="Breadcrumb"><a href="#/games">Games</a><span aria-hidden="true">/</span><a href="' + "#/games?week=" + g.week + '">Week ' + g.week + "</a></nav>" +
+        '<nav class="td-crumbs" aria-label="Breadcrumb"><a href="#/games">Games</a><span aria-hidden="true">/</span><a href="' + esc(M.stageHref(g)) + '">' + esc(M.stageText(g)) + "</a></nav>" +
         (S2.has("staff") ? '<a class="btn site outline td-deskbtn" href="#/desk/game/' + esc(g.id) + '">Open in Game desk</a>' : "") + "</div>" +
-      '<div class="page-head td-room-ph"><span class="kicker">' + esc("Week " + g.week + " · " + M.etLong(g.at) + " · " + nb(g.time + " ET") + (g.makeup ? " · Make-up game" : "") + (arena ? " · " + arena : "")) + "</span>" +
+      '<div class="page-head td-room-ph"><span class="kicker">' + esc(M.stageText(g) + " · " + M.etLong(g.at) + " · " + nb(g.time + " ET") + (g.makeup ? " · Make-up game" : "") + (arena ? " · " + arena : "")) + "</span>" +
         '<h1 class="t-large sr" id="tdRoomH">' + esc(said) + "</h1></div>" +
       '<div class="td-room-main">' + side(g.away) + '<div class="td-room-mid">' + mid + "</div>" + side(g.home) + goalsRow + "</div>" +
       (note ? '<p class="td-room-note">' + esc(note) + "</p>" : "") + "</section>";
@@ -1281,9 +1305,24 @@
      been rescheduled". The page asks the league which season holds the game (games.season_id, one row by id) and opens it
      there (?season=<n>, a fresh league read); only an id no season holds is not found. One lookup per id per visit */
   var GFIND = {};
-  var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  /* the season that holds a row of a season-keyed public table (games here, news in js/pages/office.js), by its id:
+     resolves with that season's number, or null when no season on this page holds it (no such row, or one filed for no
+     season); rejects when the league did not answer. Its id is a uuid (S2.isUuid, core's one test), checked by the caller
+     (health links 2, 2026-11-25: an old story link needed this same lookup, so it is one copy here, not a second in
+     office.js). shortcut: defined here and read by office.js, as S2.seasonDate is; move into core.js with the next kit pass */
+  S2.seasonOf = function (table, id) {
+    return Promise.resolve().then(function () {
+      var c = S2.ensureSb ? S2.ensureSb() : null;
+      if (!c) throw new Error("the league's data service is not on this page");
+      return c.from(table).select("season_id").eq("id", id).maybeSingle();
+    }).then(function (res) {
+      if (res && res.error) throw new Error(res.error.message || table + " did not answer");
+      var sid = res && res.data && res.data.season_id, s = sid ? M.control.seasons.filter(function (x) { return x.settings && x.settings.id === sid; })[0] : null;
+      return s ? s.number : null;
+    });
+  };
   function gameMissing(id) {
-    var f = GFIND[id] || { state: UUID.test(String(id || "")) ? "looking" : "none" };
+    var f = GFIND[id] || { state: S2.isUuid(id) ? "looking" : "none" };
     var shell = function (h, lede, btns, role) {
       return '<div class="td-gc"><section class="hero reveal" aria-labelledby="tdNfH"' + (role ? ' role="' + role + '"' : "") + '><span class="kicker">Games</span><h1 class="d-1" id="tdNfH">' + esc(h) + "</h1>" +
         '<p class="lede-l">' + lede + "</p>" + (btns ? '<div class="td-btns">' + btns + "</div>" : "") + "</section></div>";
@@ -1294,19 +1333,12 @@
     return shell("Game not found", "No game has this address.", '<a class="btn site" href="#/games">All games</a>');
   }
   function findGame(root, id) {
-    if (GFIND[id] || !UUID.test(String(id || ""))) return;
+    if (GFIND[id] || !S2.isUuid(id)) return;
     GFIND[id] = { state: "looking" };
     var paint = function () { var gc = S2.$(".td-gc", root); if (!gc || S2.parse().name !== "game" || S2.parse().arg !== id) return; gc.outerHTML = gameMissing(id); bindMissing(root, id); };
-    Promise.resolve().then(function () {
-      var c = S2.ensureSb ? S2.ensureSb() : null;
-      if (!c) throw new Error("the league's data service is not on this page");
-      return c.from("games").select("season_id").eq("id", id).maybeSingle();
-    }).then(function (res) {
-      if (res && res.error) throw new Error(res.error.message || "games did not answer");
-      var sid = res && res.data && res.data.season_id, s = sid ? M.control.seasons.filter(function (x) { return x.settings && x.settings.id === sid; })[0] : null;
-      if (!s || s.number === M.view.season) { GFIND[id] = { state: "none" }; paint(); return; }
-      var q = new URLSearchParams(location.search); q.set("season", s.number);
-      location.replace("?" + q.toString() + "#/game/" + id);
+    S2.seasonOf("games", id).then(function (n) {
+      if (n == null || n === M.view.season) { GFIND[id] = { state: "none" }; paint(); return; }
+      location.replace(S2.seasonHref(n, "#/game/" + id));
     }).catch(function (e) { console.error("Game: the season of game " + id + " could not be looked up:", e); GFIND[id] = { state: "err", err: e }; paint(); });
   }
   function bindMissing(root, id) {
@@ -1326,7 +1358,7 @@
       else if (v.state !== "voided") {
         var lockAt = lockOf(g), locked = v.state !== "upcoming" || now() >= Date.parse(lockAt);
         /* the lobby (Rule 4.2): the night's code and server, released at the lock to the two clubs and the office (js/lobby.js) */
-        html += h2hSection(g) + watchSection(g) + lineupsSection(g, lockAt, locked) + (S2.lobby ? S2.lobby.section(g, now()) : "");
+        html += askCard(g) + h2hSection(g) + watchSection(g) + lineupsSection(g, lockAt, locked) + (S2.lobby ? S2.lobby.section(g, now()) : "");
       }
       return html + alsoSection(g) + reportLine(g) + aboutGame(g, v, boxed) + "</div>";
     },
@@ -1343,6 +1375,7 @@
         delete LU[g.id];
         var sec = S2.$(".td-lineups", root); if (sec) { sec.outerHTML = lineupsSection(g, lockOf(g), true); var n = S2.$(".td-lineups", root); if (n) n.classList.add("in"); }
       });
+      if (S2.poolAsks) S2.poolAsks.bind(root);   /* Accept and Decline, as Team HQ binds them (hq.js) */
       bindRail(root); tick(root);
     }
   });

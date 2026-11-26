@@ -167,6 +167,15 @@ function writes(H) {
   A("the goaltender's line reads saves, shots against and save percentage", r.goalie, await txt(o.p, "#puGame"));
   A("a member's game page has no input, picker or control", r.inputs === 0, r.inputs);
   A("a member wrote nothing and posted nothing", calls(o.ctx).length === 0 && o.H.posts.length === 0, calls(o.ctx));
+  /* health crawl 9 (2026-11-25): a mistyped game address (the classic #/pickup/<id>, through the alias) read pickup_games and
+     pickup_stats with "abc"; production answered 22P02, the console logged two 400s and the page printed Postgres's words.
+     It is not found at once, with the way to the list, and the league is never asked */
+  const readsAt = o.H.reads.length;
+  await o.p.evaluate(() => { location.hash = "#/pickup/abc"; });
+  A("health crawl 9: a game address that is not an id is 'Pickup game not found' with the way to the list, and asks the league nothing",
+    await until(o.p, () => location.hash === "#/pickups/abc" && /Pickup game not found/.test((document.getElementById("puHead") || {}).textContent || "")) &&
+    !!(await o.p.$('#puHead a[href="#/pickups"]')) && !/invalid input|22P02|uuid/i.test(await txt(o.p, "#puHead")) && o.H.reads.slice(readsAt).filter((x) => /^pickup_(games|stats)\?/.test(x) && /abc/.test(x)).length === 0,
+    { head: await txt(o.p, "#puHead"), reads: o.H.reads.slice(readsAt) });
   A("no request went past the recorded reads and this suite's routes", mock.unexpected(o.ctx).length === 0, mock.unexpected(o.ctx));
   await o.ctx.close();
 

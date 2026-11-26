@@ -37,6 +37,11 @@
   /* one ordinal and one plural for every page (review 2026-10-19: four pages each kept a copy, and pctBar printed "1th") */
   S2.ord = function (n) { n = Math.round(n); var t = Math.abs(n) % 100, u = Math.abs(n) % 10; return S2.fmt(n) + (t >= 11 && t <= 13 ? "th" : u === 1 ? "st" : u === 2 ? "nd" : u === 3 ? "rd" : "th"); };
   S2.plural = function (n, one, many) { return S2.fmt(n) + " " + (n === 1 ? one : many || one + "s"); };
+  /* the ONE test for a database id (a uuid) in an address or a notification's parameter, so a page can refuse a mistyped
+     id before it asks PostgREST, which answers 22P02 and logs a 400 (health crawl 9, 2026-11-25: core.js, today.js and
+     trade.js each kept a copy of the pattern, and pickups.js read with none) */
+  var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  S2.isUuid = function (x) { return UUID.test(String(x == null ? "" : x)); };
   /* a count in words, as prose spells a small number: "eight"; zero is "no" unless the caller names its own word ("none",
      "zero"), and from 13 up the numeral (QA round 2, 2026-11-25: the footer said "Eight clubs" by hand, and seven pages
      each kept their own list of these words) */
@@ -461,6 +466,10 @@
      column or link) go through S2.has, and a guest-only link is not: "member".
      shortcut: a menu link to another tab of the page already open re-renders it from the top, until core has a
      def.update hook (control.js names it, at its replaceState tab switch) */
+  /* the current season's page, read each time a link is drawn: a bare "#/season" keeps whatever ?season= the address
+     names, so on an archive Register, Own a club, Join the staff and Full calendar opened the archive's season page,
+     which counted nobody signed up (health crawl 1, 2026-11-25). A NAV link reads it through a getter (get href) */
+  function seasonNow() { return S2.seasonHref(null, "#/season"); }
   S2.WORKSPACES = [["hq", "Team HQ", "office", "Front office"], ["desk", "Staff Desk", "staff", "League staff"], ["control", "Control Center", "commish", "Commissioners"]];
   function heldWorkspaces() { return S2.WORKSPACES.filter(function (w) { return S2.has(w[2]); }); }
   S2.NAV = [
@@ -480,11 +489,12 @@
       { h: "Seasons", lead: 1, links: function () { return seasonLinks().concat([{ t: "Draft room", href: "#/draft" },
         /* Season 2 player market (commissioner, 2026-11-02): the Saturday bid room and the league-wide training camp pool */
         { t: "Bid room", href: "#/bidding" }, { t: "Training camp", href: "#/camp" }]); } },
-      { h: "Take part", links: [{ t: "Join with Discord", href: "#/you", not: "member" }, { t: "Register", href: "#/season", flow: "register", accent: 1 },
+      { h: "Take part", links: [{ t: "Join with Discord", href: "#/you", not: "member" }, { t: "Register", get href() { return seasonNow(); }, flow: "register", accent: 1 },
         /* only while owner applications are open (QA functional 2026-11-25: after the close the database refuses them) */
-        { t: "Own a club", href: "#/season", flow: "owner", not: "staff", when: function () { return !S2.forms || S2.forms.ownerAppsOpen(); } }, { t: "Join the staff", href: "#/season", flow: "staff", not: "staff" },
+        { t: "Own a club", get href() { return seasonNow(); }, flow: "owner", not: "staff", when: function () { return !S2.forms || S2.forms.ownerAppsOpen(); } },
+        { t: "Join the staff", get href() { return seasonNow(); }, flow: "staff", not: "staff" },
         { t: "Saturday bidding", href: "#/hq?tab=bidding", hat: "office" }, { t: "Import a pickup game", href: "#/pickup-import", hat: "member" }] },
-      { h: "Key dates", wide: 1, draw: "dates", links: [{ t: "Full calendar", href: "#/season", arrow: 1 }] }] },
+      { h: "Key dates", wide: 1, draw: "dates", links: [{ t: "Full calendar", get href() { return seasonNow(); }, arrow: 1 }] }] },
     { id: "rulebook", t: "Rulebook", href: "#/rulebook", here: ["rulebook"] },
     { id: "work", side: "work", count: "work", here: ["hq", "trade", "desk", "control"],   /* trade: the Team HQ trade builder (js/pages/tradebuild.js) */
       t: function () { var w = heldWorkspaces(); return w.length === 1 ? w[0][1] : "Workspaces"; },
@@ -646,7 +656,7 @@
       var line = close ? "Sign-ups close " + M.etDate(close) : "Late sign-ups join the training camp pool";
       if (mine) return strip(s, "You are signed up", nextOf(s) || "Your sign-up", "#/you?tab=season");
       if (mine == null) return strip(s, line, "See the season", S2.seasonHref(null, "#/season"));
-      return strip(s, line, "Sign up", "#/season", "register");
+      return strip(s, line, "Sign up", seasonNow(), "register");
     }
     var cur = currentSeason(), nx = cur ? nextOf(cur) : "";
     return nx ? strip(cur, nx, "See the season", S2.seasonHref(null, "#/season")) : "";
@@ -989,13 +999,13 @@
      door is a case, the one way to the league office (a message goes to a member the sender picks) */
   function locks() {
     var F = S2.forms, s = F && F.regSeason(), sn = s ? s.name || "Season " + s.number : "", open = !!(F && F.ownerAppsOpen()), M = S2.M;
-    var hq = open ? ["Team HQ is for a club's Owner, GM and AGM. " + sn + " owner applications are open to every member who signed up.", ["Apply to own a club", "#/season", "owner"]]
+    var hq = open ? ["Team HQ is for a club's Owner, GM and AGM. " + sn + " owner applications are open to every member who signed up.", ["Apply to own a club", seasonNow(), "owner"]]
       : s && s.owner_app_deadline && M && M.etDate ? ["Team HQ is for a club's Owner, GM and AGM. " + sn + " owner applications closed on " + M.etDate(s.owner_app_deadline) + ".", ["See the " + sn + " calendar", S2.seasonHref(null, "#/season"), ""]]
       : ["Team HQ is for a club's Owner, GM and AGM.", ["See the season", S2.seasonHref(null, "#/season"), ""]];
     return {
       hq: ["Team HQ", "Front offices only", "Team HQ opens for a club's Owner, GM and AGM after they sign in.", hq[0], hq[1]],
       desk: ["Staff Desk", "Staff only", "The Staff Desk opens for the league's staff after they sign in.",
-        "The Staff Desk is for the league's staff." + (sn ? " Staff applications for " + sn + " are open." : ""), ["Apply to join the staff", "#/season", "staff"]],
+        "The Staff Desk is for the league's staff." + (sn ? " Staff applications for " + sn + " are open." : ""), ["Apply to join the staff", seasonNow(), "staff"]],
       control: ["Control Center", "Commissioners only", "The Control Center opens for the league's commissioners after they sign in.",
         "The Control Center is for the league's commissioners. To reach the league office, file a case.", ["File a case", "#/you?tab=inbox", "case"]]
     };
@@ -1019,9 +1029,26 @@
      Desk for staff and in the member's inbox for everyone else). A name this table does not hold and no page holds still
      lands on Today, as before. Test: tools/ui/aliases.test.cjs walks every entry, and tools/s2-site-modes.test.cjs checks
      every route the backend writes (jobs/, bot/, shared/, netlify/functions, sql/ and the database functions) resolves. ---------- */
-  /* an alias whose page depends on who is signed in (staff or not); S2.route holds it until the role is known */
-  function byRole(staff, other) { var f = function () { return S2.has("staff") ? staff : other; }; f.byRole = true; return f; }
-  var casesFor = byRole("#/desk?tab=cases", "#/you?tab=inbox&show=cases");
+  /* an alias whose page depends on a hat the reader holds (S2.has): yes for a holder, no for anyone else, each an address
+     or fn(r) -> address that reads the old route. f.byRole marks it for S2.route, which holds it until the role is known.
+     Health links 0 to 3 (2026-11-25): the old helper took no route, so every case and application link lost its id */
+  function byHat(hat, yes, no) {
+    var f = function (r) { var v = S2.has(hat) ? yes : no; return typeof v === "function" ? v(r) : v; };
+    f.byRole = true; return f;
+  }
+  /* a case link keeps its case: the Staff Desk opens ?case=<id> (a staffer told about a case opened the first one in the
+     list instead); the member's inbox has no address per case. The id-less old pages (complaints, archive) open the tab */
+  var casesFor = byHat("staff", function (r) { var id = r && r.q && r.q.id; return "#/desk?tab=cases" + (id ? "&case=" + encodeURIComponent(id) : ""); }, "#/you?tab=inbox&show=cases");
+  /* an application link (link_param "id=<uuid>&type=owner|staff|management|committee") opens that application's own desk
+     page for staff; a type the desk does not know stays on the board rather than a not-found page */
+  var APP_TYPES = /^(owner|staff|management|committee)$/;
+  var appFor = byHat("staff", function (r) {
+    var q = r && r.q || {};
+    return q.id && APP_TYPES.test(q.type || "") ? "#/desk/application/" + encodeURIComponent(q.type + "-" + q.id) : "#/desk?tab=applications";
+  }, "#/you?tab=applications");
+  /* a club room's lineup and availability notices are read by every player on the club (club_notify): a front office plans
+     the night in Team HQ, a player reads their own week there (Team HQ is front offices only, so it locked players out) */
+  var lineupsFor = byHat("office", "#/hq?tab=lineups", "#/you?tab=week");
   function arg(base, list) { return function (r) { return r.arg ? base + encodeURIComponent(r.arg) : list; }; }
   S2.ALIASES = {
     /* the twelve database functions' links */
@@ -1029,8 +1056,8 @@
     "hub/actions": "#/you?tab=inbox&show=cases", "matchup": arg("#/game/", "#/games"),
     /* the rest of the live hub: the member's own pages to You, the front office's to Team HQ, the staff's to the Staff Desk */
     "hub": "#/you", "hub/complaints": casesFor, "hub/archive": casesFor, "hub/officials": "#/desk", "hub/messages": "#/you?tab=inbox", "hub/notifications": "#/you?tab=inbox",
-    "hub/settings": "#/you?tab=settings", "hub/application": byRole("#/desk?tab=applications", "#/you?tab=applications"),
-    "hub/draft": "#/draft", "hub/lineups": "#/hq?tab=lineups", "hub/lineup": "#/hq?tab=lineups", "hub/lines": "#/hq?tab=lineups", "hub/roster": "#/hq?tab=roster",
+    "hub/settings": "#/you?tab=settings", "hub/application": appFor,
+    "hub/draft": "#/draft", "hub/lineups": lineupsFor, "hub/lineup": lineupsFor, "hub/lines": lineupsFor, "hub/roster": "#/hq?tab=roster",
     "hub/clubrequests": "#/hq?tab=roster", "hub/management": "#/hq?tab=office", "hub/schedule": "#/hq?tab=nights", "hub/freeagents": "#/camp",
     "hub/statsmgr": "#/desk?tab=games", "hub/statsentry": "#/desk?tab=games", "hub/gamestats": "#/desk?tab=games",
     /* v5.00 swap (i2): the department desks bot/staff-alerts.mjs links (DESK_PATH). Season 2 has no departments (ruling
@@ -1040,11 +1067,14 @@
        night recap are automatic, stories are any staffer's), as the Staff Desk's Newsroom pane. So the old media desk link opens that
        pane for staff and the public news page for anyone else, as casesFor does (review fix: it had sent staff to #/news) */
     "hub/reviewboard": "#/desk?tab=applications", "hub/opsdesk": "#/desk?tab=games", "hub/draftroom": "#/draft", "hub/transdesk": "#/desk?tab=transactions",
-    "hub/community": "#/desk?tab=cases", "hub/newsroom": byRole("#/desk?tab=newsroom", "#/news"),
+    "hub/community": "#/desk?tab=cases", "hub/newsroom": byHat("staff", "#/desk?tab=newsroom", "#/news"),
     /* the live public pages, merged here (the concept's "Where things go" list) */
     "home": "#/today", "team": function (r) { return r.arg ? "#/club/" + encodeURIComponent(r.arg.toUpperCase()) : "#/clubs"; }, "teams": "#/clubs", "awards": "#/stats?tab=awards",
     "players": "#/stats?tab=players", "rankings": "#/standings?view=power", "register": "#/season", "owner": "#/season", "staffapply": "#/season",
-    "signin": "#/you", "messages": "#/you?tab=inbox", "search": "#/today", "brand": "#/today", "legal": "#/terms", "article": arg("#/news/", "#/news"),
+    "signin": "#/you", "messages": "#/you?tab=inbox", "search": "#/today", "brand": "#/today", "legal": "#/terms",
+    /* a classic story link carries the bare news id; a story's address here is n-<id> (js/pages/office.js), so the bare id
+       always said Story not found (health links 2, 2026-11-25). Finding a story from another season is office.js's */
+    "article": arg("#/news/n-", "#/news"),
     /* a pickup game's box score (the classic CG.ROUTES.pickup, linked from profiles' Pickup tab and the LFG bot's posts)
        opens that game on the pickups page (js/pages/pickups.js S2.pickups.href); a bare #/pickup the list (g5's hand-over,
        i3f 2026-11-25; it used to land on Games) */
@@ -1086,12 +1116,15 @@
     if (view === "teams") return S2.alias("#/admin/teams");
     if (view === "manager") return S2.ALIASES["hub/" + p] ? S2.alias("#/hub/" + p) : "#/hq";
     if (view === "hub" && p === "schedule") return S2.alias("#/schedule");
-    var isId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p), isQs = p.indexOf("id=") === 0;
+    var isId = S2.isUuid(p), isQs = p.indexOf("id=") === 0;
     var caseUrl = isId ? "#/hub/complaint?id=" + encodeURIComponent(p) : null, appUrl = isQs ? "#/hub/application?" + p : null;
     var old = ({
       team: p ? "#/team/" + encodeURIComponent(p) : "#/teams", game: p ? "#/matchup/" + encodeURIComponent(p) : "#/schedule", draft: "#/hub/draft",
       availability: "#/hub/availability", lineups: "#/hub/lineups", lineup: p ? "#/hub/lineup?game=" + encodeURIComponent(p) : "#/hub/lineups", manager: "#/hub",
-      mgmtapprovals: "#/hub/management", transactions: "#/home", automations: "#/admin/automations", preseason: "#/admin/preseason", rulebook: "#/rulebook",
+      mgmtapprovals: "#/hub/management",
+      /* a trade notice (completed, reversed): the league's trades, public to every recipient (the live site opened its home,
+         which says nothing about the trade; health links 4, 2026-11-25) */
+      transactions: "#/clubs?view=moves&kind=trade", automations: "#/admin/automations", preseason: "#/admin/preseason", rulebook: "#/rulebook",
       stafftasks: "#/hub/staffdesk", actions: caseUrl || "#/hub/complaints", complaints: caseUrl || "#/hub/complaints",
       admin: caseUrl || (p ? "#/admin/" + encodeURIComponent(p) : "#/hub/staffdesk"), application: appUrl || "#/hub/staffdesk", staffdesk: appUrl || "#/hub/staffdesk",
       users: appUrl || "#/admin/users", hub: p === "staffdesk" ? "#/hub/staffdesk" : "#/hub", offers: "#/hub", ownerapp: "#/owner", staffapp: "#/staffapply",
@@ -1126,10 +1159,25 @@
     var it = S2.$("#inlineTitle"); if (it) it.textContent = t;
     return t;
   };
-  function opening() {
+  /* the page head while the router is about to move on: no motion and no wheel, since what follows (a session landing, or
+     the next page's own boot screen) shows its own */
+  function opening(head, line) {
     var page = S2.$("#page"); if (!page) return;
-    page.innerHTML = '<section class="page-head"><h1 class="t-large">Opening the link</h1><p class="t-sub">Checking who is signed in. This page moves on by itself.</p></section>';
+    page.innerHTML = '<section class="page-head"><h1 class="t-large">' + S2.esc(head || "Opening the link") + '</h1><p class="t-sub">' +
+      S2.esc(line || "Checking who is signed in. This page moves on by itself.") + "</p></section>";
     S2.setTitle("Opening");
+  }
+  /* the Season page is the current season's: its title, its doors and its sign-up count are that season's (the Season
+     menu's own design, where a finished season's archive opens on its standings). A bare "#/season" keeps whatever
+     ?season= the address names, so from an archive the page drew Season 2's doors over Season 1's data and said "0
+     members are in so far" (health crawl 1, 2026-11-25; second pass: you.js, bidding.js, today.js and the search palette
+     still link it bare, and so might any later page, so the router owns the rule instead of each link). -> the current
+     season's address, or null. Only an address that names a season is moved, so the move cannot repeat: the address it
+     goes to names none */
+  function seasonPageMove(r) {
+    var named = S2.load && S2.load.season != null, cur = currentSeason(), view = S2.M && S2.M.view;
+    if (r.name !== "season" || !named || (cur && view && view.season === cur.number)) return null;
+    return { to: S2.seasonHref(null, location.hash), name: cur ? cur.name || "Season " + cur.number : "the current season" };
   }
   function completing() {
     var page = S2.$("#page"); if (!page) return;
@@ -1158,6 +1206,8 @@
     if (old && old.hit.byRole && S2.roleGuessed) { opening(); return; }
     var to = S2.alias(location.hash); if (to) history.replaceState(history.state, "", to);
     var r = S2.parse(), def = S2.pages[r.name] || S2.pages.today;
+    var sm = seasonPageMove(r);
+    if (sm) { opening("Opening " + sm.name, "The season page is the current season's. This page moves on by itself."); location.replace(sm.to); return; }
     /* an address no page and no alias holds lands on Today and says so once (QA visual 2026-11-25: a mistyped or stale
        link silently drew Today with the bad address left in the bar) */
     if (!S2.pages[r.name] && r.name !== "today") {
@@ -1252,7 +1302,10 @@
     inp.addEventListener("keydown", function (e) {
       if (e.key === "ArrowDown") { el.classList.add("kb"); sel = Math.min(items.length - 1, sel + 1); draw(); e.preventDefault(); }
       else if (e.key === "ArrowUp") { el.classList.add("kb"); sel = Math.max(0, sel - 1); draw(); e.preventDefault(); }
-      else if (e.key === "Enter") pick(sel);
+      /* the Enter is the palette's: pick() hands focus back to the opener (the header's search button) inside this keydown,
+         and an Enter left to its default then pressed that button, so the palette opened again, empty, over the result
+         (health crawl 4, 2026-11-25). A composing Enter (an input method's) only confirms the characters */
+      else if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); pick(sel); }
     });
     res.addEventListener("click", function (e) { var b = e.target.closest("[data-i]"); if (b) pick(+b.dataset.i); });
     scrim.addEventListener("click", close);

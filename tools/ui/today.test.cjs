@@ -142,12 +142,23 @@ const AS = { guest: "anon", player: "member", office: "gm", staff: "staff", comm
   r = await p.evaluate(() => document.getElementById("tdClub").textContent);
   A("?club=all keeps the whole league for a member", /All clubs/.test(r), r);
   await done(p);
-  /* QA round 2 (2026-11-25): Games' empty states give S2.empty their action, which it draws as the website button */
+  /* QA round 2 (2026-11-25): Games' empty states give S2.empty their action, which it draws as the website button.
+     Health crawl 0 (2026-11-25): rewritten. It reached "No playoff games yet" through Season 1's Playoffs tab for a club
+     with none, a state that only showed because the tab never matched a playoff game (it tested stage "playoffs"), and so
+     pinned an archive with 25 playoff games saying they had not begun. "No playoff games yet" is now a season with no
+     playoff game (Season 2's first week); a Season 1 club with none is a filter that matched nothing, with Clear filters */
+  const emptyRead = () => { const a = document.querySelector(".td-gempty .empty-acts a, .td-gempty .empty-acts button");
+    return { t: (document.querySelector(".td-gempty .t-head") || {}).textContent, a: a ? [a.className, a.getAttribute("href"), a.textContent] : null, text: (document.getElementById("tdGList") || {}).textContent }; };
+  p = await open("#/games?week=playoffs", { phase: "quiet" });
+  r = await p.evaluate(emptyRead);
+  A("Games, playoffs before any playoff game: the empty state's Projected bracket is S2.empty's website button", r.t === "No playoff games yet" && JSON.stringify(r.a) === JSON.stringify(["btn site outline", "#/standings?view=playoffs", "Projected bracket"]), r);
+  await done(p);
   p = await open("?season=1#/games?club=all");
   const outClub = await p.evaluate(() => (S2.M.teams.filter((t) => !S2.M.games.some((g) => g.stage === "playoff" && (g.home === t.code || g.away === t.code)))[0] || {}).code);
   await p.evaluate((c) => { location.hash = "#/games?week=playoffs&club=" + c; }, outClub); await p.waitForTimeout(500);
-  r = await p.evaluate(() => { const a = document.querySelector(".td-gempty .empty-acts a"); return { t: (document.querySelector(".td-gempty .t-head") || {}).textContent, a: a ? [a.className, a.getAttribute("href"), a.textContent] : null }; });
-  A("Games, playoffs for a club with none: the empty state's Projected bracket is S2.empty's website button", !!outClub && r.t === "No playoff games yet" && JSON.stringify(r.a) === JSON.stringify(["btn site outline", "#/standings?view=playoffs", "Projected bracket"]), { club: !!outClub, r });
+  r = await p.evaluate(emptyRead);
+  A("Games, Season 1's playoffs for a club with none: no games match, never 'the playoffs begin', with Clear filters as S2.empty's website button", !!outClub && r.t === "No games match" &&
+    JSON.stringify(r.a) === JSON.stringify(["btn site outline", null, "Clear filters"]) && !/No playoff games yet|The playoffs begin/.test(r.text), { club: !!outClub, r });
   await done(p);
   p = await open("?season=1#/stats?tab=" + "skaters", { persona: "member" });
   const role1 = await p.evaluate(() => { const me = S2.mine(); return me && me.mainRole; });
@@ -442,6 +453,95 @@ const AS = { guest: "anon", player: "member", office: "gm", staff: "staff", comm
     await done(p);
   }
 
+  /* Season 1's playoff games, as the recording holds them */
+  const PO = S1.games.filter((g) => g.stage === "playoff");
+  console.log("## health crawl 0 (2026-11-25): the Playoffs tab lists the playoff games");
+  {
+    /* the Playoffs tab tested games.stage against "playoffs", a value the column never holds (games_stage_check:
+       preseason, regular, playoff), so Season 1's 25 playoff games never showed */
+    const etDay = (iso) => new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    const poNights = [...new Set(PO.map((g) => etDay(g.scheduled_at)))].sort();
+    p = await open("?season=1#/games?week=playoffs");
+    r = await p.evaluate(() => ({ tab: (document.querySelector('#tdWeek button[aria-pressed="true"]') || {}).dataset, rows: document.querySelectorAll("#tdGList .td-mx").length,
+      nights: [...document.querySelectorAll("#tdGList .td-gn")].map((s) => s.id.replace(/^night-/, "")).sort(), sum: document.getElementById("tdGSum").textContent, empty: !!document.querySelector("#tdGList .td-gempty") }));
+    A("crawl 0: ?season=1#/games?week=playoffs draws Season 1's " + PO.length + " playoff games across its " + poNights.length + " playoff nights",
+      PO.length === 25 && r.tab && r.tab.v === "playoffs" && r.rows === 25 && JSON.stringify(r.nights) === JSON.stringify(poNights) && poNights.join() === "2026-11-04,2026-11-05,2026-11-06,2026-11-11,2026-11-12,2026-11-13,2026-11-18,2026-11-19" &&
+      r.sum === "25 games, 25 final, 0 to play" && !r.empty, r);
+    await done(p);
+    /* a Season 1 club with no playoff game: "the league pages know the member" above (the empty state rewritten for crawl 0) */
+  }
+  console.log("## health crawl 3 (2026-11-25): a playoff game reads Playoffs and links to the Playoffs tab, on Games, the Game Center and Today");
+  {
+    /* the Cup Final (stage playoff, week 3) read "Week 3" and its breadcrumb opened the regular season's week 3 */
+    const fin = PO.slice().sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at)).slice(-1)[0];
+    p = await open("?season=1#/game/" + fin.id);
+    r = await p.evaluate(() => { const c = document.querySelectorAll(".td-crumbs a")[1], m = document.querySelector(".td-also .td-mc-more a");
+      return { kicker: document.querySelector(".td-room-ph .kicker").textContent, crumb: c && [c.textContent, c.getAttribute("href")], more: m && [m.textContent, m.getAttribute("href")] }; });
+    A("crawl 3: a playoff game's kicker, breadcrumb and schedule link say Playoffs and open the Playoffs tab", /^Playoffs · /.test(r.kicker) && !/Week/.test(r.kicker) &&
+      JSON.stringify(r.crumb) === JSON.stringify(["Playoffs", "#/games?week=playoffs"]) && JSON.stringify(r.more) === JSON.stringify(["Playoff schedule", "#/games?week=playoffs"]), r);
+    await p.click(".td-crumbs a:nth-of-type(2)");
+    await p.waitForFunction(() => S2.parse().name === "games" && document.querySelector("#tdGList"), null, { timeout: 10000 }).catch(() => {});
+    r = await p.evaluate((id) => ({ hash: location.hash, row: !!document.querySelector('#tdGList a.td-mx[href="#/game/' + id + '"]') }), fin.id);
+    A("crawl 3: the breadcrumb lands on the Playoffs tab, which lists that game", r.hash === "#/games?week=playoffs" && r.row, r);
+    await done(p);
+    p = await open("?season=1#/games?week=all&club=all");
+    r = await p.evaluate(() => { const meta = (d) => [...document.querySelectorAll("#night-" + d + " .td-gn-meta span")].map((s) => s.textContent.replace(/ /g, " "));
+      return { po: meta("2026-11-19"), reg: meta([...document.querySelectorAll("#tdGList .td-gn")].map((s) => s.id.replace(/^night-/, "")).sort()[0]) }; });
+    A("crawl 3: in All weeks a playoff night is marked Playoffs, a regular-season night its week", r.po.indexOf("Playoffs") >= 0 && !r.po.some((x) => /^Week/.test(x)) && r.reg.indexOf("Week 1") >= 0, r);
+    await done(p);
+
+    /* crawl 3, Today: Season 1 moved back into its playoffs (the season active, every game from `from` on not yet played),
+       so the next game night is a playoff night: Tuesday, Nov 10 between rounds, and Wednesday, Nov 11 at 9:10 PM ET */
+    const midPlayoffs = (generated, from) => { const x = clone(S1); x.generated = generated;
+      x.seasons = x.seasons.map((s) => (s.number === 1 ? Object.assign({}, s, { status: "active" }) : s));
+      x.games.forEach((g) => { if (g.scheduled_at >= from) { Object.assign(g, { status: "scheduled", home_score: null, away_score: null, went_ot: false, forfeit: null, forfeit_team_id: null }); if (x.box && x.box.byGame) delete x.box.byGame[g.id]; } });
+      return x; };
+    const at1 = (body) => ({ s2_league: (a) => mock.ok(+a.p_season === 1 ? body : mock.league(a)) });
+    const quiet = midPlayoffs("2026-11-10T17:00:00+00:00", "2026-11-10T17:00:00+00:00");
+    p = await open("?season=1#/today", { rpcs: at1(quiet) });
+    r = await p.evaluate(() => { const t = (s) => ((document.querySelector(s) || {}).textContent || "").replace(/ /g, " ").trim(), a = (s) => [...document.querySelectorAll(s)].map((x) => [x.textContent.trim(), x.getAttribute("href")]);
+      return { state: document.querySelector(".td").dataset.state, h1: t(".td-hero h1"), kicker: t(".td-hero .kicker"), lede: t(".td-hero .lede-l"), btns: a(".td-hero .td-btns a"), when: t(".td-nx-when"), next: a(".td-next .td-btns a"),
+        mc: t("#tdMcH"), more: a(".td-mc > .td-mc-more a") }; });
+    A("crawl 3, Today between playoff rounds: the hero says the playoffs resume, under a Playoffs kicker, never a regular-season week",
+      r.state === "quiet" && r.h1 === "The playoffs resume tomorrow" && /^Playoffs · Tuesday, November 10/.test(r.kicker) && /^\d+ games across Wednesday, Thursday and Friday from 9:00 PM ET\.$/.test(r.lede) && !/Week|before the playoffs begin/.test(r.lede + r.kicker), r);
+    A("crawl 3, Today: the schedule doors say Playoff schedule and open the Playoffs tab (the hero's and the next match's)",
+      JSON.stringify(r.btns) === JSON.stringify([["Playoff schedule", "#/games?week=playoffs"], ["Standings", "#/standings"]]) && / · Playoffs$/.test(r.when) && JSON.stringify(r.next[1]) === JSON.stringify(["Playoff schedule", "#/games?week=playoffs"]), r);
+    A("crawl 3, Today: the last playoff night's results are that night's, with All playoff results, never 'Week 1 is in the books'",
+      r.mc === "Friday's results" && JSON.stringify(r.more) === JSON.stringify([["All playoff results", "#/games?week=playoffs"]]), r);
+    await done(p);
+    /* the review of crawl 3 (2026-11-25): before the autopilot draws the next round no playoff game is open, and the match
+       center called the playoffs finished. Saturday, Nov 7, round 1 decided and round 2 not yet drawn (its games removed) */
+    const undrawn = midPlayoffs("2026-11-07T17:00:00+00:00", "2026-11-07T17:00:00+00:00");
+    undrawn.games = undrawn.games.filter((g) => g.scheduled_at < "2026-11-07T17:00:00+00:00");
+    p = await open("?season=1#/today", { rpcs: at1(undrawn) });
+    r = await p.evaluate(() => ({ state: document.querySelector(".td").dataset.state, mc: ((document.getElementById("tdMcH") || {}).textContent || "").trim(),
+      more: [...document.querySelectorAll(".td-mc > .td-mc-more a")].map((x) => [x.textContent.trim(), x.getAttribute("href")]) }));
+    A("crawl 3, Today between rounds before the next is drawn: the last night's results, never 'The playoffs are in the books' while the season is active",
+      r.state === "quiet" && r.mc === "Friday's results" && JSON.stringify(r.more) === JSON.stringify([["All playoff results", "#/games?week=playoffs"]]), r);
+    await done(p);
+    p = await open("?season=1#/games", { rpcs: at1(quiet) });
+    r = await p.evaluate(() => ({ tab: (document.querySelector('#tdWeek button[aria-pressed="true"]') || { dataset: {} }).dataset.v, rows: document.querySelectorAll("#tdGList .td-mx").length }));
+    A("crawl 3: in the playoffs Games opens on the Playoffs tab, not the regular season's week of the same number", r.tab === "playoffs" && r.rows === 25, r);
+    await done(p);
+    p = await open("?season=1#/today", { rpcs: at1(midPlayoffs("2026-11-12T02:10:00+00:00", "2026-11-12T00:00:00+00:00")) });
+    r = await p.evaluate(() => ({ state: document.querySelector(".td").dataset.state, kicker: ((document.querySelector(".td-nb .kicker") || {}).textContent || "").trim() }));
+    A("crawl 3, Today on a playoff game night: the band's kicker says Playoffs", r.state === "tonight" && r.kicker === "Game night · Playoffs · Wednesday, November 11", r);
+    await done(p);
+  }
+  console.log("## health crawl 1 (2026-11-25): Today's season doors open the current season");
+  {
+    /* Today's season doors (the Season 2 band, the calendar) linked a bare "#/season", which keeps the season the
+       address names, so on the Season 1 archive they opened Season 1's season page ("0 members are in so far") */
+    p = await open("?season=1#/today");
+    r = await p.evaluate(() => [...document.querySelectorAll(".td-s2 .td-doors a")].map((a) => ({ h: a.getAttribute("href"), to: new URL(a.getAttribute("href"), location.href).href })));
+    A("crawl 1: on the Season 1 archive, Today's Season 2 doors open the current season's page", r.length > 0 && r.every((x) => /#\/season$/.test(x.to) && !/[?&]season=/.test(new URL(x.to).search)), r);
+    await done(p);
+    p = await open("?season=2#/today", { phase: "draft" });
+    r = await p.evaluate(() => [...document.querySelectorAll(".td-cal a")].map((a) => new URL(a.getAttribute("href"), location.href).href));
+    A("crawl 1: the calendar's links open the season page without a ?season the address carried", r.length > 1 && r.every((x) => /#\/season$/.test(x) && !/[?&]season=/.test(new URL(x).search)), r);
+    await done(p);
+  }
+
   /* QA round 2 (A4, 2026-11-25): every club tile and club hero wears core's one band, S2.clubBand (league.js, today.js and
      profile.js each kept their own ink test and wrote the ink-band fallback by hand): Today's tiles, the Clubs page, the
      trophy tiles and the Cup panel, the club hero. A club with no color takes the ink band with light text */
@@ -573,6 +673,44 @@ const AS = { guest: "anon", player: "member", office: "gm", staff: "staff", comm
   r = await p.evaluate(() => ({ h1: (document.querySelector(".of-art h1") || {}).textContent, doc: document.title, bar: (document.getElementById("inlineTitle") || {}).textContent }));
   A("News: a story opened by its address is titled '<story> · News · CGHL' (the bar '<story> · News') once the read lands", r.h1 === "A story about the league" && r.doc === "A story about the league · News · CGHL" && r.bar === "A story about the league · News", r);
   await done(p);
+  /* health links 2 (2026-11-25): every classic story link (#/article/<id>, now #/news/n-<id>) is a Season 1 story, and the
+     league read holds the season on screen's stories only, so each said "Story not found". A bare id is the same story;
+     a story of another season opens there (news.season_id, publicly readable); an id no season holds is not found; a
+     lookup the league refuses is said, with Try again */
+  {
+    const S1ID = S1.seasons.filter((s) => s.number === 1)[0].id, U1 = "6a1d0d6e-0000-4000-8000-0000000000e1", U2 = "6a1d0d6e-0000-4000-8000-0000000000e2";
+    const story = (id, title) => ({ id, title, body: "First paragraph.", category: "Night recap", published_at: "2026-10-08T03:00:00Z" });
+    const bySeason = (s1, s2) => ({ s2_league: (a) => ((a.p_sections || []).indexOf("news") >= 0 ? mock.ok({ season: +a.p_season === 1 ? 1 : 2, sections: a.p_sections, news: +a.p_season === 1 ? s1 : s2 }) : mock.ok(mock.league(a))) });
+    const art = () => ({ search: location.search, hash: location.hash, h1: ((document.querySelector("#ofNews h1") || {}).textContent || ""), lede: ((document.querySelector("#ofNews .lede-l") || {}).textContent || ""),
+      retry: !!document.querySelector('#ofNews [data-news="find"]') });
+    p = await open("#/news/" + U1, { rpcs: bySeason([], [story(U1, "A story without its prefix")]) });
+    await p.waitForSelector(".of-art h1", { timeout: 10000 }).catch(() => {});
+    r = await p.evaluate(art);
+    A("links 2: #/news/<news id>, without the n- prefix, opens that story", r.h1 === "A story without its prefix", r);
+    await done(p);
+    const newsTable = (rows) => ({ news: rows });
+    p = await open("#/news/n-" + U2, { rpcs: bySeason([story(U2, "A Season 1 recap")], []), tables: newsTable([{ id: U2, season_id: S1ID }]) });
+    await p.waitForFunction(() => /season=1/.test(location.search) && document.querySelector(".of-art h1"), null, { timeout: 15000 }).catch(() => {});
+    r = await p.evaluate(art);
+    A("links 2: a Season 1 story's link opened on Season 2 reopens it on Season 1 and shows it", r.search === "?season=1" && r.hash === "#/news/n-" + U2 && r.h1 === "A Season 1 recap", r);
+    await done(p);
+    p = await open("#/news/n-6a1d0d6e-0000-4000-8000-0000000000e9", { rpcs: bySeason([], []), tables: newsTable([{ id: U2, season_id: S1ID }]) });
+    await p.waitForFunction(() => /Story not found/.test(document.body.textContent), null, { timeout: 10000 }).catch(() => {});
+    r = await p.evaluate(art);
+    A("links 2: an id no season holds is Story not found, on the season it was opened on", r.search === "" && r.h1 === "Story not found", r);
+    await done(p);
+    p = await open("#/news/n-" + U2, { rpcs: bySeason([story(U2, "A Season 1 recap")], []), tables: newsTable(mock.fail("57014", "canceling statement due to statement timeout")) });
+    await p.waitForFunction(() => document.querySelector('#ofNews [data-news="find"]'), null, { timeout: 10000 }).catch(() => {});
+    r = await p.evaluate(art);
+    A("links 2: a lookup the league refuses is said in plain words with the league's own, and Try again", r.h1 === "The story could not be opened" && /^The league's data service reported a problem, so the story could not be found\./.test(r.lede) && /statement timeout/.test(r.lede) && r.retry, r);
+    mock.respond(p.context(), "table:news", [{ id: U2, season_id: S1ID }]);
+    /* a missing Try again is this check's FAIL, not a crash that stops the suite (the review of links 2, 2026-11-25) */
+    const retried = await p.click('#ofNews [data-news="find"]', { timeout: 5000 }).then(() => true, () => false);
+    await p.waitForFunction(() => /season=1/.test(location.search) && document.querySelector(".of-art h1"), null, { timeout: 15000 }).catch(() => {});
+    r = await p.evaluate(art);
+    A("links 2: Try again asks again and opens the story on its season", retried && r.search === "?season=1" && r.h1 === "A Season 1 recap", { retried, r });
+    await done(p);
+  }
   errors.splice(errsNews, errors.length - errsNews, ...errors.slice(errsNews).filter((e) => !/status of 400|News:/.test(e)));
   p = await open("#/news", { rpcs: newsRpc([{ id: 1, title: "MaximumLengthGamertag021 scores four in a win", body: "First paragraph.\n\nSecond paragraph.", category: "Night recap", published_at: "2026-11-20T03:00:00Z" }]), width: 390 });
   await p.waitForTimeout(400);

@@ -86,6 +86,14 @@
   function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
   function cal(n, key) { var s = M.control.season(n); return s ? s.calendar.filter(function (c) { return c.key === key; })[0] || null : null; }
   function md(c) { return c ? c.date.replace(/, \d{4}$/, "") : "to be set"; }
+  /* a closed season's Stanley Cup (M.trophies), or null while it has none, and its final said one way wherever a page
+     names the champion: "Boston swept Vancouver in the final, 4-0" (the Awards hero's words; health crawls 1 and 10,
+     2026-11-25: the Season page's card and the standings hero now name it too, so it lives here once). The Awards tab's
+     trophy room reads it too, so its hero and its Cup panel agree on whether there is a Cup to show.
+     shortcut: model.js keeps a private copy (its cupOf, for M.offseasonDemo); export it as M.cup(n) with this both-clubs
+     guard and read it here and in profile.js when model.js is next opened (owner: live-model) */
+  function cupOf(n) { return M.trophies(n).filter(function (t) { return t.key === "stanley_cup" && M.team(t.club) && M.team(t.over); })[0] || null; }
+  function finalLine(cup) { return city(cup.club) + (cup.l === 0 ? " swept " : " beat ") + city(cup.over) + " in the final, " + cup.w + "-" + cup.l; }
   function chev() { return '<svg class="lg-chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
   /* a club tile's color and the text on it are core's one S2.clubBand (QA round 2, 2026-11-25: this page kept its own
      inkOn, black or white by luminance with 0.179 where both clear 4.5:1 equally, and wrote the ink-band fallback by hand
@@ -226,19 +234,30 @@
      new M.view each time): a tab opened before Season 2's first final drops its empty state at the next repaint, with no
      reload (review 2026-11-24: read once at load, it said "No Season 2 games played yet" all night). Every page render, and
      each in-place view switch that builds from these, calls it first; the caches built from the old model go with it. */
-  var VIEW = null, PAST, UP, NEXT, FINALS, BOXED, BOXLINES, THROUGH, NOGAMES, PREV, AW, THROUGH_K;
+  var VIEW = null, PAST, UP, NEXT, FINALS, BOXED, BOXLINES, THROUGH, NOGAMES, PREV, AW, THROUGH_K, STARS_K;
   function sync() {
     if (!M || M.view === VIEW) return;
     VIEW = M.view;
     FLOOR = M.playoffFormat.minGp; SETTLE = M.SETTLE_GP;
-    PAST = M.nights({ when: "past" })[0] || null;
+    var past = M.nights({ when: "past" });
+    PAST = past[0] || null;
     UP = M.nights({ when: "upcoming" });
     NEXT = UP.length ? UP[UP.length - 1] : null;     /* nights are newest first */
-    FINALS = M.games.filter(function (g) { return g.isFinal; }).length;
-    BOXED = M.games.filter(function (g) { return g.isFinal && g.hasBox; });
+    /* the tables, the lines and the club figures are the regular season's (the model counts no other stage in them), so
+       their counts and their "through" date are too: the newest night with a regular-season game. Health crawl 10
+       (2026-11-25): Season 1's archive dated its regular-season tables "through Thu, Nov 19", the Cup's last night, and
+       its source counted the 25 playoff finals into "all 241 Season 1 finals" */
+    var regNight = past.filter(function (n) { return n.games.some(function (g) { return g.stage === "regular"; }); })[0] || null;
+    var regular = function (g) { return g.isFinal && g.stage === "regular"; };
+    FINALS = M.games.filter(regular).length;
+    BOXED = M.games.filter(function (g) { return regular(g) && g.hasBox; });
     BOXLINES = BOXED.reduce(function (s, g) { return s + (g.lines || 0); }, 0);
-    THROUGH = PAST ? "through " + PAST.short : "";
-    THROUGH_K = PAST ? "through " + M.etMonthDay(PAST.games[0].at) : VIEW.name;   /* "through Oct 16" */
+    THROUGH = regNight ? "through " + regNight.short : "";
+    /* the page kicker: a complete season names itself as final, never a date (it read "Standings, through Nov 19" with
+       nothing on the page naming Season 1); else "through Oct 16" */
+    THROUGH_K = VIEW.status === "complete" ? VIEW.name + ", final" : regNight ? "through " + M.etMonthDay(regNight.games[0].at) : VIEW.name;
+    /* the Three Stars board counts every game with a box score, playoffs included, so it runs to the newest night of any stage */
+    STARS_K = PAST ? "through " + M.etMonthDay(PAST.games[0].at) : VIEW.name;
     NOGAMES = !!VIEW.empty.finals;
     PREV = M.control.seasons.filter(function (s) { return s.status === "complete" && s.number < VIEW.season; }).map(function (s) { return s.number; }).sort(function (a, b) { return a - b; }).pop() || null;
     /* the awards tab shows the season on screen once it has closed, else the last one that has (Season 1's trophy room while
@@ -499,6 +518,13 @@
   }
   function stHero() {
     var lg = M.standings("league"), divs = M.standings("division"), spots = M.cutLine.after * divs.length, top = lg[0];
+    /* health crawl 10 (2026-11-25): a complete season is titled from its result, its final table's first club, with the
+       champion in the sentence; Season 1's archive read "The playoff field is set" three weeks after the Cup was won */
+    if (VIEW.status === "complete") {
+      var cup = cupOf(VIEW.season), endsC = cal(VIEW.season, "ends_at");
+      return hero({ kicker: "Standings, " + THROUGH_K, title: top ? city(top) + " finished first with " + top.pts + " points" : "Final standings",
+        lede: esc((cup ? finalLine(cup) + ", to win the Stanley Cup. " : "") + (endsC ? "The regular season ended " + M.etLong(endsC.at) + "." : "")), foot: crestStrip() });
+    }
     var won = lg.filter(function (r) { return r.clinched; }), open = spots - won.length, title;
     if (won.length && open > 0) title = (won.length === 1 ? city(won[0]) + " is in. " : list(won.map(city)) + " are in. ") + cap(word(open)) + (open === 1 ? " spot remains." : " spots remain.");
     else if (won.length) title = "The playoff field is set";
@@ -989,6 +1015,11 @@
     var q = DIR.q.trim().toLowerCase();
     return M.players.filter(function (p) { return (DIR.state === "all" || poolState(p).key === DIR.state) && (!q || p.tag.toLowerCase().indexOf(q) >= 0); });
   }
+  /* a row's line under the name: position, then club (and squad) or the player's state, each only when there is one (health
+     crawl 7, 2026-11-25: a player with no position for the season on screen read ", Not signed up", 237 rows of 324) */
+  function dirSub(p, st) {
+    return [p.posName || p.pos, p.rostered && p.team ? p.team.full : st.label, p.rostered && p.team ? st.sub : null].filter(Boolean).map(esc).join(", ");
+  }
   function dirList() {
     var rows = dirRows(), groups = {}, order = [];
     /* QA worst 16 (2026-11-25): a tag files under its letter however it is written. NFKD folds an accented capital (Š to S)
@@ -1008,7 +1039,7 @@
         var st = poolState(p), team = p.team;
         var mine = me() && me().id === p.id;
         return '<a class="lg-dir-row' + (mine ? " lg-me" : "") + '" href="' + esc(p.href) + '">' + (p.rostered && team ? cr(p.club) : '<span class="lg-cr lg-mark" aria-hidden="true">' + S2.mark(28) + "</span>") +
-          '<span class="lg-dir-b"><span class="lg-dir-t">' + esc(p.tag) + (mine ? " " + YOU : "") + '</span><span class="lg-dir-s">' + esc(p.posName || p.pos || "") + ", " + (p.rostered && team ? esc(team.full) + (st.sub ? ", " + esc(st.sub) : "") : esc(st.label)) + "</span></span>" +
+          '<span class="lg-dir-b"><span class="lg-dir-t">' + esc(p.tag) + (mine ? " " + YOU : "") + '</span><span class="lg-dir-s">' + dirSub(p, st) + "</span></span>" +
           '<span class="lg-dir-st">' + st.label + "</span>" +
           (p.ovr ? '<span class="lg-ovr num' + (p.ovr.provisional ? " prov" : "") + '" title="Rating ' + p.ovr.ovr + " at " + esc(M.GROUP_NAME[p.ovr.pos] || p.ovr.pos) + (p.ovr.provisional ? ", provisional: fewer than " + SETTLE + " games there" : "") + '">' + p.ovr.ovr + "</span>" : '<span class="lg-ovr none" title="No rating yet">–</span>') +
           "</a>";
@@ -1234,7 +1265,7 @@
        shortcut: the order is written twice, here and in today.js; move it into M.honors.potwByWeek when model.js is next opened */
     var ORD = { potw_forward: 1, potw_skater: 1, potw_defense: 2, potw_goalie: 3 };
     var inOrder = function (picks) { return picks.slice().sort(function (a, b) { return (ORD[a.category] || 9) - (ORD[b.category] || 9); }); };
-    var s1 = stars[0], tr = M.trophies(AW), cup = tr.filter(function (x) { return x.key === "stanley_cup"; })[0], teamT = tr.filter(function (x) { return x.team && x !== cup; });
+    var s1 = stars[0], tr = M.trophies(AW), cup = cupOf(AW), teamT = tr.filter(function (x) { return x.team && x.key !== "stanley_cup"; });
     var filed = M.filedTitles(AW), byWho = {};
     filed.concat(tr.filter(function (x) { return !x.team; })).forEach(function (x) { byWho[x.tag] = (byWho[x.tag] || 0) + 1; });
     var most = Object.keys(byWho).sort(function (a, b) { return byWho[b] - byWho[a]; })[0], nRec = filed.length + tr.filter(function (x) { return !x.team; }).length;
@@ -1264,7 +1295,7 @@
           return '<a href="' + esc(p.href) + '">' + cr(p.club) + '<span><span class="lg-wk-k">' + esc(p.label) + "</span>" + esc(p.tag) + "</span></a>"; }).join("") + "</span></li>";
       }).join("") + "</ol></section>" +
       (stars.length ? '<section class="lg-sec" aria-labelledby="hstars">' + secHead({ kicker: "Three Stars", id: "hstars", title: s1 ? s1.tag + " has " + plural(s1.n[0], "first star", "first stars") : "Three Stars board",
-        text: "Three Stars are picked for every game with a box score. The board counts three points for a first star, two for a second and one for a third, and runs " + esc(THROUGH_K) + "." }) +
+        text: "Three Stars are picked for every game with a box score. The board counts three points for a first star, two for a second and one for a third, and runs " + esc(STARS_K) + "." }) +
       '<ol class="lg-stars">' + stars.map(function (s, i) {
         return '<li><span class="lg-rk num">' + (i + 1) + "</span>" + cr(s.club) + '<a href="' + esc(s.href) + '" class="lg-stars-n" title="' + esc(s.tag) + '">' + esc(s.tag) + "</a>" +   /* QA round 2: the name cuts with an ellipsis on one line, so its full tag is its title */
           '<span class="lg-stars-c" aria-label="' + s.n[0] + " first, " + s.n[1] + " second, " + s.n[2] + ' third stars">' + s.n.map(function (c, k) { return '<span class="lg-st' + (k + 1) + '"><b class="d-num">' + c + '</b><span>' + ["1st", "2nd", "3rd"][k] + "</span></span>"; }).join("") + "</span></li>";
@@ -1335,16 +1366,24 @@
       var c = dirCounts(), rostered = M.players.filter(function (p) { return p.rostered; }), seats = rostered.filter(function (p) { return p.seat; }).length;
       /* audit 2026-11-09: the headline said 171 on a roster while the Rostered filter said 148, because the 23 front-office
          seats were in one and not the other. The headline now counts as the filters do */
-      return { title: (rostered.length - seats) + " players on rosters, " + seats + " in front offices",
-        lede: "Of the " + M.players.length + " players in the records, " + (c.free_agent || 0) + ((c.free_agent || 0) === 1 ? " was" : " were") + " waived and " + (c.unregistered || 0) + " are not signed up. The number beside each name is the headline rating, 75 to 99 with a league median of 85.",
+      /* health crawl 7 (2026-11-25): an empty count is said in words, never "0 players on rosters, 0 in front offices" (Season
+         2 before its draft). A seat is held by a rostered player, so with nobody rostered there is no seat either.
+         shortcut: an archive whose seats have ended still reads "139 players on rosters, 0 in front offices", since
+         tools/ui/today.test.cjs (stream e7) pins the seat count as a numeral; say it with S2.words(seats, "none") when e7
+         rewrites that check */
+      var waived = c.free_agent || 0, on = rostered.length - seats;
+      /* the players count in words too: once Season 2's Owners and GMs are seated, before the draft, every rostered player
+         holds a seat ("No players on rosters, 16 in front offices") */
+      return { title: rostered.length ? cap(S2.words(on)) + (on === 1 ? " player" : " players") + " on rosters, " + seats + " in front offices" : "No players on rosters yet",
+        lede: "Of the " + M.players.length + " players in the records, " + S2.words(waived, "none") + (waived === 1 ? " was" : " were") + " waived and " + S2.words(c.unregistered || 0, "none") + ((c.unregistered || 0) === 1 ? " is" : " are") + " not signed up. The number beside each name is the headline rating, 75 to 99 with a league median of 85.",
         cta: arrow("#/stats?tab=skaters", "Every line", "skaters") };
     }
     if (t === "awards") {
       /* the season's lead story is its champion; the week-by-week honors follow under the trophies */
-      var tr = M.trophies(AW), cup = tr.filter(function (x) { return x.key === "stanley_cup"; })[0], pres = tr.filter(function (x) { return x.key === "presidents_trophy"; })[0];
+      var tr = M.trophies(AW), cup = cupOf(AW), pres = tr.filter(function (x) { return x.key === "presidents_trophy"; })[0];
       var pRow = pres ? (M.seasonClose(AW) || { table: [] }).table.filter(function (r) { return r.club === pres.club; })[0] : null;
       if (cup) return { kicker: "Awards, Season " + AW, title: "The " + M.team(cup.club).name + " win the Stanley Cup",
-        lede: esc(M.team(cup.club).city + (cup.l === 0 ? " swept " : " beat ") + M.team(cup.over).city + " in the final, " + cup.w + "-" + cup.l + "." +
+        lede: esc(finalLine(cup) + "." +
           (pres && pRow ? " " + M.team(pres.club).city + "'s " + pRow.pts + " points won the Presidents' Trophy, the best record in the league." : "")),
         cta: arrow(M.team(cup.club).href + "?tab=history", M.team(cup.club).city + "'s honors") };
       var times = {}; M.honors.potw.forEach(function (p) { times[p.id] = times[p.id] || { p: p, n: 0 }; times[p.id].n++; });
@@ -1627,8 +1666,15 @@
     var id = S2.session && S2.session.profileId, p = id && M.view.season === 2 ? M.player(id) : null;
     return !!(p && p.signup && p.signup.status !== "declined");
   }
+  /* Season 2's sign-ups so far (M.control.seasonReturn), or null when this read does not hold them: with another season on
+     screen the model says "not read" with a null count (core half, c7011e8), and the object itself is always there, so a
+     bare `sr ?` never fell back (health crawl 1, 2026-11-25: ?season=1#/season said "0 members are in so far", then "null
+     members"). Every count on this page reads it here, and a count it does not hold is left out, never said as 0 */
+  function signups() { var sr = M.control.seasonReturn; return sr && sr.signedUp != null ? sr : null; }
+  /* a count of members in words as prose spells it (S2.words): "no members", "one member", "87 members" */
+  function members(n) { return S2.words(n) + (n === 1 ? " member" : " members"); }
   function doorList() {
-    var draft = cal(2, "draft_at"), own = cal(2, "owner_app_deadline"), dec = cal(2, "owners_decided_by"), reg = cal(2, "registration_deadline"), sr = M.control.seasonReturn, R = M.RULES.s2;
+    var draft = cal(2, "draft_at"), own = cal(2, "owner_app_deadline"), dec = cal(2, "owners_decided_by"), reg = cal(2, "registration_deadline"), sr = signups(), R = M.RULES.s2;
     var regOpen = ahead(reg), ownOpen = ahead(own);
     /* the draft room's state is the draft's own (draft_state) when Season 2 is on screen, else its date */
     var dst = M.view.season === 2 && M.draft.state ? M.draft.state.status : null, drLive = dst === "live" || dst === "paused";
@@ -1639,7 +1685,7 @@
     var staffer = S2.has("staff");
     return [
       { k: "register", state: regOpen ? "Open now" : "Closed " + md(reg), open: regOpen, t: "Register", line: "Sign up to play in Season 2. Everyone signs up again, including every Season 1 player.",
-        spec: [[regOpen ? "Closes" : "Closed", regWhen(false, true)], ["Signed up", sr ? sr.signedUp + " members " + (regOpen ? "so far" : "in all") : regOpen ? "Open" : "Closed"], ["Draft", md(draft)], ["Format", "Basic"]] },
+        spec: [[regOpen ? "Closes" : "Closed", regWhen(false, true)], ["Signed up", sr ? cap(members(sr.signedUp)) + " " + (regOpen ? "so far" : "in all") : regOpen ? "Open" : "Closed"], ["Draft", md(draft)], ["Format", "Basic"]] },
       staffer ? null : { k: "owner", state: (ownOpen ? "Closes " : "Closed ") + md(own), open: ownOpen, t: "Own a club", line: "Apply to own any of the thirty-two NHL franchises for Season 2.",
         spec: [["Decided by", md(dec)], ["Who may apply", "Members signed up for Season 2"], ["Franchises", "Name up to three"], ["Sitting owners", "Apply again"]] },
       staffer ? null : { k: "staff", state: "Open now", open: true, t: "Join the staff", line: "Help run the league as one staff group, with committees by topic, each led by a committee manager.",
@@ -1714,21 +1760,41 @@
       held.length ? "Bid nights: " + list(held.map(function (b) { return b.label; })) + ", 9 to 10 PM ET." + (off.length ? " None on " + list(off.map(function (b) { return dayOnly(b.short); })) + ", which fall in holiday weeks (Rule S2.6)." : "")
         : "After the movement deadline, clubs add players only through single-game requests from the training camp pool (Rule S2.5)."];
   }
+  /* where the season on screen stands: not started, its regular season, its playoffs, or complete. The table counts are the
+     regular season's (the standings count no other stage) */
   function seasonNow() {
-    var lg = M.standings("league"), left = M.games.length - FINALS, end = cal(VIEW.season, "ends_at"), po = cal(VIEW.season, "playoffs_start_at");
+    var lg = M.standings("league"), end = cal(VIEW.season, "ends_at"), po = cal(VIEW.season, "playoffs_start_at");
+    var reg = M.games.filter(function (g) { return g.stage === "regular"; }), left = reg.filter(function (g) { return !g.isFinal; }).length;
+    var band = function (title, text, aside) {
+      return '<section class="band tint lg-band lg-now reveal" aria-labelledby="hnow">' + secHead({ kicker: VIEW.name + " now", id: "hnow", title: title, text: esc(text), aside: aside }) + "</section>";
+    };
     if (NOGAMES) {
-      var dr = cal(VIEW.season, "draft_at"), go = cal(VIEW.season, "starts_at"), cup = PREV ? M.trophies(PREV).filter(function (t) { return t.key === "stanley_cup"; })[0] : null;
-      return '<section class="band tint lg-band lg-now reveal" aria-labelledby="hnow">' + secHead({ kicker: VIEW.name + " now", id: "hnow", title: VIEW.name + " has not started",
-        text: esc((dr ? "The draft " + (ahead(dr) ? "is " : "was ") + M.etLong(dr.at) + (go ? " and puck drop " + M.etLong(go.at) : "") + ". " : go ? "Puck drop " + (ahead(go) ? "is " : "was ") + M.etLong(go.at) + ". " : "") +
-          (cup && M.team(cup.club) ? "Season " + PREV + " is complete: the " + M.team(cup.club).full + " won the Stanley Cup." : "")),
-        aside: PREV ? '<a class="arrow" href="' + esc(S2.seasonHref(PREV, "#/standings")) + '"><span>Season ' + PREV + " standings</span>" + S2.ic("chev") + "</a>" : "" }) + "</section>";
+      var dr = cal(VIEW.season, "draft_at"), go = cal(VIEW.season, "starts_at"), cup = PREV ? cupOf(PREV) : null;
+      return band(VIEW.name + " has not started", (dr ? "The draft " + (ahead(dr) ? "is " : "was ") + M.etLong(dr.at) + (go ? " and puck drop " + M.etLong(go.at) : "") + ". " : go ? "Puck drop " + (ahead(go) ? "is " : "was ") + M.etLong(go.at) + ". " : "") +
+          (cup ? "Season " + PREV + " is complete: the " + M.team(cup.club).full + " won the Stanley Cup." : ""),
+        PREV ? arrow(S2.seasonHref(PREV, "#/standings"), "Season " + PREV + " standings") : "");
     }
-    return '<section class="band tint lg-band lg-now reveal" aria-labelledby="hnow">' + secHead({ kicker: VIEW.name + " now", id: "hnow", title: NEXT ? VIEW.name + " is in week " + NEXT.week : VIEW.name + "'s regular season is complete",
-      /* QA visual 11 and worst 3 (2026-11-25): a finished schedule is said as played, never "0 of 241 games are left", and a
-         date already behind the league's clock is said in the past tense */
-      text: esc((left ? left + " of " + M.games.length + " games are left. " : "All " + M.games.length + " games are played. ") + (lg[0] ? lg[0].team.full + " lead the league on " + lg[0].pts + " points. " : "") +
-        (end ? "The regular season " + (ahead(end) ? "ends " : "ended ") + M.etLong(end.at) + (po ? " and the playoffs " + (ahead(po) ? "begin " : "began ") + M.etLong(po.at) : "") + "." : "")),
-      aside: '<a class="arrow" href="#/standings?view=race"><span>The playoff race</span>' + S2.ic("chev") + "</a>" }) + "</section>";
+    /* health crawl 1 (2026-11-25): a complete season (an archive, or the current season before the next one opens) is said
+       as decided, with its champion and its final table; it read "Season 1's regular season is complete" over a link to the
+       playoff race, three weeks after the Cup was won. A bare #/standings keeps the address's season, so the link opens the
+       final table of the season this card describes */
+    if (VIEW.status === "complete") {
+      var won = cupOf(VIEW.season);
+      return band(VIEW.name + " is complete", (won ? finalLine(won) + ", to win the Stanley Cup. " : "") + (lg[0] ? lg[0].team.full + " finished first in the regular season on " + lg[0].pts + " points." : ""),
+        arrow("#/standings", VIEW.name + " final standings"));
+    }
+    /* a playoff night is a round, never a regular-season week (health crawl 3's labels, M.stageText). The season is in the
+       playoffs once a playoff final is played: between the regular season's last night and the first playoff final its
+       regular season is complete (review 2026-11-25: it read "is in the playoffs" beside "the playoffs begin <date>") */
+    var inPo = M.games.some(function (g) { return g.stage === "playoff" && g.isFinal; });
+    /* QA visual 11 and worst 3 (2026-11-25): a finished schedule is said as played, never "0 of 241 games are left", and a
+       date already behind the league's clock is said in the past tense */
+    return band(inPo ? VIEW.name + " is in the playoffs" : NEXT && left ? VIEW.name + " is in week " + NEXT.week : VIEW.name + "'s regular season is complete",
+      (left ? left + " of " + reg.length + " regular-season games are left. " : "All " + reg.length + " regular-season games are played. ") + (lg[0] ? lg[0].team.full + " lead the league on " + lg[0].pts + " points. " : "") +
+        (end ? "The regular season " + (ahead(end) ? "ends " : "ended ") + M.etLong(end.at) + (po ? " and the playoffs " + (ahead(po) ? "begin " : "began ") + M.etLong(po.at) : "") + "." : ""),
+      /* once the regular season is played the link opens the real playoff games (M.stageHref, the address a playoff game
+         gives), never the standings' projected bracket ("If the season ended today") */
+      left ? arrow("#/standings?view=race", "The playoff race") : arrow(M.stageHref({ stage: "playoff" }), "Playoff games"));
   }
 
   S2.page("season", {
@@ -1738,13 +1804,13 @@
       sync();
       SN.n = r.q.season === "1" ? 1 : 2;
       var s2 = M.control.season(2), now = M.now.toISOString(), next = s2 ? s2.calendar.filter(function (c) { return c.at > now; }).sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); })[0] : null;
-      var drop = cal(2, "starts_at"), reg = cal(2, "registration_deadline"), sr = M.control.seasonReturn;
+      var drop = cal(2, "starts_at"), reg = cal(2, "registration_deadline"), sr = signups();
       var rows = settingRows(), changed = rows.filter(function (x) { return x[1] !== x[2] && x[0] !== "Sign-ups"; }).length, dl = doorList(), open = dl.filter(function (d) { return d.open; }).length;
       var regDoor = dl.filter(function (d) { return d.k === "register"; })[0], soon = dl.filter(function (d) { return !d.open && d.opens; });
       return hero({ kicker: "Chel Gaming Hockey League", title: "Season 2", cls: "lg-h1-xl",
           lede: esc((drop ? "Puck drop " + (ahead(drop) ? "is " : "was ") + M.etLong(drop.at) + ", " + (drop.date.match(/\d{4}$/) || [""])[0] + ". " : "") +
-            (regDoor.open ? "Sign-ups are open" + (reg ? " until " + regWhen(true) : "") + (sr ? ", and " + sr.signedUp + " members are in so far." : ".")
-              : "Sign-ups closed " + (reg ? regWhen(true) : "") + (sr ? ", with " + sr.signedUp + " members signed up." : "."))),
+            (regDoor.open ? "Sign-ups are open" + (reg ? " until " + regWhen(true) : "") + (sr ? ", and " + members(sr.signedUp) + (sr.signedUp === 1 ? " is" : " are") + " in so far." : ".")
+              : "Sign-ups closed " + (reg ? regWhen(true) : "") + (sr ? ", with " + members(sr.signedUp) + " signed up." : "."))),
           cta: registerBtn(regDoor, true) + '<button type="button" class="btn site outline" id="snDates">See the dates</button>',
           side: next ? '<div class="lg-cd"><span class="d-num lg-cd-n" data-count="' + daysTo(next.at) + '">' + daysTo(next.at) + '</span><span class="lg-cd-l">' + (daysTo(next.at) === 1 ? "day" : "days") + " until " + esc(next.label.toLowerCase()) + ", " + esc(md(next)) + "</span></div>" : "" }) +
         seasonNow() +
@@ -1755,7 +1821,7 @@
           text: "Both seasons run the basic format. Each value is Season 2&rsquo;s, with Season 1&rsquo;s beneath it where it differs.", aside: arrow("#/rulebook?rule=S2.1", "Chapter S2") }) + settings(rows) + "</section>" +
         about(paras(["League time is Eastern. Dates come from each season&rsquo;s record; Season 2&rsquo;s owner decision date comes from the commissioner&rsquo;s ruling.",
           "Season 2 changes are set out in the rulebook&rsquo;s Season 2 chapter (" + rule("S2.1") + " to " + rule("S2.8") + "). The salary cap counts the whole roster.",
-          sr ? "The sign-up count is everyone signed up for Season 2 now, " + sr.playedS1 + " of whom played in Season 1." : ""]));
+          sr ? "The sign-up count is everyone signed up for Season 2 now, " + S2.words(sr.playedS1, "none") + " of whom played in Season 1." : ""]));
     },
     after: function (root) {
       if (!M) return;
@@ -1786,10 +1852,18 @@
   var RB = S2.RB || null;
   var RB_IDS = {};
   if (RB) RB.chapters.forEach(function (c) { c.sections.forEach(function (s) { RB_IDS[s.id] = s; }); });
+  /* a citation in the prose becomes links: every number in it links the whole number to its section ("Rule 4.3.6" is one
+     link to 4.3, the book's sections having two parts), through a list ("Rules 2.3, 2.4 and 6.3", "Rules 9.1 to 9.3",
+     "Rules 4.3.4, 4.3.7 and 4.3.10"); the words between stay text, and a number with no section in the book stays text.
+     Health crawl 8 (2026-11-25): the pattern read two parts and at most two numbers, so "Rule 4.3.6" underlined "4.3" and
+     left ".6" plain (11 citations on the book's page), and a list linked only its first two numbers */
+  var CITE_N = "S?\\d+(?:\\.\\d+)+", CITE = new RegExp("\\b(Rules?) (" + CITE_N + "(?:(?:,? and |, | to | or )" + CITE_N + ")*)", "g");
   function linkRules(html) {
-    return html.replace(/\b(Rules?) (S?\d+\.\d+)(?: and (S?\d+\.\d+))?/g, function (m, w, a, b) {
-      var one = function (x) { return RB_IDS[x] ? '<a href="#/rulebook?rule=' + x + '" data-rule="' + x + '">' + x + "</a>" : x; };
-      return w + " " + one(a) + (b ? " and " + one(b) : "");
+    return html.replace(CITE, function (m, w, nums) {
+      return w + " " + nums.replace(new RegExp(CITE_N, "g"), function (x) {
+        var id = /^S?\d+\.\d+/.exec(x)[0];
+        return RB_IDS[id] ? '<a href="#/rulebook?rule=' + id + '" data-rule="' + id + '">' + x + "</a>" : x;
+      });
     });
   }
   function chLabel(c) { return (c.shelved ? "Appendix " : "Chapter ") + c.num; }

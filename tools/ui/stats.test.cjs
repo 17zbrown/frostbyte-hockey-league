@@ -386,6 +386,142 @@ A("no skater line carries a goalie figure", rows.filter((r) => !r.goalie).every(
     errors.splice(errsHere, errors.length - errsHere, ...errors.slice(errsHere).filter((e) => !/status of 400|the title race could not be read/i.test(e)));
   }
 
+  /* health crawl 1 (2026-11-25, the league half): ?season=1#/season said "0 members are in so far", and with the model's
+     "not read" (a null count, c7011e8) it said "null members". The router now moves the Season page to the current season
+     (cfa9767), so the page is drawn here from the archive's model directly: with Season 2's sign-ups not read it leaves the
+     count out, and its now card says the season on screen is complete, with its champion and its final table */
+  console.log("## health crawl 1: the Season page's sign-up count and its now card");
+  p = await livePage("#/season");
+  r = await p.evaluate(() => { const sr = S2.M.control.seasonReturn, t = (s) => ((document.querySelector(s) || {}).textContent || "");
+    return { n: sr.signedUp, said: S2.words(sr.signedUp) + (sr.signedUp === 1 ? " member" : " members"), played: S2.words(sr.playedS1, "none"), lede: t(".lg-hero .lede-l"), spec: t(".lg-door .spec"), about: t("#lgAboutB") }; });
+  A("health crawl 1: with Season 2 on screen, the hero, the Register door and About say the sign-ups the page read", r.n > 0 &&
+    (r.lede.indexOf(", and " + r.said + (r.n === 1 ? " is" : " are") + " in so far.") > 0 || r.lede.indexOf(", with " + r.said + " signed up.") > 0) &&
+    new RegExp("Signed up" + r.said + " (so far|in all)Draft").test(r.spec) && r.about.indexOf("now, " + r.played + " of whom played in Season 1.") > 0, r);
+  /* review 2026-11-25: the check above passes on the old code too (Season 2's count was always read), so the count's words
+     are pinned where the old code said them wrong: one member signed up, none of whom played ("1 members are in so far",
+     "Signed up1 members so far", "0 of whom played"). The model's count is set to one and the page drawn from it */
+  r = await p.evaluate(() => { const sr = S2.M.control.seasonReturn, keep = [sr.signedUp, sr.playedS1]; sr.signedUp = 1; sr.playedS1 = 0;
+    const d = document.createElement("div"); d.innerHTML = S2.pages.season.render({ name: "season", q: {} }); sr.signedUp = keep[0]; sr.playedS1 = keep[1];
+    const t = (s) => ((d.querySelector(s) || {}).textContent || ""); return { lede: t(".lg-hero .lede-l"), spec: t(".lg-door .spec"), about: t("#lgAboutB") }; });
+  A("health crawl 1: one sign-up is said in words, \"one member is in so far\", none of whom played in Season 1", (/, and one member is in so far\.$/.test(r.lede) || /, with one member signed up\.$/.test(r.lede)) &&
+    /Signed upOne member (so far|in all)Draft/.test(r.spec) && r.about.indexOf("now, none of whom played in Season 1.") > 0 && !/\b[01] (members?|of whom)\b/.test(r.lede + r.spec + r.about), { lede: r.lede, spec: r.spec, about: r.about.slice(-90) });
+  await p.context().close();
+  p = await page("#/standings");
+  r = await p.evaluate(() => {
+    const d = document.createElement("div"); d.innerHTML = S2.pages.season.render({ name: "season", q: {} });
+    const t = (s) => ((d.querySelector(s) || {}).textContent || ""), M = S2.M, tr = M.trophies(1), cup = tr.filter((x) => x.key === "stanley_cup")[0], pres = tr.filter((x) => x.key === "presidents_trophy")[0];
+    const pRow = pres && M.seasonClose(1).table.filter((x) => x.club === pres.club)[0], a = d.querySelector(".lg-now .sec-head a");
+    return { view: M.view.name, status: M.view.status, sr: M.control.seasonReturn.signedUp, lede: t(".lg-hero .lede-l"), spec: t(".lg-door .spec"), about: t("#lgAboutB"),
+      k: t(".lg-now .kicker"), h: t("#hnow"), p: t(".lg-now .sec-head p"), a: a ? [a.textContent, a.getAttribute("href")] : null,
+      want: cup && pres ? M.team(cup.club).city + (cup.l === 0 ? " swept " : " beat ") + M.team(cup.over).city + " in the final, " + cup.w + "-" + cup.l + ", to win the Stanley Cup. " +
+        M.team(pres.club).full + " finished first in the regular season on " + pRow.pts + " points." : null };
+  });
+  const said = r.lede + " | " + r.spec + " | " + r.about;
+  A("health crawl 1: on the archive's model (Season 2's sign-ups not read), no count is said: never 0, never null", r.view === "Season 1" && r.sr === null &&
+    !/\b(0|null|undefined|NaN) (members?|of whom)\b/.test(said) && !/\bnull\b|undefined|NaN/.test(said) && /Sign-ups (are open until|closed) [^.]+\.$/.test(r.lede) && !/members/.test(r.lede) &&
+    /Signed up(Open|Closed)Draft/.test(r.spec) && !/of whom/.test(r.about), { lede: r.lede, spec: r.spec, about: r.about.slice(-120) });
+  A("health crawl 1: the now card says the complete season as decided, its champion and its first club, and opens its final table", r.status === "complete" && !!r.want &&
+    r.k === "Season 1 now" && r.h === "Season 1 is complete" && r.p === r.want && JSON.stringify(r.a) === JSON.stringify(["Season 1 final standings", "#/standings"]), { h: r.h, p: r.p, want: r.want, a: r.a });
+  /* review 2026-11-25: a season not yet complete whose regular season is played. It is "in the playoffs" only once a playoff
+     final is played (it said so as soon as the next night was a playoff night, beside "the playoffs begin <date>"), and its
+     link opens the real playoff games, never the standings' projected bracket ("The playoff bracket"). Season 1's own games
+     are read as a season still running: with its playoff finals, then with none of them played */
+  r = await p.evaluate(() => { const M = S2.M, po = M.games.filter((g) => g.stage === "playoff" && g.isFinal), was = M.view.status, out = {};
+    const draw = () => { const d = document.createElement("div"); d.innerHTML = S2.pages.season.render({ name: "season", q: {} }); const a = d.querySelector(".lg-now .sec-head a");
+      return { h: (d.querySelector("#hnow") || {}).textContent, a: a ? [a.textContent, a.getAttribute("href")] : null }; };
+    M.view.status = "active"; out.po = po.length; out.on = draw(); po.forEach((g) => { g.isFinal = false; }); out.gap = draw(); po.forEach((g) => { g.isFinal = true; }); M.view.status = was;
+    out.href = M.stageHref({ stage: "playoff" }); return out; });
+  A("health crawl 1: a season in its playoffs says so once a playoff final is played, and links its playoff games", r.po > 0 && r.on.h === "Season 1 is in the playoffs" &&
+    r.gap.h === "Season 1's regular season is complete" && [r.on, r.gap].every((x) => JSON.stringify(x.a) === JSON.stringify(["Playoff games", r.href])) && r.href === "#/games?week=playoffs", r);
+  await p.context().close();
+  /* health crawl 7 (2026-11-25): a player with no position for the season on screen read ", Not signed up" (237 of 324
+     rows with Season 2 on screen, 123 on Season 1), and Season 2's empty rosters read "0 players on rosters, 0 in front
+     offices". shortcut: Season 1's "0 in front offices" (its seats ended at the close) is still a numeral; today.test.cjs
+     (stream e7) pins it, so this checks the empty-roster words on Season 2 only, until e7 rewrites that check */
+  console.log("## health crawl 7: the players directory's lines and its empty counts");
+  for (const season of [null, 1]) {
+    p = await livePage("#/stats?tab=players", season);
+    r = await p.evaluate(() => { const subs = [...document.querySelectorAll(".lg-dir-s")].map((x) => x.textContent), t = (s) => ((document.querySelector(s) || {}).textContent || "");
+      return { view: S2.M.view.name, rows: subs.length, bad: subs.filter((x) => /^\s*,|,\s*,|,\s*$|^\s*$/.test(x)), rostered: S2.M.players.filter((x) => x.rostered).length, h1: t(".lg-hero h1"), lede: t(".lg-hero .lede-l") }; });
+    A("health crawl 7, " + r.view + ": no directory line starts or ends with a comma, or is empty", r.rows > 300 && r.bad.length === 0, { rows: r.rows, bad: r.bad.length, sample: r.bad.slice(0, 2) });
+    if (!season) A("health crawl 7, Season 2 before its draft: the empty counts are said in words", r.rostered === 0 && r.h1 === "No players on rosters yet" &&
+      /^Of the \d+ players in the records, none were waived and \d+ are not signed up\./.test(r.lede) && !/\b0 /.test(r.h1 + " " + r.lede), [r.h1, r.lede]);
+    /* review 2026-11-25: the count of players not signed up agrees with its verb ("one are not signed up" before). Every
+       such player but one is given a sign-up in the model, and the tab drawn from it */
+    if (!season) {
+      r = await p.evaluate(() => { const un = [...document.querySelectorAll(".lg-dir-row")].filter((a) => a.querySelector(".lg-dir-st").textContent === "Not signed up").map((a) => a.getAttribute("href"));
+        const given = S2.M.players.filter((x) => un.indexOf(x.href) > 0); given.forEach((x) => { x.signup = { status: "pending" }; });
+        const d = document.createElement("div"); d.innerHTML = S2.pages.stats.render({ name: "stats", q: { tab: "players" } }); given.forEach((x) => { delete x.signup; });
+        return { un: un.length, given: given.length, lede: ((d.querySelector(".lg-hero .lede-l") || {}).textContent || "") }; });
+      A("health crawl 7: one player not signed up reads \"one is not signed up\"", r.un > 2 && r.given === r.un - 1 && /, none were waived and one is not signed up\./.test(r.lede), r);
+    }
+    await p.context().close();
+  }
+  /* health crawl 8 (2026-11-25): "(Rule 4.3.6)" linked "4.3" and left ".6" as text (11 citations on the book's page), and a
+     list ("Rules 2.3, 2.4, 2.6, 3.2, 3.3 and 6.3") linked at most its first two numbers. Read independently of the page's
+     own pattern: every dotted number from "Rule" or "Rules" to the end of its sentence (or a closing parenthesis or a
+     semicolon) whose section is in the book is one link reading the whole number, so a list form the page does not know
+     ("Rules 4.3 through 4.5") fails here instead of being skipped by both (review 2026-11-25: the scan used the page's
+     own separators) */
+  console.log("## health crawl 8: the rulebook's citations");
+  p = await livePage("#/rulebook?rule=4.3");
+  r = await p.evaluate(() => {
+    const ids = new Set([...document.querySelectorAll(".lg-toc-a[data-rule]")].map((a) => a.dataset.rule));
+    const N = "S?\\d+(?:\\.\\d+)+", RE = /\bRules? ([^.;)]*(?:\.\d[^.;)]*)*)/g;
+    const out = { cites: 0, missing: [], tails: 0, wrong: [] };
+    document.querySelectorAll("#rbBody .lg-rb-p, #rbBody .lg-rb-intro").forEach((el) => {
+      const c = el.cloneNode(true); c.querySelectorAll(".lg-rb-pn").forEach((x) => x.remove());
+      const have = [...el.querySelectorAll("a[data-rule]")].map((a) => { const nx = a.nextSibling; if (nx && /^\.\d/.test(nx.textContent)) out.tails++;
+        if (a.textContent !== a.dataset.rule && a.textContent.indexOf(a.dataset.rule + ".") !== 0) out.wrong.push(a.textContent + " to " + a.dataset.rule);
+        return a.textContent + ">" + a.dataset.rule; });
+      let m; RE.lastIndex = 0;
+      while ((m = RE.exec(c.textContent))) (m[1].match(new RegExp(N, "g")) || []).forEach((x) => { const id = /^S?\d+\.\d+/.exec(x)[0]; if (!ids.has(id)) return; out.cites++;
+        const i = have.indexOf(x + ">" + id); if (i < 0) out.missing.push(x); else have.splice(i, 1); });
+    });
+    const a = [...document.querySelectorAll("#rbBody a[data-rule]")].filter((x) => x.textContent === "4.3.6")[0];
+    out.c436 = a ? [a.dataset.rule, a.getAttribute("href")] : null;
+    return out;
+  });
+  A("health crawl 8: every rule a citation names is one link over its whole number, lists included, none leaving a tail", r.cites > 100 && r.missing.length === 0 && r.tails === 0 && r.wrong.length === 0,
+    { cites: r.cites, missing: r.missing.length, sample: r.missing.slice(0, 6), tails: r.tails, wrong: r.wrong.slice(0, 3) });
+  A("health crawl 8: Rule 4.3.6 reads 4.3.6 and opens section 4.3", JSON.stringify(r.c436) === JSON.stringify(["4.3", "#/rulebook?rule=4.3"]), r.c436);
+  await p.evaluate(() => { location.hash = "#/rulebook?rule=0.1"; }); await p.waitForTimeout(500);
+  const hit = await p.evaluate(() => { const a = [...document.querySelectorAll("#rbBody a[data-rule]")].filter((x) => x.textContent === "4.3.6")[0]; if (a) a.click(); return !!a; }); await p.waitForTimeout(900);
+  r = await p.evaluate(() => ({ hash: location.hash, focus: document.activeElement && document.activeElement.id }));
+  A("health crawl 8: clicking Rule 4.3.6 jumps to section 4.3", hit && /[?&]rule=4\.3$/.test(r.hash) && r.focus === "rb-4.3", r);
+  await p.context().close();
+  /* health crawl 10 (2026-11-25): Season 1's archive read "Standings, through Nov 19 / THE PLAYOFF FIELD IS SET" and dated
+     its regular-season tables to the Cup's last night, with nothing on the page naming Season 1, and its source counted
+     the playoff finals as "all 241 Season 1 finals". The expected date and counts come from the recording itself */
+  console.log("## health crawl 10: Season 1's archive headers");
+  {
+    const regFin = D.games.filter((g) => FINAL(g) && g.stage === "regular"), lastReg = regFin.map((g) => g.scheduled_at).sort().pop();
+    const thru = "through " + new Date(lastReg).toLocaleDateString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric" });
+    const ended = new Date(D.seasons.filter((x) => x.number === 1)[0].ends_at).toLocaleDateString("en-US", { timeZone: "America/New_York", weekday: "long", month: "long", day: "numeric" });
+    const src = "Source: all " + regFin.length + " Season 1 finals " + thru + ", and the " + rows.length.toLocaleString("en-US") + " box-score lines of the " + boxed.length + " games with a box score.";
+    p = await page("#/standings");
+    r = await p.evaluate(() => { const t = (s) => ((document.querySelector(s) || {}).textContent || ""), M = S2.M, tr = M.trophies(1), cup = tr.filter((x) => x.key === "stanley_cup")[0], pres = tr.filter((x) => x.key === "presidents_trophy")[0];
+      const pRow = pres && M.seasonClose(1).table.filter((x) => x.club === pres.club)[0];
+      return { kicker: t(".lg-hero .kicker"), h1: t(".lg-hero h1"), lede: t(".lg-hero .lede-l"), caps: [...document.querySelectorAll("#page caption")].map((c) => c.textContent), about: t("#lgAboutB"),
+        title: pres && pRow ? M.team(pres.club).city + " finished first with " + pRow.pts + " points" : null,
+        final: cup ? M.team(cup.club).city + (cup.l === 0 ? " swept " : " beat ") + M.team(cup.over).city + " in the final, " + cup.w + "-" + cup.l + ", to win the Stanley Cup." : null }; });
+    A("health crawl 10: the archive's standings kicker names the season as final", r.kicker === "Standings, Season 1, final", r.kicker);
+    A("health crawl 10: the regular-season tables run through the last regular-season night (" + thru + "), and their source counts its finals only", r.caps.length === 2 &&
+      r.caps.every((c) => c.endsWith(", " + thru)) && r.about.indexOf(src) >= 0, { caps: r.caps, src, about: r.about.slice(-170) });
+    A("health crawl 10: a complete season is titled from its result, with the champion in the sentence", !!r.title && r.h1 === r.title && r.lede === r.final + " The regular season ended " + ended + "." &&
+      !/playoff field|clinched|spots? remains?/i.test(r.h1 + r.lede), { h1: r.h1, lede: r.lede, title: r.title, final: r.final });
+    await p.context().close();
+    for (const hash of ["#/stats", "#/stats?tab=skaters"]) {
+      p = await page(hash);
+      r = await p.evaluate(() => ((document.querySelector(".lg-hero .kicker") || {}).textContent || ""));
+      A("health crawl 10: " + hash + " on the archive is kicked as Season 1, final", r === "Stats, Season 1, final", r);
+      await p.context().close();
+    }
+    /* review 2026-11-25: the page finds a season's Stanley Cup in one place, cupOf (the standings hero, the Season page's
+       card, the Awards hero and its trophy room), so the hero and the Cup panel agree on whether there is a Cup to show */
+    A("league.js finds the Stanley Cup only through cupOf", (lgSrc.match(/key === "stanley_cup"/g) || []).length === 1 && /function cupOf\(n\) \{[^\n]*key === "stanley_cup"/.test(lgSrc) &&
+      /cup = cupOf\(AW\), teamT = /.test(lgSrc), (lgSrc.match(/key === "stanley_cup"/g) || []).length);
+  }
   console.log("## QA 2026-11-25: the type floor, the tag's contrast and fingertips (visual 28, phone 1, 2, 10, 11, 13)");
   const TINY = () => [...document.querySelectorAll("#page *")].filter((el) => [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) && el.getClientRects().length &&
     getComputedStyle(el).visibility !== "hidden" && parseFloat(getComputedStyle(el).fontSize) < 10.99).map((el) => el.tagName + "." + String(el.getAttribute("class") || "").replace(/ /g, "."));
